@@ -1,0 +1,9 @@
+{
+  "//": "Playwright tests: Node for the runner plus DOM types for code passed to page.evaluate().",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["./**/*", "../../src/renderer/env.d.ts"]
+}

@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Capture Studio sync check</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: #888;
+        font: 20px sans-serif;
+        cursor: none;
+      }
+      #flash {
+        position: fixed;
+        inset: 0;
+        background: #fff;
+        visibility: hidden;
+      }
+      #info {
+        position: fixed;
+        left: 24px;
+        bottom: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="flash"></div>
+    <div id="info">Click once to start. Flash + beep every 2 s. Esc to quit.</div>
+    <script>
+      const PERIOD = 2.0;
+      const FLASH = 0.12;
+      const flash = document.getElementById('flash');
+      const info = document.getElementById('info');
+      let ctx = null;
+      let next = 0;
+      let count = 0;
+      // Beeps are scheduled on the audio clock; the flash is shown when that sound reaches the
+      // speakers (contextTime + outputLatency), so screen and system audio start together.
+      function schedule() {
+        while (next < ctx.currentTime + 0.5) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.frequency.value = 1000;
+          gain.gain.setValueAtTime(0.0001, next);
+          gain.gain.exponentialRampToValueAtTime(0.8, next + 0.002);
+          gain.gain.setValueAtTime(0.8, next + FLASH - 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.0001, next + FLASH);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(next);
+          osc.stop(next + FLASH + 0.01);
+          next += PERIOD;
+        }
+      }
+      function frame() {
+        schedule();
+        const latency = ctx.outputLatency || ctx.baseLatency || 0;
+        const heard = ctx.currentTime - latency;
+        const phase = ((heard % PERIOD) + PERIOD) % PERIOD;
+        const on = heard > 1 && phase < FLASH;
+        if (on && flash.style.visibility !== 'visible') count++;
+        flash.style.visibility = on ? 'visible' : 'hidden';
+        info.textContent = `beep ${count} · output latency ${(latency * 1000).toFixed(0)} ms · Esc to quit`;
+        requestAnimationFrame(frame);
+      }
+      addEventListener('click', () => {
+        if (ctx) return;
+        ctx = new AudioContext({ latencyHint: 'interactive' });
+        next = Math.ceil((ctx.currentTime + 1) / PERIOD) * PERIOD;
+        requestAnimationFrame(frame);
+      });
+      addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+FFmpeg in Capture Studio
+========================
+
+Capture Studio ships unmodified FFmpeg and ffprobe executables in the `bin/` folder of its
+resources. They run as separate programs; Capture Studio does not link to FFmpeg libraries.
+
+FFmpeg is free software, a project of the FFmpeg developers (https://ffmpeg.org/).
+The bundled builds are "gpl" builds from the BtbN/FFmpeg-Builds project
+(https://github.com/BtbN/FFmpeg-Builds). They are configured with --enable-gpl and
+--enable-version3, so the executables as a whole are licensed under the
+GNU General Public License, version 3 or later (GPL-3.0-or-later).
+
+The full licence text ships next to each binary as `bin/<platform>-<arch>/LICENSE.txt`, and
+Capture Studio's own licence (also GPL-3.0-or-later) is in `LICENSE.txt`. The exact build that
+was bundled (release tag, FFmpeg revision, archive SHA-256 and the SHA-256 of every file) is
+recorded in `bin/<platform>-<arch>/BUILD-INFO.json`.
+
+FFmpeg in these builds includes or links third-party libraries such as x264, x265, libvpx,
+libopus, libaom, dav1d, SVT-AV1 and others; each is distributed under its own licence, which
+is compatible with GPL-3.0. The complete list is in the `configuration:` line printed by
+`ffmpeg -version` and in the build scripts referenced in FFMPEG-SOURCE-OFFER.txt.
+
+How to get the source code: see FFMPEG-SOURCE-OFFER.txt.
+
+This notice does not modify the terms of the GPL. FFmpeg is distributed WITHOUT ANY
+WARRANTY; see the GNU General Public License for details.

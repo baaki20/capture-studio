@@ -1,0 +1,9 @@
+{
+  "//": "The shared core must stay pure TypeScript: no Node and no DOM types are available here.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": []
+  },
+  "include": ["./**/*"]
+}

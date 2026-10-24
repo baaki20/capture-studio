@@ -1,0 +1,45 @@
+.meter {
+  display: grid;
+  grid-template-columns: 4.5rem 1fr 3.5rem;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.75rem;
+}
+
+.label {
+  color: var(--color-text-muted);
+}
+
+.track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-text) 12%, transparent);
+}
+
+.fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  transition: width 60ms linear;
+}
+
+.ok {
+  background: #2f9e44;
+}
+
+.warm {
+  background: #f08c00;
+}
+
+.hot {
+  background: #e03131;
+}
+
+.value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--color-text-muted);
+}

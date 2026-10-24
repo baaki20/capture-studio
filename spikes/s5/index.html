@@ -1,0 +1,40 @@
+<!doctype html><meta charset="utf-8"><body><script>window.addEventListener("error",(e)=>console.log("PAGE ERROR",e.message,e.filename));window.addEventListener("unhandledrejection",(e)=>console.log("REJECTION",String(e.reason)));</script><script>
+const path = require("path");
+const { Output, Mp4OutputFormat, StreamTarget, EncodedVideoPacketSource, EncodedAudioPacketSource, EncodedPacket } = require(path.resolve(__dirname, "../../node_modules/mediabunny/dist/bundles/mediabunny.cjs"));
+const { ipcRenderer } = require("electron");
+(async () => {
+console.log("script running");
+const report = {};
+try {
+  const file = await ipcRenderer.invoke('open');
+  const target = new StreamTarget(new WritableStream({ async write(c) { await ipcRenderer.invoke('write', c.data, c.position); } }), { chunked: true, chunkSize: 1 << 20 });
+  const output = new Output({ format: new Mp4OutputFormat({ fastStart: 'fragmented', minimumFragmentDuration: 1 }), target });
+  const vsrc = new EncodedVideoPacketSource('avc'); output.addVideoTrack(vsrc, { frameRate: 30 });
+  const asrc = new EncodedAudioPacketSource('opus'); output.addAudioTrack(asrc);
+  await output.start(); console.log("output started");
+  const pending = [];
+  const venc = new VideoEncoder({ output: (ch, meta) => pending.push(vsrc.add(EncodedPacket.fromEncodedChunk(ch), meta)), error: (e) => { throw e; } });
+  venc.configure({ codec: 'avc1.640028', width: 1920, height: 1080, bitrate: 6e6, framerate: 30, latencyMode: 'realtime', avc: { format: 'avc' } });
+  const aenc = new AudioEncoder({ output: (ch, meta) => pending.push(asrc.add(EncodedPacket.fromEncodedChunk(ch), meta)), error: (e) => { throw e; } });
+  aenc.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2, bitrate: 128000 });
+  const c = new OffscreenCanvas(1920, 1080), x = c.getContext('2d');
+  const t0 = performance.now(); console.log("encoding");
+  for (let i = 0; i < 300; i++) {
+    x.fillStyle = `hsl(${i * 3} 60% 40%)`; x.fillRect(0, 0, 1920, 1080); x.fillStyle = '#fff'; x.font = '160px monospace'; x.fillText(`#${i}`, 200, 600);
+    const vf = new VideoFrame(c, { timestamp: Math.round(i * 1e6 / 30) }); venc.encode(vf, { keyFrame: i % 60 === 0 }); vf.close();
+    // 1/30 s of audio = 1600 frames
+    const pcm = new Float32Array(1600 * 2); for (let k = 0; k < 1600; k++) { const v = 0.2 * Math.sin(2 * Math.PI * 440 * (i * 1600 + k) / 48000); pcm[k] = v; pcm[1600 + k] = v; }
+    const ad = new AudioData({ format: 'f32-planar', sampleRate: 48000, numberOfFrames: 1600, numberOfChannels: 2, timestamp: Math.round(i * 1e6 / 30), data: pcm }); aenc.encode(ad); ad.close();
+    while (venc.encodeQueueSize > 8) await new Promise((r) => venc.addEventListener('dequeue', r, { once: true }));
+  }
+  await venc.flush(); await aenc.flush(); await Promise.all(pending); await output.finalize();
+  report.encodeMs = Math.round(performance.now() - t0);
+  report.write = await ipcRenderer.invoke('close');
+  report.crash = await ipcRenderer.invoke('crash-recover');
+  // timestamp-addressed decode in a worker
+  const w = new Worker('./decode.worker.js');
+  report.decode = await new Promise((res) => { w.onmessage = (e) => res(e.data); w.onerror = (e) => res({ error: e.message }); w.postMessage({ url: new URL('file://' + file).href, times: [0, 3.3, 5.0, 7.77, 9.9] }); });
+} catch (e) { report.error = String(e && e.stack || e); }
+await ipcRenderer.invoke('report', report);
+})();
+</script></body>

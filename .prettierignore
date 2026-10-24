@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+resources/bin/
+docs/schemas/
+package-lock.json
+LICENSE
+resources/licenses/
+spikes/
+tests/fixtures/sync/
+tests/sync/pattern/

@@ -1,0 +1,18 @@
+{
+  "//": "Node-side code: main, preload, utility processes, scripts, tests and build configs. The renderer and the pure shared core have their own tsconfig.json next to their sources.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024"],
+    "types": ["node", "electron-vite/node"]
+  },
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/utility/**/*",
+    "src/shared/**/*",
+    "scripts/**/*",
+    "tests/**/*",
+    "*.config.ts"
+  ],
+  "exclude": ["tests/e2e/**/*"]
+}

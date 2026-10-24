@@ -1,0 +1,238 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Capture Studio — feasibility tests</title>
+<style>
+  body { font: 15px system-ui, sans-serif; margin: 20px; background: #15171c; color: #e8e8ea; }
+  #step { font-size: 22px; font-weight: 600; padding: 16px; border-radius: 10px; background: #233; border: 2px solid #4cc; margin-bottom: 12px; }
+  button { font-size: 17px; padding: 10px 18px; margin: 4px 8px 4px 0; border-radius: 8px; border: 0; background: #4cc; color: #012; cursor: pointer; }
+  button.secondary { background: #555; color: #eee; }
+  button:disabled { opacity: .35; cursor: default; }
+  #anim { background: #000; border-radius: 6px; }
+  pre { background: #0b0c0f; padding: 10px; border-radius: 8px; height: 330px; overflow: auto; font-size: 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div id="step">Running automatic encoder checks… (about 30 seconds, no action needed)</div>
+<div>
+  <button id="btnA" disabled>Start capture test</button>
+  <button id="btnB" disabled>Start second capture method</button>
+  <button id="btnSkip" class="secondary" disabled>Skip this step</button>
+</div>
+<p><canvas id="anim" width="420" height="90"></canvas> <span id="timer"></span></p>
+<pre id="log"></pre>
+<script>
+const { ipcRenderer } = require('electron');
+const $ = (id) => document.getElementById(id);
+const nowUs = () => Math.round((performance.timeOrigin + performance.now()) * 1000);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function log(...a) { const s = a.map((x) => typeof x === 'string' ? x : JSON.stringify(x)).join(' '); $('log').textContent += s + '\n'; $('log').scrollTop = 1e9; console.log(s); }
+function step(html) { $('step').innerHTML = html; }
+const result = (k, v) => ipcRenderer.invoke('result', k, v);
+
+// Constant on-screen motion so PipeWire delivers frames even when nothing else changes.
+(function animate() {
+  const c = $('anim').getContext('2d'); const t = performance.now() / 1000;
+  c.fillStyle = '#000'; c.fillRect(0, 0, 420, 90);
+  c.fillStyle = `hsl(${(t * 120) % 360} 80% 55%)`; c.fillRect(((t * 200) % 460) - 40, 20, 40, 50);
+  c.fillStyle = '#fff'; c.font = '14px monospace'; c.fillText(t.toFixed(2), 340, 80);
+  requestAnimationFrame(animate);
+})();
+
+// ---------- helpers ----------
+function pct(arr, p) { const s = [...arr].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor(p * s.length))]; }
+function summarize(samples, expectedFps) {
+  if (!samples.length) return { n: 0 };
+  const off = samples.map((s) => s.arr - s.ts);
+  const t0 = samples[0].arr;
+  const first2 = samples.filter((s) => s.arr - t0 < 2e6).map((s) => s.arr - s.ts);
+  const dur = (samples[samples.length - 1].arr - t0) / 1e6;
+  let gaps = 0;
+  if (expectedFps) for (let i = 1; i < samples.length; i++) if (samples[i].ts - samples[i - 1].ts > 1.5e6 / expectedFps) gaps++;
+  return {
+    n: samples.length, seconds: +dur.toFixed(2), rate: +(samples.length / dur).toFixed(2),
+    medianOffsetUs: pct(off, 0.5), first2sSpreadUs: pct(first2, 0.9) - pct(first2, 0.1),
+    driftUsOverRun: Math.round(pct(off.slice(-20), 0.5) - pct(off.slice(0, 20), 0.5)),
+    firstTs: samples[0].ts, gaps,
+  };
+}
+function makeEncoder(label, codec, w, h, bitrate) {
+  const st = { label, codec, w, h, in: 0, out: 0, dropped: 0, bytes: 0, errors: [], maxQueue: 0 };
+  const enc = new VideoEncoder({
+    output: (chunk) => { st.out++; st.bytes += chunk.byteLength; },
+    error: (e) => st.errors.push(String(e)),
+  });
+  enc.configure({ codec, width: w, height: h, bitrate, framerate: 30, latencyMode: 'realtime' });
+  const canvas = new OffscreenCanvas(w, h); const ctx = canvas.getContext('2d');
+  return {
+    st,
+    push(frame) {
+      st.in++;
+      st.maxQueue = Math.max(st.maxQueue, enc.encodeQueueSize);
+      if (enc.state !== 'configured' || enc.encodeQueueSize > 4) { st.dropped++; return; }
+      ctx.drawImage(frame, 0, 0, w, h);
+      const vf = new VideoFrame(canvas, { timestamp: frame.timestamp });
+      enc.encode(vf, { keyFrame: st.in % 60 === 1 }); vf.close();
+    },
+    async finish() { try { await enc.flush(); } catch (e) { st.errors.push(String(e)); } enc.close(); st.dropPct = +(100 * st.dropped / Math.max(1, st.in)).toFixed(2); st.mbps = 0; return st; },
+  };
+}
+async function readTrack(track, kind, ms, onFrame) {
+  const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  const samples = []; const meta = {}; let peak = 0; const end = performance.now() + ms;
+  while (performance.now() < end) {
+    const r = await Promise.race([reader.read(), sleep(1000).then(() => ({ timeout: true }))]);
+    if (r.timeout) continue; if (r.done) { meta.endedEarly = true; break; }
+    const f = r.value; samples.push({ arr: nowUs(), ts: f.timestamp });
+    if (kind === 'audio') {
+      if (!meta.sampleRate) Object.assign(meta, { sampleRate: f.sampleRate, channels: f.numberOfChannels, format: f.format, framesPerChunk: f.numberOfFrames });
+      try { const buf = new Float32Array(f.numberOfFrames); f.copyTo(buf, { planeIndex: 0, format: 'f32-planar' }); for (const v of buf) peak = Math.max(peak, Math.abs(v)); } catch {}
+    } else {
+      if (!meta.width) Object.assign(meta, { width: f.displayWidth, height: f.displayHeight, format: f.format });
+      if (onFrame) onFrame(f);
+    }
+    f.close();
+  }
+  reader.releaseLock();
+  if (kind === 'audio') meta.peakDb = peak > 0 ? +(20 * Math.log10(peak)).toFixed(1) : 'silent';
+  return { samples, meta };
+}
+function waitClick(...ids) { return new Promise((res) => ids.forEach((id) => { const b = $(id); b.disabled = false; b.onclick = () => { ids.forEach((x) => ($(x).disabled = true)); res(id); }; })); }
+
+// ---------- S3a: WebCodecs support matrix + synthetic throughput ----------
+async function s3Synthetic() {
+  const codecs = { h264: 'avc1.640033', vp9: 'vp09.00.40.08', av1: 'av01.0.12M.08' };
+  const matrix = {};
+  for (const [name, codec] of Object.entries(codecs)) for (const hw of ['prefer-hardware', 'prefer-software']) {
+    try { const r = await VideoEncoder.isConfigSupported({ codec, width: 2560, height: 1440, bitrate: 12e6, framerate: 30, hardwareAcceleration: hw }); matrix[`${name}/${hw}`] = r.supported; }
+    catch (e) { matrix[`${name}/${hw}`] = 'error: ' + e.message; }
+  }
+  log('S3 support matrix @1440p', matrix);
+  const bench = {};
+  for (const [name, codec, w, h, frames] of [['h264-1440p', codecs.h264, 2560, 1440, 150], ['h264-1080p', 'avc1.640028', 1920, 1080, 150], ['vp9-1440p', codecs.vp9, 2560, 1440, 90], ['h264-720p', 'avc1.64001f', 1280, 720, 150]]) {
+    try {
+      let out = 0; const enc = new VideoEncoder({ output: () => out++, error: (e) => log('bench err', name, String(e)) });
+      enc.configure({ codec, width: w, height: h, bitrate: 10e6, framerate: 30, latencyMode: 'realtime' });
+      const c = new OffscreenCanvas(w, h); const x = c.getContext('2d'); const t = performance.now();
+      for (let i = 0; i < frames; i++) {
+        x.fillStyle = `hsl(${i * 7} 60% 40%)`; x.fillRect(0, 0, w, h);
+        x.fillStyle = '#fff'; x.font = `${h / 20}px monospace`;
+        for (let r = 0; r < 18; r++) x.fillText(`line ${r} frame ${i} the quick brown fox ${Math.random().toFixed(6)}`, 20 + i * 3, 60 + r * h / 20);
+        const vf = new VideoFrame(c, { timestamp: Math.round(i * 1e6 / 30) });
+        while (enc.encodeQueueSize > 8) await new Promise((r) => enc.addEventListener('dequeue', r, { once: true }));
+        enc.encode(vf, { keyFrame: i % 60 === 0 }); vf.close();
+      }
+      await enc.flush(); enc.close();
+      bench[name] = { frames, fps: +(frames / ((performance.now() - t) / 1000)).toFixed(1), out };
+    } catch (e) { bench[name] = 'error: ' + e.message; }
+    log('S3 bench', name, bench[name]);
+  }
+  await result('s3_synthetic', { matrix, bench });
+}
+
+// ---------- beep generator (system-audio content) ----------
+let actx;
+function startBeeps() {
+  actx = new AudioContext();
+  const iv = setInterval(() => {
+    const o = actx.createOscillator(); const g = actx.createGain(); g.gain.value = 0.25; o.frequency.value = 1000;
+    o.connect(g).connect(actx.destination); o.start(); o.stop(actx.currentTime + 0.05);
+  }, 1000);
+  return () => { clearInterval(iv); actx.close(); };
+}
+
+// ---------- main sequence ----------
+const ROUND2 = process.env.SPIKE_ROUND === '2';
+(async () => {
+  if (!ROUND2) await s3Synthetic(); else log('ROUND 2: full-resolution capture, mic, stop indicator, shortcut');
+
+  // S1 path A + S2 + S3 realtime + S4
+  step('STEP 1 — Click <b>Start capture test</b>. GNOME will ask what to share: pick your screen and click <b>Share</b>.<br><small>Then the camera light turns on and beeps play for ~15 s. Please talk a little so the microphone hears you.</small>');
+  await waitClick('btnA');
+  const stopBeeps = startBeeps();
+  let screen;
+  try {
+    const t = performance.now();
+    const sources = await ipcRenderer.invoke('pick-a');
+    log('path A portal returned', sources, 'after', Math.round(performance.now() - t), 'ms');
+    if (!sources.length) throw new Error('portal cancelled / no source');
+    screen = await navigator.mediaDevices.getUserMedia({ audio: false, video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: sources[0].id, maxFrameRate: 30, maxWidth: 3840, maxHeight: 2160 } } });
+    await result('s1_pathA', { ok: true, portalMs: Math.round(performance.now() - t), settings: screen.getVideoTracks()[0].getSettings() });
+  } catch (e) {
+    log('path A FAILED', String(e)); await result('s1_pathA', { ok: false, error: String(e) });
+  }
+  step('Recording test in progress — keep this window visible, talk a little… (15 s)');
+  let cam, mic, sys, sysLabel = null;
+  try { cam = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720, frameRate: 30 } }); } catch (e) { log('camera failed', String(e)); }
+  try { mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); } catch (e) { log('mic failed', String(e)); }
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const audioIns = devices.filter((d) => d.kind === 'audioinput').map((d) => d.label);
+  const monitor = devices.find((d) => d.kind === 'audioinput' && /monitor/i.test(d.label));
+  if (monitor) {
+    sysLabel = monitor.label;
+    try { sys = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: monitor.deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false } }); } catch (e) { log('monitor device failed', String(e)); }
+  }
+  log('audio inputs:', audioIns, 'monitor:', sysLabel);
+  await ipcRenderer.invoke('pw-start');
+  const screenEnc = makeEncoder('screen', 'avc1.640033', 2560, 1440, 12e6);
+  const camEnc = makeEncoder('camera', 'avc1.64001f', 1280, 720, 4e6);
+  let secs = ROUND2 ? 25 : 15; const tick = setInterval(() => ($('timer').textContent = `${--secs}s left`), 1000);
+  const jobs = {
+    screen: screen ? readTrack(screen.getVideoTracks()[0], 'video', ROUND2 ? 25000 : 15000, (f) => screenEnc.push(f)) : null,
+    camera: cam ? readTrack(cam.getVideoTracks()[0], 'video', ROUND2 ? 25000 : 15000, (f) => camEnc.push(f)) : null,
+    mic: mic ? readTrack(mic.getAudioTracks()[0], 'audio', ROUND2 ? 25000 : 15000) : null,
+    system: sys ? readTrack(sys.getAudioTracks()[0], 'audio', 15000) : null,
+  };
+  const s2 = {}; const raw = {};
+  for (const [k, p] of Object.entries(jobs)) if (p) { const r = await p; raw[k] = r; s2[k] = { ...summarize(r.samples, k === 'screen' || k === 'camera' ? 30 : 0), ...r.meta }; }
+  clearInterval(tick); $('timer').textContent = '';
+  const meds = Object.values(s2).filter((x) => x.n).map((x) => x.medianOffsetUs);
+  s2.crossTrackMedianSpreadUs = meds.length ? Math.max(...meds) - Math.min(...meds) : null;
+  s2.systemDeviceLabel = sysLabel; s2.audioInputs = audioIns;
+  await result('s2_sync', s2);
+  await result('s3_realtime', { screen: await screenEnc.finish(), camera: await camEnc.finish() });
+  await result('s4_pwrecord', await ipcRenderer.invoke('pw-stop'));
+  stopBeeps();
+  [cam, mic, sys].forEach((s) => s && s.getTracks().forEach((t) => t.stop()));
+
+  // S1: stop via GNOME indicator
+  if (screen) {
+    step('STEP 2 — Look at the <b>top-right corner</b> of the screen: GNOME shows a small <b>orange/red screen-share icon</b>. Click it (it opens the system menu) and click <b>Stop</b> / <b>Stop Screen Sharing</b>.<br><small>Or press Skip if you can\'t find it.</small>');
+    const t = performance.now();
+    const track = screen.getVideoTracks()[0];
+    const ended = new Promise((r) => (track.onended = () => r('ended')));
+    const r = await Promise.race([ended, waitClick('btnSkip'), sleep(120000).then(() => 'timeout')]);
+    $('btnSkip').disabled = true;
+    await result('s1_endedEvent', { outcome: r === 'ended' ? 'ended-fired' : r, afterMs: Math.round(performance.now() - t) });
+    track.stop();
+  }
+
+  // S1 path B
+  if (!ROUND2) {
+  step('STEP 3 — Click <b>Start second capture method</b>. GNOME asks again: pick your screen and click <b>Share</b>. (Runs 5 s.)');
+  await waitClick('btnB');
+  try {
+    const t = performance.now();
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+    const r = await readTrack(s.getVideoTracks()[0], 'video', 5000);
+    await result('s1_pathB', { ok: true, portalMs: Math.round(performance.now() - t) - 5000, ...summarize(r.samples, 30), ...r.meta });
+    s.getTracks().forEach((t) => t.stop());
+  } catch (e) { log('path B FAILED', String(e)); await result('s1_pathB', { ok: false, error: String(e) }); }
+  }
+
+  // S7 global shortcut
+  step('STEP 4 — Global shortcut test. <b>Watch for a GNOME dialog</b> asking to allow shortcuts and click <b>Allow</b> (remember whether one appeared).<br>Then click on <b>another window</b> (so this one is not focused) and press <b>Ctrl + Alt + Shift + K</b>.<br><small>Press Skip if nothing happens after a few tries.</small>');
+  const reg = await ipcRenderer.invoke('hotkey-register');
+  log('hotkey register', reg);
+  const fired = new Promise((r) => ipcRenderer.once('hotkey', (_e, d) => r(d)));
+  const hk = await Promise.race([fired, waitClick('btnSkip').then(() => 'skipped'), sleep(150000).then(() => 'timeout')]);
+  $('btnSkip').disabled = true;
+  await result('s7_hotkey', { register: reg, outcome: hk });
+
+  step('✅ All done — thank you! You can stop clicking now. This window closes by itself.');
+  await ipcRenderer.invoke('done');
+})().catch(async (e) => { log('HARNESS ERROR', String(e && e.stack || e)); await result('harness_error', String(e)); step('Harness error — see log. You can close this window.'); });
+</script>
+</body>
+</html>

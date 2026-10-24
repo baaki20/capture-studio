@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+coverage/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+
+# FFmpeg binaries are fetched by scripts/fetch-ffmpeg.ts (pinned and SHA-256 verified)
+resources/bin/
+.cache/
+spikes/out/

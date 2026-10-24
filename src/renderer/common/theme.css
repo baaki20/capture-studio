@@ -1,0 +1,24 @@
+:root {
+  color-scheme: light dark;
+  --color-bg: #f6f7f9;
+  --color-text: #1b1d22;
+  --color-text-muted: #5d6270;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 16px;
+  font-family: system-ui, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1b1d22;
+    --color-text: #e8e9ec;
+    --color-text-muted: #9aa0ad;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
