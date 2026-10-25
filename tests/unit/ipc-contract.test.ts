@@ -42,6 +42,7 @@ describe('IPC contract (§4.3.11)', () => {
       'library.import',
       'library.openFolder',
       'project.open',
+      'editor.open',
       'project.save',
       'project.relink',
       'media.peaks',

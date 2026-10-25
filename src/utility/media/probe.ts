@@ -58,6 +58,8 @@ const RawStreamSchema = z.looseObject({
   duration: z.string().optional(),
   avg_frame_rate: z.string().optional(),
   r_frame_rate: z.string().optional(),
+  color_space: z.string().optional(),
+  color_range: z.string().optional(),
 });
 
 const RawProbeSchema = z.looseObject({
@@ -79,6 +81,9 @@ export interface ProbeStream {
   width?: number;
   height?: number;
   frameRate?: number | null;
+  /** Video: ffprobe `color_space` and `color_range` (e.g. `smpte170m`, `tv`), null if untagged. */
+  colorSpace?: string | null;
+  colorRange?: string | null;
   sampleRate?: number;
   channels?: number;
 }
@@ -129,6 +134,8 @@ export async function probeMedia(
         if (s.width !== undefined) stream.width = s.width;
         if (s.height !== undefined) stream.height = s.height;
         stream.frameRate = parseRate(s.avg_frame_rate) ?? parseRate(s.r_frame_rate);
+        stream.colorSpace = s.color_space && s.color_space !== 'unknown' ? s.color_space : null;
+        stream.colorRange = s.color_range && s.color_range !== 'unknown' ? s.color_range : null;
       }
       if (codecType === 'audio') {
         const sampleRate = s.sample_rate ? Number.parseInt(s.sample_rate, 10) : NaN;

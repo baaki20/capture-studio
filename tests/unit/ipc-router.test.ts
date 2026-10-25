@@ -7,6 +7,7 @@ import {
   type WebContentsLike,
 } from '../../src/main/ipc/router';
 import { EngineLink } from '../../src/main/ipc/engine-link';
+import { decodeIpcError, ipcErrorCode, ipcErrorMessage } from '../../src/shared/ipc/errors';
 
 type Listener = (event: IpcSenderEvent, ...args: unknown[]) => unknown;
 
@@ -165,6 +166,33 @@ describe('IpcRouter (R1.52)', () => {
     expect(handlers.has('shell.exec')).toBe(false);
     expect(() => router.onEngine('engine.evil' as 'engine.stats', () => undefined)).toThrow(
       'not an engine channel',
+    );
+  });
+
+  it('carries a coded handler error across as a structured envelope (decision 2)', async () => {
+    const { router, handlers } = setup();
+    router.handle('library.trash', () => {
+      throw Object.assign(new Error('project prj_1 is busy'), { code: 'read-only' });
+    });
+    router.handle('library.reveal', () => {
+      throw new Error('plain failure');
+    });
+    const coded = await invoke(handlers, 'library.trash', event(1), { id: 'prj_1' }).catch(
+      (e: unknown) => e,
+    );
+    expect(decodeIpcError(coded)).toEqual({ code: 'read-only', message: 'project prj_1 is busy' });
+    expect(
+      ipcErrorCode(
+        new Error(`Error invoking remote method 'x': Error: ${(coded as Error).message}`),
+      ),
+    ).toBe('read-only');
+    const plain = await invoke(handlers, 'library.reveal', event(1), { id: 'prj_1' }).catch(
+      (e: unknown) => e,
+    );
+    expect((plain as Error).message).toBe('plain failure');
+    expect(decodeIpcError(plain)).toBeNull();
+    expect(ipcErrorMessage(new Error("Error invoking remote method 'x': Error: nope"))).toBe(
+      'nope',
     );
   });
 

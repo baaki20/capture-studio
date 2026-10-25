@@ -37,13 +37,25 @@ export function refToFileSeconds(media: MediaClock, refUs: Us): number {
 }
 
 /**
- * The media's extent in its reference clock:
+ * Where the media's content lies in its reference clock, with the sync nudge applied:
  * `[startOffsetUs + syncAdjustUs, startOffsetUs + syncAdjustUs + durationUs × clockRatio]`.
  * The end is rounded to the nearest µs, which absorbs float error in `clockRatio`.
+ *
+ * Rendering uses it: where a clip's reference range falls outside these bounds (a nudge pushed
+ * an edge past the file), the render plan draws nothing and plays silence (`render-plan.ts`).
  */
 export function mediaRefBounds(media: MediaClock): { startUs: Us; endUs: Us } {
   const startUs = media.startOffsetUs + media.syncAdjustUs;
   return { startUs, endUs: startUs + Math.round(media.durationUs * media.clockRatio) };
+}
+
+/**
+ * The bounds clips are edited and validated against (invariant 2, trims): the media's extent
+ * **without** the sync nudge, `[startOffsetUs, startOffsetUs + durationUs × clockRatio]`.
+ * A nudge is non-destructive (R1.42): it never trims, moves or invalidates a clip.
+ */
+export function mediaEditBounds(media: MediaClock): { startUs: Us; endUs: Us } {
+  return mediaRefBounds({ ...media, syncAdjustUs: 0 });
 }
 
 /** File-local range covered by a clip's `[sourceStartUs, sourceEndUs)`. */

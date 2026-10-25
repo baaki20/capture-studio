@@ -1,7 +1,7 @@
 /**
  * Entry point of the media utility process (§1.3). It owns everything that touches media bytes
- * or runs FFmpeg: stream writers, system-audio capture, finalize, peaks, thumbnails and the
- * encoder probe. Requests are handled by `MediaService`.
+ * or runs FFmpeg: stream writers, system-audio capture, finalize, peaks, thumbnails, the
+ * encoder probe and exports. Requests are handled by `MediaService`.
  */
 import type { MediaUtilityEvent } from '../../shared/ipc/media-utility';
 import { MediaService } from './service';

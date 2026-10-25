@@ -1,0 +1,59 @@
+# args
+  -y
+  -loglevel
+  warning
+  -i
+  /projects/Lesson.cstudio/media/screen.mp4
+  -i
+  /projects/Lesson.cstudio/media/microphone.mp4
+  -i
+  /projects/Lesson.cstudio/media/system-audio.mp4
+  -/filter_complex
+  /tmp/cs-export/graph.txt
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  medium
+  -crf
+  21
+  -profile:v
+  high
+  -pix_fmt
+  yuv420p
+  -color_primaries
+  bt709
+  -color_trc
+  bt709
+  -colorspace
+  bt709
+  -color_range
+  tv
+  -c:a
+  aac
+  -b:a
+  192k
+  -ar
+  48000
+  -ac
+  2
+  -t
+  60.000000
+  -movflags
+  +faststart
+  -f
+  mp4
+  /exports/.Lesson.mp4.0000.part
+# masks
+# expectedDurationUs 60000000
+# filter script
+[0:v:0]fps=30:start_time=0[v0];
+[v0]trim=start=0.000000:end=59.997800,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=1800,crop=1920:1080:0:0,scale=1920:1080,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuv420p[p1];
+[p1]null[t2];
+[t2]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[1:a:0]atrim=start=0.027200:end=59.986102,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a5];
+[2:a:0]atrim=start=0.000000:end=59.990100,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a6];
+[a5][a6]amix=inputs=2:normalize=0:dropout_transition=0,alimiter=limit=0.98:level=0:latency=1,aresample=48000,apad[aout]

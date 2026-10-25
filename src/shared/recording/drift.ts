@@ -24,6 +24,13 @@ import type { Us } from '../time';
 
 export const SYNC_FILE_VERSION = 1;
 
+/**
+ * `nominalRate` of a video track's sync file: its checkpoints are `[arrival session µs, frame
+ * file µs]`, so one "sample" is one microsecond. The live sync test (tests/sync) showed screen
+ * timestamps drifting ~116 ppm from the session clock, so video is drift-fitted like audio.
+ */
+export const VIDEO_SYNC_RATE = 1_000_000;
+
 /** `media/<x>.sync.json` (§4.4.3). */
 export const SyncCheckpointFileSchema = z.object({
   version: z.literal(SYNC_FILE_VERSION),

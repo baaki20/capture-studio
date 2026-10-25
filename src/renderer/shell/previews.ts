@@ -30,30 +30,59 @@ function options(devices: MediaDeviceInfo[], kind: MediaDeviceKind, fallback: st
     .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `${fallback} ${String(i + 1)}` }));
 }
 
+/**
+ * Chromium hides device ids until the page has opened that kind of device once. With the mic set
+ * to None the panel never opens it, so the list would stay empty and the mic could never be
+ * chosen again. Open each hidden kind briefly (no preview), then enumerate again.
+ */
+async function unlockHiddenKinds(devices: MediaDeviceInfo[]): Promise<boolean> {
+  const hidden = (kind: MediaDeviceKind) =>
+    devices.some((d) => d.kind === kind && d.deviceId === '');
+  const audio = hidden('audioinput');
+  const video = hidden('videoinput');
+  if (!audio && !video) return false;
+  let unlocked = false;
+  for (const constraints of [audio && { audio: true }, video && { video: true }]) {
+    if (!constraints) continue;
+    try {
+      stopStream(await navigator.mediaDevices.getUserMedia(constraints));
+      unlocked = true;
+    } catch (error) {
+      console.warn('setup: could not unlock device list', constraints, error);
+    }
+  }
+  return unlocked;
+}
+
 /** Cameras and microphones, kept current when devices are plugged in or out. */
 export function useDevices(): DeviceLists {
   const [lists, setLists] = useState<DeviceLists>({ cameras: [], mics: [], ready: false });
   useEffect(() => {
     let cancelled = false;
-    const refresh = () => {
-      navigator.mediaDevices.enumerateDevices().then(
-        (devices) => {
-          if (cancelled) return;
-          setLists({
-            cameras: options(devices, 'videoinput', 'Camera'),
-            mics: options(devices, 'audioinput', 'Microphone'),
-            ready: true,
-          });
-        },
-        // Not ready: a failed enumeration must not reset the saved devices to "none".
-        (error: unknown) => console.warn('setup: enumerateDevices failed', error),
-      );
+    let triedUnlock = false;
+    const refresh = async () => {
+      let devices = await navigator.mediaDevices.enumerateDevices();
+      if (!triedUnlock) {
+        triedUnlock = true;
+        if (await unlockHiddenKinds(devices))
+          devices = await navigator.mediaDevices.enumerateDevices();
+      }
+      if (cancelled) return;
+      setLists({
+        cameras: options(devices, 'videoinput', 'Camera'),
+        mics: options(devices, 'audioinput', 'Microphone'),
+        ready: true,
+      });
     };
-    refresh();
-    navigator.mediaDevices.addEventListener('devicechange', refresh);
+    const refreshSafely = () => {
+      // Not ready: a failed enumeration must not reset the saved devices to "none".
+      refresh().catch((error: unknown) => console.warn('setup: enumerateDevices failed', error));
+    };
+    refreshSafely();
+    navigator.mediaDevices.addEventListener('devicechange', refreshSafely);
     return () => {
       cancelled = true;
-      navigator.mediaDevices.removeEventListener('devicechange', refresh);
+      navigator.mediaDevices.removeEventListener('devicechange', refreshSafely);
     };
   }, []);
   return lists;

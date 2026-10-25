@@ -6,7 +6,9 @@
  * build.
  *
  * Images may also come from `cs-media:` (project thumbnails, §4.3.10), which serves only files
- * inside registered project folders.
+ * inside registered project folders. The editor's demuxers, waveform and thumbnail loaders
+ * `fetch` project files with Range requests from the same scheme (§4.3.8), so `connect-src`
+ * allows it too. Scripts and frames never come from it.
  */
 /** The project media scheme (`main/projects/media-protocol.ts` registers it). */
 export const MEDIA_SCHEME = 'cs-media';
@@ -27,7 +29,7 @@ export function buildCsp(options: CspOptions = {}): string {
     'img-src': ["'self'", 'data:', 'blob:', `${MEDIA_SCHEME}:`],
     'font-src': ["'self'"],
     'media-src': ["'self'", 'blob:'],
-    'connect-src': ["'self'", ...(dev && devWs ? [dev, devWs] : [])],
+    'connect-src': ["'self'", ...(dev && devWs ? [dev, devWs] : []), `${MEDIA_SCHEME}:`],
     'worker-src': ["'self'", 'blob:'],
     'base-uri': ["'none'"],
     'form-action': ["'none'"],

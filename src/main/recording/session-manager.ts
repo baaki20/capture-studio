@@ -60,6 +60,7 @@ import {
   type ProjectV1,
   type RecordingInfo,
 } from '../../shared/project/schema';
+import { VIDEO_SYNC_RATE } from '../../shared/recording/drift';
 import type { Settings } from '../../shared/settings/schema';
 import type { ActionBus } from '../action-bus';
 import type { ProjectStore } from '../projects/project-store';
@@ -176,6 +177,8 @@ export interface SessionManagerDeps {
   pickRegion?: (source: { width: number; height: number }) => Promise<RegionChoice>;
   /** `audio.system` is available. */
   systemAudioAvailable: () => boolean;
+  /** Output latency of the default sink in µs (system audio is shifted by it). */
+  systemAudioOutputLatencyUs?: () => Promise<number>;
   platform: () => RecordingInfo['platform'];
   appVersion: string;
   events: SessionEvents;
@@ -207,6 +210,8 @@ interface StreamState {
     mode: 'shared' | 'arrival-calibrated';
     offsetUs: number;
     clockHandshakeUs: number | null;
+    /** System audio: sink output latency added to `startOffsetUs`. */
+    outputLatencyUs?: number;
   };
   startOffsetUs: number | null;
   endedEarly: boolean;
@@ -633,7 +638,8 @@ export class SessionManager {
       changed = this.applyReport(stream, report) || changed;
       if (report.checkpoints && report.checkpoints.length > 0) {
         stream.checkpoints.push(...report.checkpoints.map(checkpoint));
-        stream.nominalRate ??= report.nominalRate ?? null;
+        stream.nominalRate ??=
+          report.nominalRate ?? (isVideoKind(stream.kind) ? VIDEO_SYNC_RATE : null);
         stream.checkpointsDirty = true;
       }
     }
@@ -776,7 +782,10 @@ export class SessionManager {
       const system = session.streams.get('system');
       if (system && session.t0Us !== null && session.utilityOffsetUs !== null) {
         system.startOffsetUs = Math.round(
-          event.firstSampleUs - session.utilityOffsetUs - session.t0Us,
+          event.firstSampleUs -
+            session.utilityOffsetUs -
+            session.t0Us +
+            (system.sync.outputLatencyUs ?? 0),
         );
         void this.writeLog(session);
       }
@@ -942,6 +951,9 @@ export class SessionManager {
         system.label = 'System audio';
         system.encoder = { name: 'Opus (FFmpeg libopus)', hardware: false };
         system.sync.clockHandshakeUs = Math.round(session.utilityOffsetUs);
+        system.sync.outputLatencyUs = Math.round(
+          (await this.deps.systemAudioOutputLatencyUs?.().catch(() => 0)) ?? 0,
+        );
         session.streams.set('system', system);
         this.deps.utility.startSystemAudio(system.streamId, mediaDir);
       } else {
@@ -1408,7 +1420,10 @@ export class SessionManager {
     const system = session.streams.get('system');
     if (system && stopped.system?.firstSampleUs != null && session.t0Us !== null) {
       system.startOffsetUs = Math.round(
-        stopped.system.firstSampleUs - (session.utilityOffsetUs ?? 0) - session.t0Us,
+        stopped.system.firstSampleUs -
+          (session.utilityOffsetUs ?? 0) -
+          session.t0Us +
+          (system.sync.outputLatencyUs ?? 0),
       );
     }
 
@@ -1439,7 +1454,7 @@ export class SessionManager {
         file?.sync && stream.kind === 'system'
           ? shiftCheckpoints(file.sync, (session.t0Us ?? 0) + (session.utilityOffsetUs ?? 0))
           : (file?.sync ?? null);
-      const drift = isVideoKind(stream.kind) ? null : fitDrift(sync);
+      const drift = fitDrift(sync);
       if (drift) {
         this.logger.info(
           `recording: ${stream.kind} drift ${drift.ppm.toFixed(1)} ppm (±${drift.standardErrorPpm.toFixed(1)}), ${drift.decision}`,

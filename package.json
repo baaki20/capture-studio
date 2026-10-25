@@ -30,10 +30,12 @@
   },
   "dependencies": {
     "electron-log": "5.4.4",
+    "immer": "11.1.18",
     "mediabunny": "1.62.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "zustand": "5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

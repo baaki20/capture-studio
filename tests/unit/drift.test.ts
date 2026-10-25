@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CheckpointLog,
   SyncCheckpointFileSchema,
+  VIDEO_SYNC_RATE,
   fitClockRatio,
   fitSyncFile,
   type Checkpoint,
@@ -154,6 +155,20 @@ describe('drift fit', () => {
     expect(fit.ppm).toBeGreaterThan(100);
     expect(fit.ppm).toBeLessThan(180);
     expect(fitSyncFile(file, { envelope: false }).ppm).toBeLessThan(60);
+  });
+
+  it('fits video tracks, whose checkpoint "samples" are file microseconds', () => {
+    // Screen timestamps 116 ppm off the session clock (live sync test), frames arriving
+    // 0–30 ms late, one checkpoint per second for 5 minutes.
+    const random = rng(11);
+    const points: Checkpoint[] = [];
+    for (let s = 0; s <= 300; s++) {
+      const fileUs = s * 1_000_000 + Math.round(random() * 33_000);
+      points.push([Math.round(BASE + fileUs * 1.000116 + random() * 30_000), fileUs]);
+    }
+    const fit = fitClockRatio(points, VIDEO_SYNC_RATE);
+    expect(fit.decision).toBe('applied');
+    expect(Math.abs(fit.ppm - 116)).toBeLessThan(10);
   });
 
   it('rejects implausible ratios as faults', () => {

@@ -25,7 +25,7 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** The project library (R1.27): list, rename, move to trash, reveal, open the folder. */
+/** The project library (R1.27): list, open in the editor, rename, move to trash, reveal, open the folder. */
 export function Library() {
   const api = window.captureStudio;
   const [entries, setEntries] = useState<Entry[] | null>(null);
@@ -115,6 +115,13 @@ export function Library() {
                 </span>
               </div>
               <div className={styles.actions}>
+                <button
+                  type="button"
+                  disabled={entry.state === 'recording' || entry.state === 'finalizing'}
+                  onClick={() => act(api.project.edit(entry.id))}
+                >
+                  Open
+                </button>
                 <button
                   type="button"
                   onClick={() => setRenaming({ id: entry.id, name: entry.name })}

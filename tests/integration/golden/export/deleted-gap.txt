@@ -1,0 +1,84 @@
+# args
+  -y
+  -loglevel
+  warning
+  -i
+  /projects/Lesson.cstudio/media/screen.mp4
+  -i
+  /projects/Lesson.cstudio/media/camera.mp4
+  -i
+  /projects/Lesson.cstudio/media/microphone.mp4
+  -i
+  /projects/Lesson.cstudio/media/system-audio.mp4
+  -i
+  /tmp/cs-export/mask-0.png
+  -/filter_complex
+  /tmp/cs-export/graph.txt
+  -map
+  [vout]
+  -map
+  [aout]
+  -c:v
+  libx264
+  -preset
+  medium
+  -crf
+  21
+  -profile:v
+  high
+  -pix_fmt
+  yuv420p
+  -color_primaries
+  bt709
+  -color_trc
+  bt709
+  -colorspace
+  bt709
+  -color_range
+  tv
+  -c:a
+  aac
+  -b:a
+  192k
+  -ar
+  48000
+  -ac
+  2
+  -t
+  60.000000
+  -movflags
+  +faststart
+  -f
+  mp4
+  /exports/.Lesson.mp4.0000.part
+# masks
+  /tmp/cs-export/mask-0.png 384x384 circle r=192
+# expectedDurationUs 60000000
+# filter script
+[0:v:0]fps=30:start_time=0,split=2[v0][v1];
+[1:v:0]fps=30:start_time=0,split=3[v2][v3][v4];
+[v0]trim=start=0.000000:end=19.997800,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=600,crop=1920:1080:0:0,scale=1920:1080,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuv420p[p5];
+color=c=0x000000:s=1920x1080:r=30:d=10.000000,format=yuv420p,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,setsar=1[p6];
+[v1]trim=start=29.997800:end=59.997800,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=900,crop=1920:1080:0:0,scale=1920:1080,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuv420p[p7];
+[p5][p6][p7]concat=n=3:v=1:a=0[t8];
+color=c=black@0:s=384x384:r=30:d=0.033333,setsar=1,format=yuva420p[p9];
+[v2]trim=start=0.000000:end=19.960000,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=599,crop=720:720:280:0,scale=384:384,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuva420p[p10];
+[v3]trim=start=19.960000:end=29.960000,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=300,crop=720:720:280:0,scale=384:384,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuva420p[p11];
+[v4]trim=start=29.960000:end=59.960000,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=900,crop=720:720:280:0,scale=384:384,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuva420p[p12];
+[p9][p10][p11][p12]concat=n=4:v=1:a=0[t13];
+[t13]split=2[ta14][tb15];
+[tb15]alphaextract[al16];
+[4:v:0]format=gray,loop=loop=-1:size=1,setpts=N/30/TB[mk17];
+[al16][mk17]blend=all_mode=multiply:shortest=1[am18];
+[ta14][am18]alphamerge[tm19];
+[t8][tm19]overlay=x=1504:y=664:eof_action=pass:format=yuv420[b20];
+[b20]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[2:a:0]asplit=3[s21][s22][s23];
+[3:a:0]asplit=3[s24][s25][s26];
+[s21]atrim=start=0.027200:end=19.986834,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a27];
+[s22]atrim=start=19.986834:end=29.986651,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=960000S:all=1[a28];
+[s23]atrim=start=29.986651:end=59.986102,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1440000S:all=1[a29];
+[s24]atrim=start=0.000000:end=19.990200,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a30];
+[s25]atrim=start=19.990200:end=29.990250,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=960000S:all=1[a31];
+[s26]atrim=start=29.990250:end=59.990100,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=1440000S:all=1[a32];
+[a27][a28][a29][a30][a31][a32]amix=inputs=6:normalize=0:dropout_transition=0,alimiter=limit=0.98:level=0:latency=1,aresample=48000,apad[aout]

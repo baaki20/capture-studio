@@ -237,7 +237,7 @@ export class RecoveryService {
         // On the utility clock; without t0 the slope (all the fit needs) is still right.
         sync = shiftCheckpoints(sync, (t0Us ?? 0) + offsetUs);
       }
-      const drift = isVideoKind(meta.kind) ? null : fitDrift(sync);
+      const drift = fitDrift(sync);
       // A stream that wrote no file at all is left out instead of listed as failed.
       if (!file) continue;
       streams.push(recordedStream(meta, file, drift, true));

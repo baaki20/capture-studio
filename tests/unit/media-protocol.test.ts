@@ -151,6 +151,21 @@ describe('cs-media protocol (§4.3.10, R1.52)', () => {
     expect(other.headers.get('Access-Control-Allow-Origin')).toBeNull();
   });
 
+  it('serves Range reads to the editor demuxers of packaged pages and their workers (Origin null)', async () => {
+    // Packaged pages are file:// (Origin "null" or "file://"); main allows exactly those.
+    const packaged = createMediaHandler({ registry, logger, allowedOrigins: ['file://', 'null'] });
+    const response = await packaged(
+      new Request(mediaUrl(ID, 'media/screen.mp4'), {
+        headers: { Origin: 'null', Range: 'bytes=4-' },
+      }),
+    );
+    expect(response.status).toBe(206);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('null');
+    expect(response.headers.get('Access-Control-Expose-Headers')).toContain('Content-Range');
+    expect(response.headers.get('Content-Range')).toBe('bytes 4-19/20');
+    expect(Buffer.from(await response.arrayBuffer()).toString()).toBe('456789abcdefghij');
+  });
+
   it('stops serving a project once it is unregistered', () => {
     const other = new ProjectRootRegistry();
     other.register('prj_x', root);

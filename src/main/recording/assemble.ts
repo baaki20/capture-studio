@@ -196,6 +196,7 @@ export const StreamLogSchema = z.object({
     mode: z.enum(['shared', 'arrival-calibrated']),
     offsetUs: z.int(),
     clockHandshakeUs: z.int().nullable(),
+    outputLatencyUs: z.int().optional(),
   }),
   /** Why the calibrator chose the mode, with its warm-up stats. */
   calibrationDetail: z.looseObject({ reason: z.string() }).optional(),

@@ -84,6 +84,8 @@ export interface ShellPreloadApi extends PreloadBase {
   };
   readonly project: {
     open(id: string): Promise<InvokeResponse<'project.open'>>;
+    /** Opens the project in the editor window. */
+    edit(id: string): Promise<void>;
   };
   readonly recovery: {
     list(): Promise<InvokeResponse<'recovery.list'>>;
@@ -127,6 +129,13 @@ export interface EditorPreloadApi extends PreloadBase {
   readonly export: {
     probeEncoders(): Promise<InvokeResponse<'export.probeEncoders'>>;
     start(request: InvokeRequest<'export.start'>): Promise<InvokeResponse<'export.start'>>;
+    /** Where the project's export will be written (chosen or default). */
+    target(projectId: string): Promise<InvokeResponse<'export.target'>>;
+    /** Native save dialog; null when cancelled. */
+    chooseOutput(projectId: string): Promise<InvokeResponse<'export.chooseOutput'>>;
+    /** After `export.done`. */
+    reveal(jobId: string): Promise<void>;
+    open(jobId: string): Promise<void>;
     cancel(jobId: string): Promise<void>;
     onProgress(listener: Listener<EventPayload<'export.progress'>>): Unsubscribe;
     onDone(listener: Listener<EventPayload<'export.done'>>): Unsubscribe;

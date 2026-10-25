@@ -128,10 +128,12 @@ describe('project invariants (§4.4.1)', () => {
     expect(codes(beforeStart)).toContain('clip-media-bounds');
   });
 
-  it('2: bounds follow syncAdjustUs and clockRatio', () => {
+  it('2: bounds follow clockRatio but ignore syncAdjustUs (nudges are non-destructive)', () => {
     const nudged = exampleProject();
-    nudged.media[0]!.syncAdjustUs = 10; // screen now starts at 10
-    expect(codes(nudged)).toContain('clip-media-bounds');
+    nudged.media[0]!.syncAdjustUs = 10; // the file now starts at 10, the clips stay valid
+    expect(codes(nudged)).toEqual([]);
+    nudged.media[0]!.syncAdjustUs = -2_000_000;
+    expect(codes(nudged)).toEqual([]);
 
     const ratio = exampleProject();
     ratio.media[0]!.clockRatio = 1.00001; // extends the end by 7 385 µs

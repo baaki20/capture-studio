@@ -8,7 +8,7 @@ import type {
   StreamKind,
 } from '../../../shared/ipc/contract';
 import type { StreamStats } from '../../../shared/ipc/media-utility';
-import type { Checkpoint } from '../../../shared/recording/drift';
+import { VIDEO_SYNC_RATE, type Checkpoint } from '../../../shared/recording/drift';
 import type { CalibrationSample } from '../../../shared/recording/sync-calibrator';
 import type { Us } from '../../../shared/time';
 import type { StreamSync } from './calibration';
@@ -99,7 +99,10 @@ export function streamResult(
       entry.startOffsetUs = startOffsetUs(result.firstTimestampUs, sync.offsetUs, t0Us);
     }
   }
-  if (result.video) entry.video = result.video;
+  if (result.video) {
+    entry.video = result.video;
+    entry.nominalRate = VIDEO_SYNC_RATE;
+  }
   if (result.audio) {
     entry.audio = result.audio;
     entry.nominalRate = result.audio.sampleRate;

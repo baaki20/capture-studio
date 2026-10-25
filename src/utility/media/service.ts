@@ -1,6 +1,7 @@
 /**
  * The media utility's request dispatcher, separate from the process entry so it can be tested
- * without Electron. It owns the open stream writers, system-audio captures and running jobs.
+ * without Electron. It owns the open stream writers, system-audio captures and running jobs
+ * (finalize, peaks, thumbnails, the encoder probe and exports).
  */
 import { promises as fs } from 'node:fs';
 import type { StreamKind } from '../../shared/ipc/contract';
@@ -13,6 +14,7 @@ import {
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
 import { probeEncoders } from './encoder-probe';
+import { runExportJob } from './export/export-job';
 import { finalizeRecording } from './finalize';
 import { PcmIngest, SystemAudioMonitor } from './pcm-ingest';
 import { generatePeaks } from './peaks';
@@ -289,6 +291,21 @@ export class MediaService {
           break;
         case 'encoders.probe':
           result = await probeEncoders({ ffmpegPath: ffmpeg.ffmpegPath, signal });
+          break;
+        case 'export':
+          result = await runExportJob({
+            ffmpegPath: ffmpeg.ffmpegPath,
+            ffprobePath: ffmpeg.ffprobePath,
+            root: job.root,
+            doc: job.doc,
+            options: job.options,
+            hardwareEncoder: job.hardwareEncoder,
+            output: job.output,
+            overwrite: job.overwrite,
+            signal,
+            onProgress: progress,
+            logger: this.logger,
+          });
           break;
       }
       if (signal.aborted) throw new Error('cancelled');

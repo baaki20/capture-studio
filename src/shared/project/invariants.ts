@@ -1,9 +1,16 @@
 /**
  * Cross-field invariants of project schema v1 (§4.4.1). Checked on load (as part of
- * `ProjectV1Schema`) and, from step 14, after every timeline operation.
+ * `ProjectV1Schema`) and after every timeline operation (`timeline-ops.ts`).
+ *
+ * Invariant 2 (media bounds) ignores `syncAdjustUs`: clips must lie within the media's
+ * un-nudged reference bounds (`mediaEditBounds`), so a sync nudge never makes a project invalid.
+ * Where a nudge moves the file away from part of a clip, the render plan shows a gap there.
+ *
+ * Beyond the six numbered invariants of the spec, IDs of tracks, clips and media must be unique:
+ * every edit operation addresses clips and tracks by ID.
  */
 import { frameDurationUs } from '../time';
-import { mediaRefBounds } from './media-time';
+import { mediaEditBounds } from './media-time';
 import type { Media, ProjectV1 } from './schema';
 
 export type InvariantCode =
@@ -15,7 +22,8 @@ export type InvariantCode =
   | 'link-mismatch'
   | 'link-same-track'
   | 'canvas-size'
-  | 'missing-media';
+  | 'missing-media'
+  | 'duplicate-id';
 
 export interface InvariantViolation {
   code: InvariantCode;
@@ -48,6 +56,24 @@ export function checkProjectInvariants(project: ProjectV1): InvariantViolation[]
       path: ['timeline', 'canvas'],
     });
   }
+
+  // IDs are unique per kind (tracks, clips, media).
+  const seen = new Set<string>();
+  const unique = (id: string, path: (string | number)[]) => {
+    if (seen.has(id)) {
+      violations.push({ code: 'duplicate-id', message: `ID ${id} is used more than once`, path });
+    }
+    seen.add(id);
+  };
+  project.media.forEach((m, i) => {
+    unique(m.id, ['media', i, 'id']);
+  });
+  project.timeline.tracks.forEach((track, trackIndex) => {
+    unique(track.id, ['timeline', 'tracks', trackIndex, 'id']);
+    track.clips.forEach((clip, clipIndex) => {
+      unique(clip.id, ['timeline', 'tracks', trackIndex, 'clips', clipIndex, 'id']);
+    });
+  });
 
   project.timeline.tracks.forEach((track, trackIndex) => {
     let previousEndUs = -Infinity;
@@ -90,7 +116,7 @@ export function checkProjectInvariants(project: ProjectV1): InvariantViolation[]
         });
       }
 
-      // 6. Referenced media exists; 2b. the clip lies within the media's reference bounds.
+      // 6. Referenced media exists; 2b. the clip lies within the media's un-nudged bounds.
       const media = mediaById.get(clip.mediaId);
       if (!media) {
         violations.push({
@@ -99,7 +125,7 @@ export function checkProjectInvariants(project: ProjectV1): InvariantViolation[]
           path: [...path, 'mediaId'],
         });
       } else {
-        const bounds = mediaRefBounds(media);
+        const bounds = mediaEditBounds(media);
         if (clip.sourceStartUs < bounds.startUs || clip.sourceEndUs > bounds.endUs) {
           violations.push({
             code: 'clip-media-bounds',

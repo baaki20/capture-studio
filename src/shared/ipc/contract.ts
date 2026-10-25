@@ -190,6 +190,36 @@ export const ExportOptionsSchema = z.strictObject({
   quality: z.enum(['draft', 'standard', 'high']),
   encoder: z.enum(['auto', 'software']),
 });
+export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
+
+/**
+ * `export.start` (step 19). The output path is never sent by the renderer: main uses the file
+ * chosen with `export.chooseOutput`, or the default `<exportsDir>/<project name>.mp4`. `doc` is
+ * the editor's current document, the snapshot the export uses (R1.49); without it main reads
+ * the saved project. `overwrite` confirms replacing an existing file (R1.47).
+ */
+export const ExportStartSchema = z.strictObject({
+  projectId: Id,
+  options: ExportOptionsSchema,
+  doc: ProjectV1Schema.optional(),
+  overwrite: z.boolean().optional(),
+});
+
+export const ExportStartResultSchema = z.object({
+  /** Null unless `status` is `started`. */
+  jobId: Id.nullable(),
+  /** `exists`: the target exists and `overwrite` was not set; `blocked`: see `message`. */
+  status: z.enum(['started', 'exists', 'blocked']),
+  /** The output file. */
+  path: z.string(),
+  message: z.string().nullable(),
+});
+
+/** Where an export of a project will be written. */
+export const ExportTargetSchema = z.object({
+  path: z.string(),
+  exists: z.boolean(),
+});
 
 export const RecoveryCandidateSchema = z.object({
   id: Id,
@@ -295,6 +325,8 @@ export const INVOKE_CHANNELS = {
   'library.openFolder': invoke(NoPayload, z.undefined(), SHELL),
 
   'project.open': invoke(z.strictObject({ id: Id }), ProjectOpenResultSchema, ['shell', 'editor']),
+  /** Opens the project in an editor window (one per project; focuses an open one). */
+  'editor.open': invoke(z.strictObject({ id: Id }), z.undefined(), SHELL),
   'project.save': invoke(ProjectSaveSchema, z.object({ revision: z.int().nonnegative() }), EDITOR),
   'project.relink': invoke(
     z.strictObject({ id: Id, mediaId: Id }),
@@ -306,12 +338,19 @@ export const INVOKE_CHANNELS = {
   'media.thumbs': invoke(MediaAssetRequestSchema, MediaAssetResultSchema, EDITOR),
 
   'export.probeEncoders': invoke(NoPayload, FfmpegEncoderReportSchema, EDITOR),
-  'export.start': invoke(
-    z.strictObject({ projectId: Id, options: ExportOptionsSchema }),
-    z.object({ jobId: Id.nullable() }),
+  'export.start': invoke(ExportStartSchema, ExportStartResultSchema, EDITOR),
+  'export.cancel': invoke(z.strictObject({ jobId: Id }), z.undefined(), EDITOR),
+  /** The current target (chosen or default) for a project's export. */
+  'export.target': invoke(z.strictObject({ projectId: Id }), ExportTargetSchema, EDITOR),
+  /** Native save dialog in main; the choice becomes the project's target. Null = cancelled. */
+  'export.chooseOutput': invoke(
+    z.strictObject({ projectId: Id }),
+    ExportTargetSchema.nullable(),
     EDITOR,
   ),
-  'export.cancel': invoke(z.strictObject({ jobId: Id }), z.undefined(), EDITOR),
+  /** After `export.done`: show the file in the file manager, or open it. */
+  'export.reveal': invoke(z.strictObject({ jobId: Id }), z.undefined(), EDITOR),
+  'export.open': invoke(z.strictObject({ jobId: Id }), z.undefined(), EDITOR),
 
   'recovery.list': invoke(NoPayload, z.array(RecoveryCandidateSchema), SHELL),
   'recovery.recover': invoke(z.strictObject({ id: Id }), z.object({ projectId: Id }), SHELL),
@@ -359,7 +398,18 @@ export const EVENT_CHANNELS = {
     }),
     windows: ['editor'],
   },
-  'export.done': { payload: z.object({ jobId: Id, outputName: z.string() }), windows: ['editor'] },
+  'export.done': {
+    payload: z.object({
+      jobId: Id,
+      outputName: z.string(),
+      /** Added in step 19 (optional for compatibility). */
+      outputPath: z.string().optional(),
+      encoder: z.string().optional(),
+      /** Set when the hardware encoder failed and libx264 was used instead (§4.3.9). */
+      notice: z.string().nullable().optional(),
+    }),
+    windows: ['editor'],
+  },
   'export.error': {
     payload: z.object({ jobId: Id, message: z.string(), cancelled: z.boolean() }),
     windows: ['editor'],

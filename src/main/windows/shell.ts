@@ -37,11 +37,14 @@ export function loadRendererPage(
   window: BrowserWindow,
   location: RendererLocation,
   page: 'shell' | 'controls' | 'picker' | 'editor' | 'engine',
+  query: Record<string, string> = {},
 ): void {
   if (location.devServerUrl) {
-    void window.loadURL(new URL(`${page}/index.html`, `${location.devServerUrl}/`).toString());
+    const url = new URL(`${page}/index.html`, `${location.devServerUrl}/`);
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
+    void window.loadURL(url.toString());
   } else {
-    void window.loadFile(path.join(location.rendererDir, page, 'index.html'));
+    void window.loadFile(path.join(location.rendererDir, page, 'index.html'), { query });
   }
 }
 

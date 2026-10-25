@@ -93,10 +93,10 @@ export class StreamCounters {
     } else {
       stats.samplesWritten = this.samplesWritten;
       stats.level = this.peak;
-      stats.checkpoints = this.pending.map(([a, b]) => [a, b]);
-      this.pending.length = 0;
       this.peak = 0;
     }
+    stats.checkpoints = this.pending.map(([a, b]) => [a, b]);
+    this.pending.length = 0;
     return stats;
   }
 }

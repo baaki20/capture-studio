@@ -406,6 +406,12 @@
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
+              },
+              "outputLatencyUs": {
+                "description": "Sink output latency added to system audio (the monitor runs ahead of the speakers)",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
               }
             },
             "required": [

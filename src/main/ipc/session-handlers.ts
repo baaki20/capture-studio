@@ -2,6 +2,7 @@
  * Handlers for the recording, library, project and recovery channels (§4.3.11, steps 10, 12 and
  * 13). Each forwards to its module; errors reach the renderer as rejected invokes.
  */
+import { markMediaPresence } from '../projects/editor-media';
 import type { Library } from '../projects/library';
 import type { ProjectStore } from '../projects/project-store';
 import type { RecoveryService } from '../recording/recovery';
@@ -49,8 +50,11 @@ export function registerSessionHandlers(deps: SessionHandlerDeps): void {
   router.handle('library.openFolder', () => done(library.openFolder()));
 
   router.handle('project.open', async ({ id }) => {
-    if (!(await library.findRoot(id))) throw new Error(`project ${id} was not found`);
-    return store.open(id);
+    const root = await library.findRoot(id);
+    if (!root) throw new Error(`project ${id} was not found`);
+    const open = await store.open(id);
+    // Media whose file is gone open as offline clips with a Relink action (R1.29).
+    return { ...open, doc: await markMediaPresence(root, open.doc) };
   });
   router.handle('project.save', ({ id, revision, doc }) => store.save(id, revision, doc));
 

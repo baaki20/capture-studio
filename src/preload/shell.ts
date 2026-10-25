@@ -44,6 +44,7 @@ const api: ShellPreloadApi = {
   },
   project: {
     open: (id) => invoke('project.open', { id }),
+    edit: (id) => invoke('editor.open', { id }),
   },
   recovery: {
     list: () => invoke('recovery.list'),

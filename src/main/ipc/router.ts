@@ -6,6 +6,9 @@
  *   and that window's kind must be allowed on the channel. Anything else is rejected and logged.
  * - Payloads are validated with the contract's zod schemas before a handler runs; responses and
  *   outgoing events are validated too, so a bug in main cannot leak an off-contract shape.
+ * - A handler error that carries a string `code` (e.g. `ProjectStoreError('stale-revision', …)`)
+ *   reaches the renderer as a structured envelope (`shared/ipc/errors.ts`), because Electron
+ *   passes only the message across; renderers branch on `ipcErrorCode(error)`.
  */
 import type { z } from 'zod';
 import {
@@ -22,6 +25,7 @@ import {
   type InvokeResponse,
   type WindowKind,
 } from '../../shared/ipc/contract';
+import { encodeIpcError } from '../../shared/ipc/errors';
 import type { Logger } from '../../shared/logger';
 
 /** The parts of an IPC event the router looks at (Electron's events satisfy this). */
@@ -69,6 +73,14 @@ function describeIssues(error: z.ZodError): string {
     .slice(0, 5)
     .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
     .join('; ');
+}
+
+/** Re-throws an error with a string `code` as a structured envelope; others pass unchanged. */
+export function toIpcError(error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code !== 'string' || code === '') return error;
+  return new Error(encodeIpcError({ code, message: error.message }));
 }
 
 export class IpcRouter {
@@ -145,7 +157,12 @@ export class IpcRouter {
         throw new IpcRejection(`${channel}: invalid payload`);
       }
 
-      const result = await handler(parsed.data as InvokePayload<C>, auth.context);
+      let result: InvokeResponse<C>;
+      try {
+        result = await handler(parsed.data as InvokePayload<C>, auth.context);
+      } catch (error) {
+        throw toIpcError(error);
+      }
       const checked = spec.response.safeParse(result);
       if (!checked.success) {
         this.options.logger.error(

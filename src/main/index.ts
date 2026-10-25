@@ -9,24 +9,30 @@ import path from 'node:path';
 import type { BrowserWindow } from 'electron';
 import {
   app,
+  BrowserWindow as ElectronWindow,
   clipboard,
   desktopCapturer,
+  dialog,
   ipcMain,
   Notification,
   protocol,
   safeStorage,
   shell,
+  webContents,
 } from 'electron';
 import type { FfmpegEncoderReport } from '../shared/capabilities/types';
 import type { RecordingInfo } from '../shared/project/schema';
 import { SecondInstanceDataSchema, type SecondInstanceData } from '../shared/ipc/actions';
 import { ActionBus } from './action-bus';
-import { CapabilityService } from './capabilities/detect';
+import { CapabilityService, defaultExec } from './capabilities/detect';
+import { estimateSinkOutputLatencyUs } from './system-audio/linux-latency';
 import { inferOzonePlatform } from './capabilities/linux';
 import { parseCliArgs } from './cli';
 import { pickScreenSource } from './display-media';
 import { locateFfmpeg, type FfmpegLocation } from './ffmpeg/locate';
 import { registerCoreHandlers } from './ipc/core-handlers';
+import { registerEditorHandlers } from './ipc/editor-handlers';
+import { registerExportHandlers, type ExportService } from './ipc/export-handlers';
 import { IpcRouter } from './ipc/router';
 import { registerSessionHandlers } from './ipc/session-handlers';
 import { forwardRendererConsole, initLogging } from './logging';
@@ -36,6 +42,7 @@ import {
   MEDIA_SCHEME_PRIVILEGES,
   ProjectRootRegistry,
 } from './projects/media-protocol';
+import { EditorMedia } from './projects/editor-media';
 import { Library } from './projects/library';
 import { ProjectStore } from './projects/project-store';
 import { RecoveryService } from './recording/recovery';
@@ -48,6 +55,7 @@ import { createTray, type AppTray, type TrayRecordingState } from './tray';
 import { startMediaUtility, type MediaUtilityHandle } from './utility-host';
 import { ControlsWindowHost } from './windows/controls';
 import { shouldMinimizeOnStart } from './windows/controls-policy';
+import { EditorWindowHost } from './windows/editor';
 import { EngineHost } from './windows/engine';
 import { RegionPickerHost } from './windows/picker';
 import { createShellWindow, focusWindow, type RendererLocation } from './windows/shell';
@@ -101,6 +109,9 @@ let mediaUtility: MediaUtilityHandle | null = null;
 let engineHost: EngineHost | null = null;
 let sessionManager: SessionManager | null = null;
 let controlsHost: ControlsWindowHost | null = null;
+let exportService: ExportService | null = null;
+/** One editor window per project (steps 16–18). */
+const editorHost = new EditorWindowHost({ router, renderer, logger: log });
 /** Stops the setup panel's system-audio meter (set once the utility exists). */
 let stopSystemMonitor: () => void = () => undefined;
 
@@ -348,6 +359,7 @@ async function start(): Promise<void> {
     },
     pickRegion: (source) => picker.pick(source),
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
+    systemAudioOutputLatencyUs: () => estimateSinkOutputLatencyUs(defaultExec),
     platform,
     appVersion: app.getVersion(),
     logger: log,
@@ -364,14 +376,15 @@ async function start(): Promise<void> {
       levels: (payload) => void router.broadcast('rec.levels', payload),
       libraryChanged,
       projectReady: ({ projectId, root, name, afterRecording }) => {
-        // The editor arrives in step 14; until then the shell shows the completion notice and
-        // the library lists the new project.
+        // R1.20: the editor opens unless "After recording" is "show in library".
         log.info(`recording: project ${projectId} ready at ${root} (after: ${afterRecording})`);
-        showShell();
+        const openEditor = (): void => void editorHost.open(projectId);
+        if (afterRecording === 'open-editor') openEditor();
+        else showShell();
         router.broadcast('rec.completed', { projectId, name, afterRecording });
         if (Notification.isSupported()) {
           const notification = new Notification({ title: 'Recording saved', body: name });
-          notification.on('click', () => showShell());
+          notification.on('click', openEditor);
           notification.show();
         }
       },
@@ -417,6 +430,64 @@ async function start(): Promise<void> {
     },
   });
 
+  const editorMedia = new EditorMedia({
+    store,
+    findRoot: (id) => library.findRoot(id),
+    runJob: (job) => utility.runJob(job),
+    chooseFile: async (media, senderId) => {
+      const sender = webContents.fromId(senderId);
+      const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
+      const options: Electron.OpenDialogOptions = {
+        title: `Relink ${media.path}`,
+        properties: ['openFile'],
+        filters: [
+          media.kind === 'video'
+            ? { name: 'Video', extensions: ['mp4', 'm4v', 'webm', 'mkv', 'mov'] }
+            : { name: 'Audio', extensions: ['mp4', 'm4a', 'webm', 'ogg', 'opus', 'wav'] },
+        ],
+      };
+      const result = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
+    logger: log,
+  });
+  registerEditorHandlers({
+    router,
+    media: editorMedia,
+    openEditor: async (id) => {
+      if (!(await library.findRoot(id))) throw new Error(`project ${id} was not found`);
+      editorHost.open(id);
+    },
+  });
+
+  exportService = registerExportHandlers({
+    router,
+    runExport: (job, options) => utility.runJob(job, options),
+    findRoot: (id) => library.findRoot(id),
+    readProject: async (root) => (await store.read(root))?.doc ?? null,
+    settings: () => settings.get(),
+    probeEncoders,
+    showSaveDialog: async ({ defaultPath, senderId }) => {
+      const sender = webContents.fromId(senderId);
+      const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
+      const options: Electron.SaveDialogOptions = {
+        title: 'Export video',
+        defaultPath,
+        filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+        properties: ['showOverwriteConfirmation', 'createDirectory'],
+      };
+      const result = parent
+        ? await dialog.showSaveDialog(parent, options)
+        : await dialog.showSaveDialog(options);
+      return result.canceled || !result.filePath ? null : result.filePath;
+    },
+    showItemInFolder: (fullPath) => shell.showItemInFolder(fullPath),
+    openPath: (fullPath) => shell.openPath(fullPath),
+    logger: log,
+  });
+
   const caps = await capabilities.refresh();
   if (caps.capabilities['ui.tray'].state === 'available') tray = createTray(actionBus);
 
@@ -443,11 +514,19 @@ if (!app.requestSingleInstanceLock(secondInstanceData)) {
     if (!tray) app.quit();
   });
 
+  // Editors save their last edits before the app quits (R1.28).
+  app.on('before-quit', (event) => {
+    if (editorHost.isReleased || editorHost.openProjects.length === 0) return;
+    event.preventDefault();
+    void editorHost.releaseForQuit().then(() => app.quit());
+  });
+
   app.on('will-quit', () => {
     tray?.destroy();
     controlsHost?.dispose();
     sessionManager?.dispose();
     engineHost?.dispose();
+    exportService?.dispose();
     mediaUtility?.stop();
     router.dispose();
   });

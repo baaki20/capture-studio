@@ -78,6 +78,9 @@ export const MediaSyncSchema = z.object({
   mode: z.enum(['shared', 'arrival-calibrated']),
   offsetUs: Us.optional().describe('Calibrator offset: sessionUs = timestampUs + offsetUs'),
   clockHandshakeUs: Us.optional().describe('Cross-process clock handshake applied (system audio)'),
+  outputLatencyUs: Us.optional().describe(
+    'Sink output latency added to system audio (the monitor runs ahead of the speakers)',
+  ),
 });
 
 export const MediaSchema = z.object({

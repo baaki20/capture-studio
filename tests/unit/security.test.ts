@@ -71,10 +71,13 @@ describe('security baseline (§1.3)', () => {
     expect(csp).toContain("connect-src 'self' http://localhost:5173 ws://localhost:5173");
   });
 
-  it('lets pages show project thumbnails from cs-media: and nothing else remote', () => {
+  it('lets pages show and fetch project media from cs-media: and nothing else remote', () => {
     const imgSrc = /img-src ([^;]*)/.exec(buildCsp())?.[1]?.split(' ');
     expect(imgSrc).toEqual(["'self'", 'data:', 'blob:', 'cs-media:']);
-    expect(buildCsp()).not.toMatch(/(script|connect|frame)-src[^;]*cs-media/);
+    // The editor's demuxers read media with Range fetches (§4.3.8).
+    const connectSrc = /connect-src ([^;]*)/.exec(buildCsp())?.[1]?.split(' ');
+    expect(connectSrc).toEqual(["'self'", 'cs-media:']);
+    expect(buildCsp()).not.toMatch(/(script|frame|worker)-src[^;]*cs-media/);
   });
 
   it('electron-builder flips the required fuses', () => {

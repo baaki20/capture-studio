@@ -121,6 +121,16 @@ export function App() {
           <button
             type="button"
             onClick={() => {
+              api.project
+                .edit(completed.projectId)
+                .catch((e: unknown) => console.warn('shell: open editor failed', e));
+            }}
+          >
+            Open in editor
+          </button>
+          <button
+            type="button"
+            onClick={() => {
               api.library
                 .reveal(completed.projectId)
                 .catch((e: unknown) => console.warn('shell: reveal failed', e));

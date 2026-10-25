@@ -37,7 +37,8 @@ describe('StreamCounters', () => {
       state: 'recording',
     });
     expect(s.droppedRatio).toBeCloseTo(0.02, 2);
-    expect(s.checkpoints).toBeUndefined();
+    // Video streams carry drift checkpoints too (none were added here).
+    expect(s.checkpoints).toEqual([]);
     expect(ENGINE_EVENTS['engine.stats'].safeParse({ atUs: 1, streams: [s] }).success).toBe(true);
   });
 

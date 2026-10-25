@@ -8,7 +8,8 @@
  */
 import { z } from 'zod';
 import { FfmpegEncoderReportSchema } from '../capabilities/types';
-import { StreamKindSchema } from './contract';
+import { ProjectV1StructureSchema } from '../project/schema';
+import { ExportOptionsSchema, StreamKindSchema } from './contract';
 
 const Id = z.string().min(1).max(64);
 const AbsPath = z.string().min(1);
@@ -39,9 +40,22 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
     mediaId: Id,
   }),
   z.object({ kind: z.literal('encoders.probe') }),
+  /**
+   * Export a project snapshot to MP4 (§4.3.9). Main validated `doc` against the full schema;
+   * `hardwareEncoder` is the probe-verified encoder for `encoder: 'auto'` (null = libx264).
+   */
+  z.object({
+    kind: z.literal('export'),
+    root: AbsPath,
+    doc: ProjectV1StructureSchema,
+    options: ExportOptionsSchema,
+    hardwareEncoder: z.string().nullable(),
+    output: AbsPath,
+    overwrite: z.boolean(),
+  }),
 ]);
 export type JobSpec = z.infer<typeof JobSpecSchema>;
-export const JOB_KINDS = ['finalize', 'peaks', 'thumbnails', 'encoders.probe'] as const;
+export const JOB_KINDS = ['finalize', 'peaks', 'thumbnails', 'encoders.probe', 'export'] as const;
 export type JobKind = JobSpec['kind'];
 
 export const SyncCheckpointsSchema = z.object({
@@ -104,6 +118,16 @@ export const JOB_RESULT_SCHEMAS = {
   peaks: PeaksResultSchema,
   thumbnails: z.object({ indexPath: AbsPath, index: ThumbnailIndexSchema }),
   'encoders.probe': FfmpegEncoderReportSchema,
+  export: z.object({
+    output: AbsPath,
+    /** The video encoder that produced the file. */
+    encoder: z.string(),
+    /** Set when the hardware encoder failed and the export was redone with libx264. */
+    fallback: z.object({ from: z.string(), reason: z.string() }).nullable(),
+    durationUs: z.int().nonnegative(),
+    sizeBytes: z.int().nonnegative(),
+    elapsedMs: z.number().nonnegative(),
+  }),
 } as const satisfies Record<JobKind, z.ZodType>;
 
 export type JobResult<K extends JobKind> = z.infer<(typeof JOB_RESULT_SCHEMAS)[K]>;

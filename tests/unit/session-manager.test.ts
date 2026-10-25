@@ -420,6 +420,7 @@ function harness(
       }),
     ...(options.pickRegion ? { pickRegion: options.pickRegion } : {}),
     systemAudioAvailable: () => options.systemAudio ?? true,
+    systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
     platform: () => ({
       os: 'linux',
       session: 'wayland',
@@ -502,8 +503,8 @@ describe('session manager', () => {
       'microphone',
       'system-audio',
     ]);
-    // System audio first sample at 20 ms session time (utility clock converted).
-    expect(log?.streams.find((s) => s.kind === 'system')?.startOffsetUs).toBe(20_000);
+    // System audio first sample at 20 ms session time, plus 42 ms output latency (utility clock converted).
+    expect(log?.streams.find((s) => s.kind === 'system')?.startOffsetUs).toBe(62_000);
 
     h.clock.us = 10 * S;
     await h.manager.stop();
@@ -527,11 +528,13 @@ describe('session manager', () => {
     expect(mic!.clockRatio).toBeCloseTo(1.00005, 6);
     expect(mic!.audio?.syncCheckpointsPath).toBe('media/mic.sync.json');
     expect(mic!.audio?.discontinuities).toBe(1);
-    expect(system!.startOffsetUs).toBe(20_000);
+    // First sample at 20 ms, shifted later by the sink's 42 ms output latency.
+    expect(system!.startOffsetUs).toBe(62_000);
     expect(system!.sync).toEqual({
       mode: 'arrival-calibrated',
       offsetUs: 0,
       clockHandshakeUs: UTILITY_OFFSET,
+      outputLatencyUs: 42_000,
     });
 
     // Finalize order: engine.stop → system stop → finalize → caches; lock gone; events.

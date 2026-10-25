@@ -9,6 +9,7 @@
  * (`startOffsetUs`). Frames larger than the encoder size (sources above 1440p, §8) are scaled
  * through an `OffscreenCanvas`.
  */
+import { CheckpointLog } from '../../../shared/recording/drift';
 import { FrameRateMeter } from '../encoder-select';
 import { PauseSchedule } from '../pipeline/pause-gate';
 import { sessionNowUs } from '../pipeline/clock';
@@ -22,6 +23,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   private readonly encoder: VideoEncoder;
   private readonly pauses = new PauseSchedule();
   private readonly meter = new FrameRateMeter();
+  private readonly checkpointLog = new CheckpointLog();
   private readonly cadence: KeyframeCadence;
   private readonly frameDurationUs: number;
   private scaler: OffscreenCanvasRenderingContext2D | null = null;
@@ -75,6 +77,9 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
         this.counters.framesDropped += 1;
         return;
       }
+      // Drift checkpoint: when the frame arrived against its capture timestamp (file time).
+      const checkpoint = this.checkpointLog.offer(arrivalUs, Math.round(fileUs));
+      if (checkpoint) this.counters.addCheckpoint(checkpoint);
       const input = this.prepare(frame, fileUs);
       try {
         this.encoder.encode(input, { keyFrame: this.cadence.next(fileUs) });
@@ -139,7 +144,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
         deliveredFps: this.meter.fps,
       },
       audio: null,
-      checkpoints: [],
+      checkpoints: this.counters.checkpoints.map(([a, b]) => [a, b] as const),
     };
   }
 

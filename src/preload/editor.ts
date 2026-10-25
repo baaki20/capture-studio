@@ -26,6 +26,10 @@ const api: EditorPreloadApi = {
   export: {
     probeEncoders: () => invoke('export.probeEncoders'),
     start: (request) => invoke('export.start', request),
+    target: (projectId) => invoke('export.target', { projectId }),
+    chooseOutput: (projectId) => invoke('export.chooseOutput', { projectId }),
+    reveal: (jobId) => invoke('export.reveal', { jobId }),
+    open: (jobId) => invoke('export.open', { jobId }),
     cancel: (jobId) => invoke('export.cancel', { jobId }),
     onProgress: (listener) => subscribe('export.progress', listener),
     onDone: (listener) => subscribe('export.done', listener),
