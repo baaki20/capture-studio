@@ -9,7 +9,7 @@
  * (`startOffsetUs`). Frames larger than the encoder size (sources above 1440p, §8) are scaled
  * through an `OffscreenCanvas`.
  */
-import { CheckpointLog } from '../../../shared/recording/drift';
+import { CheckpointLog, VIDEO_SYNC_RATE } from '../../../shared/recording/drift';
 import { FrameRateMeter } from '../encoder-select';
 import { PauseSchedule } from '../pipeline/pause-gate';
 import { sessionNowUs } from '../pipeline/clock';
@@ -23,7 +23,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   private readonly encoder: VideoEncoder;
   private readonly pauses = new PauseSchedule();
   private readonly meter = new FrameRateMeter();
-  private readonly checkpointLog = new CheckpointLog();
+  private readonly checkpointLog = new CheckpointLog(VIDEO_SYNC_RATE);
   private readonly cadence: KeyframeCadence;
   private readonly frameDurationUs: number;
   private scaler: OffscreenCanvasRenderingContext2D | null = null;
@@ -113,6 +113,9 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   }
 
   protected async flushEncoder(): Promise<void> {
+    // The last second's checkpoint is held until its interval closes.
+    const last = this.checkpointLog.flush();
+    if (last) this.counters.addCheckpoint(last);
     try {
       if (this.encoder.state === 'configured') await this.encoder.flush();
     } finally {

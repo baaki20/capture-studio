@@ -8,6 +8,17 @@ export type TrayRecordingState = 'idle' | 'recording' | 'paused' | 'busy';
 export type ConfirmAction = (kind: 'restart' | 'abort') => Promise<boolean>;
 
 /**
+ * Asks with `ask` unless `shouldConfirm` says this kind needs no confirmation (Abort's
+ * confirmation is optional, default on; R1.12).
+ */
+export function confirmWhenRequired(
+  ask: ConfirmAction,
+  shouldConfirm?: (kind: 'restart' | 'abort') => boolean,
+): ConfirmAction {
+  return (kind) => (shouldConfirm?.(kind) === false ? Promise.resolve(true) : ask(kind));
+}
+
+/**
  * Menu items for a recording state; every click dispatches on the action bus. Restart and Abort
  * ask for confirmation first (R1.12).
  */

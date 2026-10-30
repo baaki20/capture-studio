@@ -14,9 +14,11 @@
  * - **Progressive manifest:** `logs/recording.json` holds the recording manifest (streams, pauses,
  *   sync, encoders) and is rewritten on every change and heartbeat, so recovery can rebuild the
  *   project after a crash (§4.3.6).
- * - **Finalize:** `engine.stop` → stop system audio → utility finalize per stream → drift fit per
- *   audio stream → peaks and thumbnails → `projectFromRecording` → `project.json(complete)` →
- *   remove the lock → `library.changed` → open the project.
+ * - **Finalize:** `engine.stop` → stop system audio → utility finalize per stream (remux, probe)
+ *   → drift fit per audio stream → `projectFromRecording` → `project.json(complete)` → remove the
+ *   lock → `library.changed` → open the project. Peaks and thumbnails follow in the background
+ *   (`generateCaches`), so finalize time does not grow with them (R1.20); the editor shows them
+ *   when they arrive (R1.44).
  * - **Failures:** screen track ended and disk below the stop threshold finalize (R1.15, R1.17);
  *   camera, mic or system ending keeps recording with a notice (R1.16); anything unrecoverable
  *   goes to `failed`, finalizing what it can and marking the project failed with the reason.
@@ -56,6 +58,7 @@ import {
 } from '../../shared/project/from-recording';
 import {
   PROJECT_EXTENSION,
+  type Media,
   type NRect,
   type ProjectV1,
   type RecordingInfo,
@@ -68,6 +71,7 @@ import { writeFileAtomic } from '../settings/atomic-file';
 import type { SettingsPatch } from '../settings/store';
 import {
   CACHE_DIR,
+  captureSyncFileName,
   expectedStreams,
   fitDrift,
   generateCaches,
@@ -164,6 +168,8 @@ export interface SessionEvents {
     name: string;
     afterRecording: Settings['recorder']['afterRecording'];
   }): void;
+  /** The project's background peaks and thumbnails are done (R1.44). */
+  cachesReady?(info: { projectId: string; root: string }): void;
 }
 
 export interface SessionManagerDeps {
@@ -175,6 +181,11 @@ export interface SessionManagerDeps {
   selectScreen: () => Promise<ScreenSource | null>;
   /** Region mode (§4.3.7). Without a picker the last matching region (or full frame) is used. */
   pickRegion?: (source: { width: number; height: number }) => Promise<RegionChoice>;
+  /**
+   * Generates the peaks and thumbnails of a finished project in the background (the shared,
+   * low-priority queue in main). Without it, the utility's jobs run one after another.
+   */
+  generateCaches?: (projectId: string, root: string, media: readonly Media[]) => Promise<void>;
   /** `audio.system` is available. */
   systemAudioAvailable: () => boolean;
   /** Output latency of the default sink in µs (system audio is shifted by it). */
@@ -282,6 +293,8 @@ export class SessionManager {
   private finishing: Promise<void> | null = null;
   private readonly logger: Logger;
   private readonly offUtility: () => void;
+  /** Background cache passes still running (tests wait for them). */
+  private readonly cachePasses = new Set<Promise<void>>();
   private noticeCounter = 0;
   private lastFailure: string | null = null;
 
@@ -312,6 +325,11 @@ export class SessionManager {
   async settled(): Promise<void> {
     await this.starting?.catch(() => undefined);
     await this.finishing;
+  }
+
+  /** Resolves when the background peaks and thumbnails of finished projects are done. */
+  async cachesSettled(): Promise<void> {
+    while (this.cachePasses.size > 0) await Promise.allSettled([...this.cachePasses]);
   }
 
   dispose(): void {
@@ -1123,15 +1141,12 @@ export class SessionManager {
     kind: StreamKind,
     rate: number | null,
     points: readonly [number, number][],
+    fileName = syncFileName(kind),
   ): Promise<void> {
     const file = { version: 1, nominalRate: Math.round(rate ?? 48_000), checkpoints: points };
-    await writeFileAtomic(
-      path.join(root, MEDIA_DIR, syncFileName(kind)),
-      `${JSON.stringify(file)}\n`,
-      { backup: false },
-    ).catch((error: unknown) =>
-      this.logger.warn(`recording: ${kind}.sync.json not written`, error),
-    );
+    await writeFileAtomic(path.join(root, MEDIA_DIR, fileName), `${JSON.stringify(file)}\n`, {
+      backup: false,
+    }).catch((error: unknown) => this.logger.warn(`recording: ${fileName} not written`, error));
   }
 
   private async writeHeartbeat(session: Session): Promise<void> {
@@ -1367,6 +1382,7 @@ export class SessionManager {
         name: session.name ?? path.basename(outcome.root, PROJECT_EXTENSION),
         afterRecording: this.deps.settings.get().recorder.afterRecording,
       });
+      this.startCaches(outcome);
     } catch (error) {
       this.logger.error('recording: finalize failed', error);
       await this.failAndSettle(`Finalizing failed: ${message(error)}`, true);
@@ -1381,7 +1397,7 @@ export class SessionManager {
     session: Session,
     state: 'complete' | 'failed',
     failureReason?: string,
-  ): Promise<{ projectId: string; root: string } | null> {
+  ): Promise<{ projectId: string; root: string; media: readonly Media[] } | null> {
     const root = session.root;
     const projectId = session.projectId;
     if (!root || !projectId) throw new Error('no project folder');
@@ -1404,6 +1420,17 @@ export class SessionManager {
     for (const stream of session.streams.values()) {
       if (stream.kind === 'system' || stream.checkpoints.length === 0) continue;
       await this.writeSyncFile(root, stream.kind, stream.nominalRate, stream.checkpoints);
+    }
+    // The mic's capture-timestamp series, for offline comparison with the arrival series.
+    for (const report of stopped.reports) {
+      if (report.kind !== 'mic' || !report.captureCheckpoints?.length) continue;
+      await this.writeSyncFile(
+        root,
+        report.kind,
+        report.nominalRate ?? session.streams.get('mic')?.nominalRate ?? null,
+        report.captureCheckpoints.map(checkpoint),
+        captureSyncFileName(report.kind),
+      );
     }
     // The engine's pause list and stop time are authoritative (absolute session µs).
     const t0 = stopped.engine?.t0Us ?? session.t0Us;
@@ -1488,11 +1515,29 @@ export class SessionManager {
     const built = this.buildProject(manifest);
     if (!built.ok)
       throw new Error(`project is invalid: ${built.error.issues.slice(0, 3).join('; ')}`);
-    await generateCaches(this.deps.utility, root, built.value.media, this.logger);
     await this.deps.store.write(root, built.value);
     await writeSessionLog(root, { ...this.sessionLog(session), manifest }).catch(() => undefined);
     await removeLock(root);
-    return { projectId, root };
+    return { projectId, root, media: built.value.media };
+  }
+
+  /** Peaks and thumbnails after the project is ready, off the finalize path (R1.20, R1.44). */
+  private startCaches(outcome: { projectId: string; root: string; media: readonly Media[] }): void {
+    const { projectId, root, media } = outcome;
+    const started = Date.now();
+    const run = this.deps.generateCaches
+      ? this.deps.generateCaches(projectId, root, media)
+      : generateCaches(this.deps.utility, root, media, this.logger);
+    const pass: Promise<void> = run
+      .then(() => {
+        this.logger.info(
+          `recording: peaks and thumbnails of ${projectId} ready after ${String(Date.now() - started)} ms`,
+        );
+        this.deps.events.cachesReady?.({ projectId, root });
+      })
+      .catch((error: unknown) => this.logger.warn('recording: background caches failed', error))
+      .finally(() => this.cachePasses.delete(pass));
+    this.cachePasses.add(pass);
   }
 
   /** → failed: finalize what is possible and mark the project failed; delete an empty one. */
@@ -1514,8 +1559,9 @@ export class SessionManager {
         return;
       }
       try {
-        await this.finishProject(session, 'failed', reason);
+        const outcome = await this.finishProject(session, 'failed', reason);
         this.deps.events.libraryChanged();
+        if (outcome) this.startCaches(outcome);
       } catch (error) {
         this.logger.error('recording: could not finalize the failed session', error);
         await this.markFailed(session, reason);

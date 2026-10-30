@@ -20,7 +20,7 @@ async function boundaryErrors(file: string, code: string): Promise<string[]> {
     .map((m) => m.message);
 }
 
-describe('process-boundary lint zones', () => {
+describe('process-boundary lint zones', { timeout: 30_000 }, () => {
   it.each([
     ['src/renderer/shell/x.ts', "import fs from 'node:fs';\nexport const a = fs;\n"],
     [

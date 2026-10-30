@@ -1,4 +1,5 @@
-# Packaging (spec §1.2, §1.10). Phase 1 ships AppImage and deb for Linux.
+# Packaging (spec §1.2, §1.10, §4.5 step 20). Phase 1 ships AppImage and deb for Linux.
+# `npm run package:linux` builds both into dist/; `npm run smoke:linux` checks them.
 appId: org.capturestudio.CaptureStudio
 productName: Capture Studio
 executableName: capture-studio
@@ -8,6 +9,8 @@ directories:
   buildResources: build
   output: dist
 
+# Main, preload and renderer code is bundled by electron-vite into out/. Runtime dependencies in
+# package.json are added by electron-builder; nothing else from the source tree ships.
 files:
   - out/**
   - package.json
@@ -15,7 +18,8 @@ files:
 
 asar: true
 
-# FFmpeg ships as separate executables next to the app, with its licence and source offer.
+# FFmpeg ships as separate executables next to the app, with its licence, build info and source
+# offer (§1.10, §8 Q1). The folder layout is what main/ffmpeg/locate.ts resolves when packaged.
 extraResources:
   - from: resources/bin/${platform}-${arch}
     to: bin/${platform}-${arch}
@@ -24,10 +28,12 @@ extraResources:
   - from: LICENSE
     to: LICENSE.txt
 
-# Electron fuses (spec §1.3), flipped in the packaged binary.
+# Electron fuses (spec §1.3), flipped in the packaged binary. Inspect arguments are off as well,
+# so `--inspect` cannot attach a debugger to a packaged main process.
 electronFuses:
   runAsNode: false
   enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
   onlyLoadAppFromAsar: true
   enableEmbeddedAsarIntegrityValidation: true
   enableCookieEncryption: true
@@ -36,12 +42,51 @@ linux:
   target:
     - AppImage
     - deb
-  category: AudioVideo
+  icon: build/icons
+  # Electron 45 takes the Wayland app_id and the X11 WM_CLASS from `desktopName` in package.json
+  # (org.capturestudio.CaptureStudio). The installed .desktop file is named after it, so GNOME
+  # groups the windows under the launcher and portals see a stable app id.
+  syncDesktopName: true
+  category: AudioVideo;Video;Recorder;
   synopsis: Screen recorder and teaching-focused video editor
+  description: Record the screen, camera and audio, then edit lessons on a multi-track timeline.
   maintainer: Capture Studio contributors
+  vendor: Capture Studio contributors
+  desktop:
+    entry:
+      Name: Capture Studio
+      GenericName: Screen Recorder
+      Keywords: screen;recorder;screencast;capture;video;editor;lesson;
+      StartupNotify: 'true'
 
 deb:
   priority: optional
+  packageCategory: video
+  # electron-builder's defaults plus the libraries Electron itself loads (GBM, ALSA). On Ubuntu
+  # 24.04+ the t64 packages provide the old names.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+    - libgbm1
+    - libasound2
+  # Screen capture on Wayland goes through the ScreenCast portal; system audio uses pw-record.
+  recommends:
+    - xdg-desktop-portal
+    - pipewire-bin
+
+# The legacy AppImage runtime (toolset 0.0.0, the default) needs libfuse.so.2, which Ubuntu
+# 24.04 and later no longer install by default, so the AppImage would not start there. Toolset
+# 1.0.3 embeds the static type2 runtime (2025-11-08), which only needs fusermount3.
+toolsets:
+  appimage: 1.0.3
 
 appImage:
-  artifactName: ${productName}-${version}-${arch}.${ext}
+  # No spaces in the file name, so it is easy to run from a shell.
+  artifactName: capture-studio-${version}-${arch}.${ext}

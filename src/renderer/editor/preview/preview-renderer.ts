@@ -10,7 +10,7 @@
  */
 import { layersAt, type VideoLayer } from '../../../shared/project/render-plan';
 import type { Media, ProjectV1 } from '../../../shared/project/schema';
-import type { CompositeItem, LumaProbe, Size } from './compositor-webgl';
+import type { CompositeItem, LumaProbe, PixelCapture, Size } from './compositor-webgl';
 import type { DecoderPool } from './decoder-pool';
 import type { CacheableFrame } from './frame-cache';
 import type { PreviewStats } from './protocol';
@@ -21,6 +21,8 @@ export interface CompositorLike {
   resize(size: Size): void;
   draw(background: string, items: readonly CompositeItem[]): void;
   probe(): LumaProbe;
+  /** Reads the frame just drawn (parity test); optional for test doubles. */
+  capture?(): PixelCapture;
 }
 
 export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
@@ -88,6 +90,13 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
   probe(tUs: number): LumaProbe & { exact: boolean } {
     const exact = this.render(tUs, false);
     return { ...this.compositor.probe(), exact };
+  }
+
+  /** Draws `tUs` and returns the picture, or null when the compositor cannot read back. */
+  capture(tUs: number): (PixelCapture & { exact: boolean }) | null {
+    const exact = this.render(tUs, false);
+    const picture = this.compositor.capture?.();
+    return picture ? { ...picture, exact } : null;
   }
 
   stats(): PreviewStats {

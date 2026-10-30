@@ -6,6 +6,7 @@
  * After an intended change to the graph, update the golden files with
  * `npx vitest run tests/integration/export-graph.test.ts -u` and review the diff.
  */
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ExportOptions } from '../../src/shared/ipc/contract';
 import type { ProjectV1 } from '../../src/shared/project/schema';
@@ -14,6 +15,7 @@ import { unwrap } from '../../src/shared/result';
 import {
   buildExportGraph,
   exportSize,
+  mediaRuns,
   resolveExportSettings,
   toBt709,
   type ExportGraph,
@@ -153,6 +155,25 @@ const CANONICAL: Record<string, () => ExportGraph> = {
       edit(doc, { type: 'nudge', target: { componentId: faceVoice }, syncAdjustUs: 500_000 }),
     );
   },
+  'moved-earlier': () => {
+    // The last third of every track moved before the middle one: a second, seeked input per
+    // media for the out-of-order clips.
+    let doc = edit(
+      recordedProject({ pauses: [] }),
+      { type: 'split', atUs: 20_000_000 },
+      { type: 'split', atUs: 40_000_000 },
+    );
+    for (const track of doc.timeline.tracks) {
+      const middle = track.clips[1]?.id ?? '';
+      doc = edit(doc, {
+        type: 'move',
+        clipId: middle,
+        toStartUs: 60_000_000,
+        includeLinked: false,
+      });
+    }
+    return graph(edit(doc, { type: 'cutRange', inUs: 20_000_000, outUs: 40_000_000 }));
+  },
   'letterbox-untagged': () => {
     const doc = recordedProject({ pauses: [] });
     const wide: ProjectV1 = {
@@ -193,6 +214,60 @@ describe('export graph rules (§4.3.9)', () => {
     expect(g.filterScriptText).toContain('[4:v:0]format=gray,loop=loop=-1:size=1,setpts=N/30/TB');
     expect(g.masks).toHaveLength(1);
     expect(g.masks[0]?.mask.shape).toBe('circle');
+  });
+
+  it('opens a media file again, seeked, for clips that play out of file order', () => {
+    const g = CANONICAL['moved-earlier']?.();
+    if (!g) throw new Error('missing canonical case');
+    const inputs = g.inputs.map((i) => [path.basename(i.path), i.seek?.startUs ?? null]);
+    expect(inputs).toEqual([
+      ['screen.mp4', null],
+      ['camera.mp4', null],
+      ['microphone.mp4', null],
+      ['system-audio.mp4', null],
+      // The moved clips read from just under 20 s (start offsets): inputs opened a second
+      // earlier, on the frame grid for video and on a whole second for audio.
+      ['screen.mp4', expect.any(Number) as unknown],
+      ['camera.mp4', expect.any(Number) as unknown],
+      ['microphone.mp4', 18_000_000],
+      ['system-audio.mp4', 18_000_000],
+      ['mask-0.png', null],
+    ]);
+    for (const input of g.inputs.slice(4, 6)) {
+      const startUs = input.seek?.startUs ?? NaN;
+      const frames = (startUs * 30) / 1e6;
+      expect(Math.abs(frames - Math.round(frames))).toBeLessThan(1e-6);
+      expect(startUs).toBeLessThanOrEqual(19_000_000);
+      expect(startUs).toBeGreaterThan(18_000_000);
+    }
+    const args = g.args.join(' ');
+    expect(args).toContain(
+      '-noaccurate_seek -ss 18.000000 -i /projects/Lesson.cstudio/media/microphone.mp4',
+    );
+    // Each input feeds pieces in file order; the seeked ones get their timestamps back.
+    expect(g.filterScriptText).toMatch(
+      /\[4:v:0\]setpts=PTS\+[\d.]+\/TB,fps=30:start_time=[\d.]+\[/,
+    );
+    expect(g.filterScriptText).toContain('[6:a:0]asetpts=PTS+18.000000/TB');
+  });
+
+  it('groups uses of a file into runs that play in file order without overlapping', () => {
+    const use = (startS: number, endS: number, fileS: number) => ({
+      startUs: startS * 1e6,
+      endUs: endS * 1e6,
+      fileStartUs: fileS * 1e6,
+      fileEndUs: (fileS + endS - startS) * 1e6,
+    });
+    // In order (split clips, a gap between): one run.
+    expect(mediaRuns([use(0, 10, 0), use(10, 20, 10), use(30, 40, 25)])).toEqual([0, 0, 0]);
+    // Moved earlier: the clip from the start of the file needs its own run.
+    expect(mediaRuns([use(0, 10, 50), use(10, 20, 0)])).toEqual([0, 1]);
+    // Playing at the same time (two tracks): separate runs, even in file order.
+    expect(mediaRuns([use(0, 10, 0), use(5, 15, 20)])).toEqual([0, 1]);
+    // First fit: a later clip joins the first run it can follow.
+    expect(mediaRuns([use(0, 10, 50), use(10, 20, 0), use(20, 30, 70)])).toEqual([0, 1, 0]);
+    // A small overlap in file time (rounding) stays in the run.
+    expect(mediaRuns([use(0, 10, 0), use(10, 20, 9.95)])).toEqual([0, 0]);
   });
 
   it('passes the graph as a script with -/filter_complex (§9.7)', () => {

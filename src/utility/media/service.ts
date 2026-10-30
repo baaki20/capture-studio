@@ -17,6 +17,7 @@ import { probeEncoders } from './encoder-probe';
 import { runExportJob } from './export/export-job';
 import { finalizeRecording } from './finalize';
 import { PcmIngest, SystemAudioMonitor } from './pcm-ingest';
+import { ffmpegTooOldError } from './ffmpeg-runner';
 import { generatePeaks } from './peaks';
 import { probeFfmpegVersion, type FfmpegVersion } from './probe';
 import {
@@ -77,7 +78,11 @@ export class MediaService {
         };
         this.emit(
           version.ok
-            ? { type: 'ready', ffmpegVersion: version.value.version, error: null }
+            ? {
+                type: 'ready',
+                ffmpegVersion: version.value.version,
+                error: ffmpegTooOldError(version.value),
+              }
             : { type: 'ready', ffmpegVersion: null, error: version.error.message },
         );
         break;
@@ -281,7 +286,6 @@ export class MediaService {
           result = await generateThumbnails({
             ffmpegPath: ffmpeg.ffmpegPath,
             ffprobePath: ffmpeg.ffprobePath,
-            ffmpegRelease: ffmpeg.version?.release ?? null,
             input: job.input,
             outDir: job.outDir,
             mediaId: job.mediaId,

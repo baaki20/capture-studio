@@ -5,8 +5,8 @@
  * the export shows what the preview shows (R1.48).
  *
  * The graph, all at the export frame rate F:
- * 1. Inputs: one `-i` per referenced media file, then one `-i` per mask PNG (a single picture,
- *    repeated in the graph; see below).
+ * 1. Inputs: one `-i` per referenced media file, then one more per out-of-order run of its clips
+ *    (below), then one `-i` per mask PNG (a single picture, repeated in the graph; see below).
  * 2. Every video input is made constant-rate once (`fps=F:start_time=0`, so frame k is the file
  *    picture at k/F) and split when several pieces use it. Per visible video track, the plan's
  *    pieces become `trim → setpts → tpad → trim=end_frame → crop → scale → (hflip) → (BT.709
@@ -39,6 +39,19 @@
  *
  * A track whose clips do not all share one geometry (possible once media of different sizes
  * share a track) is split into one stream per geometry, each with gaps where the others are.
+ *
+ * Out-of-order clips (departure from §4.3.9 step 1, "one `-i` per media"): pieces of one decoded
+ * input are consumed in timeline order, so when a clip uses an earlier part of the file than a
+ * clip before it (moved earlier), or two clips of one file play at once, `split` has to keep
+ * every decoded frame of the waiting piece until its turn: a 640×360 two-minute file with its
+ * halves swapped peaked at 850 MB. The pieces (and audio clips) of each media are therefore
+ * grouped into runs that play in file order without overlapping in time; the first run uses the
+ * media's own input as before, every further run gets its own input of the same file, opened at
+ * the keyframe before X, a second before the run on the frame grid (`-noaccurate_seek -ss X`:
+ * frames between that keyframe and X are kept, so a variable-rate picture held across X is
+ * still there), with its timestamps put back (`setpts=PTS+X/TB`). It decodes only from there
+ * and picks exactly the frames the single input would have; FFmpeg stops reading an input once
+ * its pieces have ended. In-order projects keep one input per media.
  */
 import path from 'node:path';
 import { exportSize, QUALITY_SETTINGS, type ExportQuality } from '../../../shared/export/presets';
@@ -113,6 +126,54 @@ export interface ExportInput {
   path: string;
   /** Media id, for `kind: 'media'`. */
   mediaId: string | null;
+  /** For a further run of out-of-order clips: where reading starts (a keyframe before it). */
+  seek: { startUs: number } | null;
+}
+
+/** File-time overlap tolerated within a run (a few frames buffered at most). */
+const RUN_OVERLAP_US = 100_000;
+/** A further run's input starts this much before its first clip (decoder warm-up). */
+const RUN_LEAD_US = 1_000_000;
+
+/** One use of a media file: when it plays on the timeline and which part of the file it reads. */
+interface MediaUse {
+  startUs: number;
+  endUs: number;
+  fileStartUs: number;
+  fileEndUs: number;
+}
+
+/**
+ * Groups the uses of one media file into runs that a single decoder serves without buffering:
+ * within a run, uses do not overlap on the timeline and read the file forwards. First fit, in
+ * timeline order (ties in the given order), so the result is deterministic. Returns the run
+ * index of each use.
+ */
+export function mediaRuns(uses: readonly MediaUse[]): number[] {
+  const order = uses
+    .map((_, i) => i)
+    .sort((a, b) => (uses[a]?.startUs ?? 0) - (uses[b]?.startUs ?? 0) || a - b);
+  const runs: { endUs: number; fileEndUs: number }[] = [];
+  const runOf = new Array<number>(uses.length).fill(0);
+  for (const i of order) {
+    const use = uses[i];
+    if (!use) continue;
+    let run = runs.findIndex(
+      (r) => use.startUs >= r.endUs && use.fileStartUs >= r.fileEndUs - RUN_OVERLAP_US,
+    );
+    if (run < 0) {
+      run = runs.length;
+      runs.push({ endUs: use.endUs, fileEndUs: use.fileEndUs });
+    } else {
+      const r = runs[run];
+      if (r) {
+        r.endUs = use.endUs;
+        r.fileEndUs = Math.max(r.fileEndUs, use.fileEndUs);
+      }
+    }
+    runOf[i] = run;
+  }
+  return runOf;
 }
 
 export interface MaskSpec {
@@ -410,25 +471,92 @@ export function buildExportGraph(
   }
 
   const streams = plans.map((plan) => ({ plan, streams: trackStreams(plan.pieces, F) }));
+  const allStreams = streams.flatMap((s) => s.streams);
 
-  // Inputs: media in document order, each once.
-  const usedVideo = new Map<string, number>();
-  for (const { streams: ts } of streams) {
-    for (const s of ts) {
-      for (const p of s.pieces) {
-        if (p.kind === 'clip')
-          usedVideo.set(p.layer.mediaId, (usedVideo.get(p.layer.mediaId) ?? 0) + 1);
-      }
+  // Uses of each media, in the order the graph consumes them, then grouped into runs that one
+  // decoder serves without buffering (see the header). A source is one run of one media's video
+  // or audio: `<mediaId>#v<run>` / `<mediaId>#a<run>`.
+  const videoUses = new Map<string, { piece: FramePiece; use: MediaUse }[]>();
+  for (const stream of allStreams) {
+    let frame = 0;
+    for (const piece of stream.pieces) {
+      const from = frame;
+      frame += piece.frames;
+      if (piece.kind !== 'clip') continue;
+      const list = videoUses.get(piece.layer.mediaId) ?? [];
+      list.push({
+        piece,
+        use: {
+          startUs: (from * 1_000_000) / F,
+          endUs: (frame * 1_000_000) / F,
+          fileStartUs: piece.layer.fileStartUs,
+          fileEndUs: piece.layer.fileEndUs,
+        },
+      });
+      videoUses.set(piece.layer.mediaId, list);
     }
   }
-  const usedAudio = new Map<string, number>();
-  for (const segment of audio)
-    usedAudio.set(segment.mediaId, (usedAudio.get(segment.mediaId) ?? 0) + 1);
+  const audioUses = new Map<string, { segment: AudioSegment; use: MediaUse }[]>();
+  for (const segment of audio) {
+    const list = audioUses.get(segment.mediaId) ?? [];
+    list.push({
+      segment,
+      use: {
+        startUs: segment.timelineStartUs,
+        endUs: segment.timelineEndUs,
+        fileStartUs: segment.fileStartUs,
+        fileEndUs: segment.fileEndUs,
+      },
+    });
+    audioUses.set(segment.mediaId, list);
+  }
 
+  interface Source {
+    key: string;
+    mediaId: string;
+    kind: 'v' | 'a';
+    run: number;
+    uses: MediaUse[];
+  }
+  /** Sources in order of first use; per kind, the source of each piece or segment. */
+  const sources = new Map<string, Source>();
+  const sourceOf = new Map<FramePiece | AudioSegment, string>();
+  const addRuns = (
+    kind: 'v' | 'a',
+    mediaId: string,
+    list: { item: FramePiece | AudioSegment; use: MediaUse }[],
+  ): void => {
+    const runs = mediaRuns(list.map((u) => u.use));
+    list.forEach(({ item, use }, i) => {
+      const run = runs[i] ?? 0;
+      const key = `${mediaId}#${kind}${String(run)}`;
+      const source = sources.get(key) ?? { key, mediaId, kind, run, uses: [] };
+      source.uses.push(use);
+      sources.set(key, source);
+      sourceOf.set(item, key);
+    });
+  };
+  for (const [mediaId, list] of videoUses) {
+    addRuns(
+      'v',
+      mediaId,
+      list.map(({ piece, use }) => ({ item: piece, use })),
+    );
+  }
+  for (const [mediaId, list] of audioUses) {
+    addRuns(
+      'a',
+      mediaId,
+      list.map(({ segment, use }) => ({ item: segment, use })),
+    );
+  }
+
+  // Inputs: media in document order, each once; then further runs (document order, video
+  // before audio, run order), each opened at a keyframe before its first clip.
   const inputs: ExportInput[] = [];
   const inputIndex = new Map<string, number>();
   for (const media of doc.media) {
-    if (!usedVideo.has(media.id) && !usedAudio.has(media.id)) continue;
+    if (!videoUses.has(media.id) && !audioUses.has(media.id)) continue;
     const index = inputs.length;
     inputIndex.set(media.id, index);
     inputs.push({
@@ -436,6 +564,44 @@ export function buildExportGraph(
       kind: 'media',
       path: path.join(options.projectRoot, media.path),
       mediaId: media.id,
+      seek: null,
+    });
+  }
+  /**
+   * Where a further run's input starts, in µs: on the frame grid for video, on a whole second for
+   * audio (a whole number of samples at any rate), so putting the timestamps back is exact.
+   */
+  const seekStartUs = (source: Source): number => {
+    const first = Math.max(0, Math.min(...source.uses.map((u) => u.fileStartUs)) - RUN_LEAD_US);
+    return source.kind === 'v'
+      ? (Math.floor((first * F) / 1_000_000) * 1_000_000) / F
+      : Math.floor(first / 1_000_000) * 1_000_000;
+  };
+  const sourceInput = new Map<string, number>();
+  const extraSources = [...sources.values()]
+    .filter((source) => source.run > 0)
+    .sort((x, y) => {
+      const docOrder = (id: string) => doc.media.findIndex((m) => m.id === id);
+      return (
+        docOrder(x.mediaId) - docOrder(y.mediaId) ||
+        (x.kind === y.kind ? 0 : x.kind === 'v' ? -1 : 1) ||
+        x.run - y.run
+      );
+    });
+  for (const source of sources.values()) {
+    if (source.run === 0) sourceInput.set(source.key, inputIndex.get(source.mediaId) ?? 0);
+  }
+  for (const source of extraSources) {
+    const media = mediaById.get(source.mediaId);
+    if (!media) throw new Error(`unreachable: unknown media ${source.mediaId}`);
+    const index = inputs.length;
+    sourceInput.set(source.key, index);
+    inputs.push({
+      index,
+      kind: 'media',
+      path: path.join(options.projectRoot, media.path),
+      mediaId: media.id,
+      seek: { startUs: seekStartUs(source) },
     });
   }
 
@@ -443,20 +609,26 @@ export function buildExportGraph(
   const lines: string[] = [];
   const labels = new Labels();
 
-  // Video sources: constant rate, split per use.
+  // Video sources: constant rate, split per use. A further run puts its timestamps back to the
+  // file's (its input was opened at `X`) and starts the frame grid there.
   const videoSources = new Map<string, string[]>();
-  for (const [mediaId, uses] of usedVideo) {
-    const index = inputIndex.get(mediaId) ?? 0;
+  for (const source of sources.values()) {
+    if (source.kind !== 'v') continue;
+    const index = sourceInput.get(source.key) ?? 0;
+    const uses = source.uses.length;
     const outs = Array.from({ length: uses }, () => labels.next('v'));
     const split = uses > 1 ? `,split=${String(uses)}` : '';
-    lines.push(
-      `[${String(index)}:v:0]fps=${String(F)}:start_time=0${split}${outs.map((l) => `[${l}]`).join('')};`,
-    );
-    videoSources.set(mediaId, outs);
+    const seek = inputs[index]?.seek;
+    const head = seek
+      ? `setpts=PTS+${sec(seek.startUs)}/TB,fps=${String(F)}:start_time=${sec(seek.startUs)}`
+      : `fps=${String(F)}:start_time=0`;
+    lines.push(`[${String(index)}:v:0]${head}${split}${outs.map((l) => `[${l}]`).join('')};`);
+    videoSources.set(source.key, outs);
   }
-  const takeVideo = (mediaId: string): string => {
-    const label = videoSources.get(mediaId)?.shift();
-    if (!label) throw new Error(`unreachable: no source label for ${mediaId}`);
+  const takeVideo = (piece: FramePiece): string => {
+    const key = sourceOf.get(piece) ?? '';
+    const label = videoSources.get(key)?.shift();
+    if (!label) throw new Error(`unreachable: no source label for ${key}`);
     return label;
   };
 
@@ -467,7 +639,6 @@ export function buildExportGraph(
   const { canvas } = doc.timeline;
   const canvasSize = `${String(canvas.width)}x${String(canvas.height)}`;
   const background = ffColor(canvas.background.color);
-  const allStreams = streams.flatMap((s) => s.streams);
   const first = allStreams[0];
   const baseStream =
     first &&
@@ -514,7 +685,7 @@ export function buildExportGraph(
       const convert = toBt709(options.mediaColor?.get(layer.mediaId));
       if (convert) filters.push(convert);
       filters.push(isBase ? 'format=yuv420p' : 'format=yuva420p');
-      lines.push(`[${takeVideo(layer.mediaId)}]${filters.join(',')}[${out}];`);
+      lines.push(`[${takeVideo(piece)}]${filters.join(',')}[${out}];`);
     }
     let track = labels.next('t');
     if (pieceLabels.length === 1) {
@@ -553,7 +724,13 @@ export function buildExportGraph(
   }
 
   for (const spec of masks) {
-    inputs.push({ index: spec.inputIndex, kind: 'mask', path: spec.path, mediaId: null });
+    inputs.push({
+      index: spec.inputIndex,
+      kind: 'mask',
+      path: spec.path,
+      mediaId: null,
+      seek: null,
+    });
   }
 
   // Composition (BT.709 YUV throughout; every source was converted above).
@@ -584,22 +761,27 @@ export function buildExportGraph(
 
   // Audio.
   const audioSources = new Map<string, string[]>();
-  for (const [mediaId, uses] of usedAudio) {
-    const index = inputIndex.get(mediaId) ?? 0;
+  for (const source of sources.values()) {
+    if (source.kind !== 'a') continue;
+    const index = sourceInput.get(source.key) ?? 0;
+    const uses = source.uses.length;
+    const seek = inputs[index]?.seek;
+    // Labels are numbered even when unused, which keeps the golden graphs stable.
     const outs = Array.from({ length: uses }, () => labels.next('s'));
-    if (uses > 1) {
-      lines.push(
-        `[${String(index)}:a:0]asplit=${String(uses)}${outs.map((l) => `[${l}]`).join('')};`,
-      );
-      audioSources.set(mediaId, outs);
-    } else {
-      audioSources.set(mediaId, [`${String(index)}:a:0`]);
+    const filters: string[] = [];
+    if (seek) filters.push(`asetpts=PTS+${sec(seek.startUs)}/TB`);
+    if (uses > 1) filters.push(`asplit=${String(uses)}`);
+    if (filters.length === 0) {
+      audioSources.set(source.key, [`${String(index)}:a:0`]);
+      continue;
     }
+    lines.push(`[${String(index)}:a:0]${filters.join(',')}${outs.map((l) => `[${l}]`).join('')};`);
+    audioSources.set(source.key, outs);
   }
   const clipLabels: string[] = [];
   for (const segment of audio) {
     const media = mediaById.get(segment.mediaId);
-    const src = audioSources.get(segment.mediaId)?.shift();
+    const src = audioSources.get(sourceOf.get(segment) ?? '')?.shift();
     if (!media || !src) throw new Error(`unreachable: no audio source for ${segment.mediaId}`);
     const out = labels.next('a');
     clipLabels.push(out);
@@ -618,6 +800,7 @@ export function buildExportGraph(
   const args: string[] = ['-y', '-loglevel', 'warning'];
   if (settings.encoder === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE);
   for (const input of inputs) {
+    if (input.seek) args.push('-noaccurate_seek', '-ss', sec(input.seek.startUs));
     args.push('-i', input.path);
   }
   args.push(

@@ -288,14 +288,16 @@ test('record → countdown → controls (meters, pause, restart) → stop → sa
 
     expect(readdirSync(run.projects).filter((n) => n.endsWith('.cstudio'))).toHaveLength(1);
 
-    // The library shows the project with its thumbnail (CSP img-src cs-media:, CORP).
+    // The library shows the project with its thumbnail (CSP img-src cs-media:, CORP). Thumbnails
+    // are generated in the background after the project is ready (R1.20); the list refreshes on
+    // library.changed when they are done.
     await shell.getByRole('button', { name: 'Show in library' }).click();
     const thumb = shell.getByTestId('library-thumb');
     await expect
       .poll(
         async () => {
           if ((await thumb.count()) === 0) {
-            await shell.getByRole('button', { name: 'Library' }).click();
+            await shell.getByRole('button', { name: 'Library', exact: true }).click();
             return 0;
           }
           return thumb.first().evaluate((img: HTMLImageElement) => img.naturalWidth);

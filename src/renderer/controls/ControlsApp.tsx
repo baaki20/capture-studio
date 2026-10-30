@@ -35,8 +35,8 @@ const DROP_TEXT = {
 
 /**
  * The recording controls window (R1.10–R1.12): countdown with cancel, then the elapsed timer
- * (pauses excluded), pause/resume, stop, restart and abort (both confirmed), the mic and system
- * meters, the dropped-frame indicator and notices.
+ * (pauses excluded), pause/resume, stop, restart (confirmed) and abort (confirmed unless turned
+ * off in Settings), the mic and system meters, the dropped-frame indicator and notices.
  */
 export function ControlsApp() {
   const api = window.csControls;
@@ -213,7 +213,19 @@ export function ControlsApp() {
           <button type="button" onClick={() => dispatch({ type: 'ask', confirm: 'restart' })}>
             Restart
           </button>
-          <button type="button" onClick={() => dispatch({ type: 'ask', confirm: 'abort' })}>
+          <button
+            type="button"
+            onClick={() => {
+              // Abort's confirmation is a setting (default on; R1.12), read fresh on each click.
+              api.settings.get().then(
+                (s) => {
+                  if (s.recorder.confirmAbort) dispatch({ type: 'ask', confirm: 'abort' });
+                  else run(() => api.rec.abort());
+                },
+                () => dispatch({ type: 'ask', confirm: 'abort' }),
+              );
+            }}
+          >
             Abort
           </button>
         </div>

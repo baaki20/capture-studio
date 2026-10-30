@@ -477,6 +477,38 @@ describe('export job file handling (R1.47)', () => {
     expect(await fs.readdir(dir)).toEqual([]);
   });
 
+  it('leaves no temp file when the process exits mid-export (app quit)', async () => {
+    const dir = path.join(work, 'quit');
+    await fs.mkdir(dir, { recursive: true });
+    const job = path.join(work, 'quit-job.json');
+    await fs.writeFile(
+      job,
+      JSON.stringify({
+        ffmpegPath: ffmpeg.ffmpeg,
+        ffprobePath: ffmpeg.ffprobe,
+        root: project,
+        doc: syntheticProject(6),
+        options: { ...OPTIONS, resolution: '1080p', quality: 'high' },
+        hardwareEncoder: null,
+        output: path.join(dir, 'quit.mp4'),
+        overwrite: false,
+        tempDir: work,
+      }),
+    );
+    const listing = execFileSync(
+      path.join(ROOT, 'node_modules/.bin/tsx'),
+      [path.join(ROOT, 'tests/fixtures/export/exit-mid-export.ts'), job],
+      { cwd: ROOT, encoding: 'utf8', timeout: 30_000 },
+    );
+    // The temp output existed when the process exited…
+    expect(JSON.parse(listing)).toEqual([
+      expect.stringMatching(/^\.quit\.mp4\.[0-9a-f]{8}\.part$/),
+    ]);
+    // …and the exit hook deleted it, with the private work folder.
+    expect(await fs.readdir(dir)).toEqual([]);
+    expect((await fs.readdir(work)).filter((n) => n.startsWith('cs-export-'))).toEqual([]);
+  });
+
   it('refuses missing media with a clear message (R1.29)', async () => {
     const dir = path.join(work, 'missing.cstudio');
     await fs.mkdir(path.join(dir, 'media'), { recursive: true });

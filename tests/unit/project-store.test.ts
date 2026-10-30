@@ -1,12 +1,12 @@
 /**
  * Project store (optimistic revisions, fallbacks, read-only newer formats) and the library
- * (listing, rename, trash, reveal, open folder) on temporary folders.
+ * (listing, rename, trash, reveal, open folder, import) on temporary folders.
  */
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { Library } from '../../src/main/projects/library';
+import { ImportError, Library } from '../../src/main/projects/library';
 import { ProjectRootRegistry } from '../../src/main/projects/media-protocol';
 import {
   MAX_PROJECT_BACKUPS,
@@ -304,5 +304,79 @@ describe('library', () => {
     setBusy([path.join(projectsDir, 'Older lesson.cstudio')]);
     await expect(library.rename(a.id, 'X')).rejects.toBeInstanceOf(ProjectStoreError);
     await expect(library.trash(a.id)).rejects.toBeInstanceOf(ProjectStoreError);
+  });
+
+  describe('import (R1.27)', () => {
+    async function importSetup() {
+      const ctx = await setup();
+      let imported: string[] = [];
+      const library = new Library({
+        store: ctx.store,
+        projectsDir: () => ctx.projectsDir,
+        trashItem: (p) => fs.rm(p, { recursive: true }),
+        showItemInFolder: () => undefined,
+        openPath: () => Promise.resolve(''),
+        importedRoots: () => imported,
+        setImportedRoots: (roots) => {
+          imported = roots;
+          return Promise.resolve();
+        },
+      });
+      const elsewhere = path.join(work, 'USB stick', 'Field trip.cstudio');
+      const c = project('Field trip', '2026-10-25T09:00:00.000Z');
+      await ctx.store.write(elsewhere, c);
+      ctx.store.unregister(c.id);
+      return { ...ctx, library, elsewhere, c, imported: () => imported };
+    }
+
+    it('adds a project from another folder in place and remembers it', async () => {
+      const { library, store, registry, elsewhere, c, a, b, imported } = await importSetup();
+      const entry = await library.importFolder(elsewhere);
+      expect(entry).toMatchObject({ id: c.id, name: 'Field trip' });
+      expect(imported()).toEqual([elsewhere]);
+      expect(store.rootOf(c.id)).toBe(elsewhere);
+      expect(registry.resolve(c.id)).toBe(elsewhere);
+      // Listed with the others (and still after a restart: the list comes from settings).
+      expect((await library.list()).map((e) => e.id)).toEqual([c.id, b.id, a.id]);
+      expect(await library.findRoot(c.id)).toBe(elsewhere);
+    });
+
+    it('does not remember a folder that is already inside the projects folder', async () => {
+      const { library, projectsDir, a, imported } = await importSetup();
+      const entry = await library.importFolder(path.join(projectsDir, 'Older lesson.cstudio'));
+      expect(entry.id).toBe(a.id);
+      expect(imported()).toEqual([]);
+    });
+
+    it('refuses folders without a readable project.json, and copies of a listed project', async () => {
+      const { library, projectsDir, store, a } = await importSetup();
+      await expect(library.importFolder(path.join(projectsDir, 'Broken.cstudio'))).rejects.toThrow(
+        /not a Capture Studio project/,
+      );
+      await expect(library.importFolder(path.join(work, 'nowhere'))).rejects.toBeInstanceOf(
+        ImportError,
+      );
+      const copy = path.join(work, 'Copy.cstudio');
+      await fs.cp(path.join(projectsDir, 'Older lesson.cstudio'), copy, { recursive: true });
+      await expect(library.importFolder(copy)).rejects.toThrow(/already in the library/);
+      expect(store.rootOf(a.id)).toBe(path.join(projectsDir, 'Older lesson.cstudio'));
+    });
+
+    it('follows a rename and forgets a trashed import', async () => {
+      const { library, elsewhere, c, imported } = await importSetup();
+      await library.importFolder(elsewhere);
+      await library.rename(c.id, 'Field trip 2');
+      const renamed = path.join(path.dirname(elsewhere), 'Field trip 2.cstudio');
+      expect(imported()).toEqual([renamed]);
+      expect(await library.trash(c.id)).toEqual({ trashed: true });
+      expect(imported()).toEqual([]);
+    });
+
+    it('skips a remembered folder that is gone', async () => {
+      const { library, elsewhere, a, b } = await importSetup();
+      await library.importFolder(elsewhere);
+      await fs.rm(elsewhere, { recursive: true });
+      expect((await library.list()).map((e) => e.id)).toEqual([b.id, a.id]);
+    });
   });
 });

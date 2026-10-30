@@ -5,10 +5,12 @@
  * - Cancel writes `q` to stdin (FFmpeg finishes the container cleanly), then SIGKILLs after 5 s.
  * - Output files named in `removeOnFailure` are deleted after a cancel or failure, so no partial
  *   file is left behind (R1.47).
+ * - FFmpeg dies with this process, even when it is SIGKILLed (`child-processes.ts`).
  */
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import { err, ok, type Result } from '../../shared/result';
+import { spawnChild } from './child-processes';
 
 export interface FfmpegProgress {
   /** Output time reached, in µs, or null if FFmpeg has not reported one yet. */
@@ -127,16 +129,17 @@ function runOnce(
   options: RunFfmpegOptions,
 ): Promise<Result<{ stderrTail: string }, FfmpegRunError>> {
   if (options.signal?.aborted) return Promise.resolve(err({ kind: 'cancelled' }));
-  const spawnFn = options.spawnImpl ?? spawn;
 
   return new Promise((resolve) => {
     let child: ChildProcess;
     try {
-      child = spawnFn(options.ffmpegPath, [...RUNNER_GLOBAL_ARGS, ...options.args], {
-        cwd: options.cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
+      // Tracked and tied to this process's death, so a hung FFmpeg never outlives it.
+      child = spawnChild(
+        options.ffmpegPath,
+        [...RUNNER_GLOBAL_ARGS, ...options.args],
+        { cwd: options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+        options.spawnImpl,
+      );
     } catch (error) {
       resolve(err({ kind: 'spawn-failed', message: String(error) }));
       return;
@@ -183,16 +186,33 @@ function runOnce(
   });
 }
 
+/** The oldest FFmpeg that accepts `-/filter_complex <file>` (§9.7; the bundle is n9). */
+export const MIN_FFMPEG_RELEASE = { major: 7, minor: 1 } as const;
+
 /**
- * Arguments that pass a filter graph from a script file (§1.10): `-/filter_complex` on FFmpeg 7.1
- * and later, `-filter_complex_script` before that. Unknown versions (git master builds) are
- * assumed to be recent.
+ * Arguments that pass a filter graph from a script file (§1.10, §9.7): always
+ * `-/filter_complex <file>`, never on the command line (Windows' length limit). FFmpeg 9 removed
+ * `-filter_complex_script`, and FFmpeg older than 7.1 is refused at start-up
+ * (`ffmpegTooOldError`).
  */
-export function filterComplexScriptArgs(
-  version: { major: number; minor: number } | null,
-  scriptPath: string,
-): string[] {
-  const modern =
-    version === null || version.major > 7 || (version.major === 7 && version.minor >= 1);
-  return modern ? ['-/filter_complex', scriptPath] : ['-filter_complex_script', scriptPath];
+export function filterComplexArgs(scriptPath: string): string[] {
+  return ['-/filter_complex', scriptPath];
+}
+
+/**
+ * A clear error for an FFmpeg too old for `-/filter_complex`, or null. Git master builds
+ * (no release number) are recent by construction.
+ */
+export function ffmpegTooOldError(
+  version: { version: string; release: { major: number; minor: number } | null } | null,
+): string | null {
+  const release = version?.release;
+  if (!version || !release) return null;
+  const { major, minor } = MIN_FFMPEG_RELEASE;
+  if (release.major > major || (release.major === major && release.minor >= minor)) return null;
+  return (
+    `FFmpeg ${version.version} is too old: Capture Studio needs FFmpeg ${String(major)}.` +
+    `${String(minor)} or later (it passes filter graphs with -/filter_complex). ` +
+    'Use the bundled FFmpeg or point CS_FFMPEG_DIR at a newer build.'
+  );
 }

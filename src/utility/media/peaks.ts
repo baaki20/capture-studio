@@ -3,9 +3,10 @@
  * every 10 ms window (80 samples) becomes one `[min, max]` pair of little-endian Int16 values in
  * `cache/<mediaId>.peaks`. The file has no header: pair `i` covers `[i × 10 ms, (i+1) × 10 ms)`.
  */
-import { spawn } from 'node:child_process';
+
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { spawnChild } from './child-processes';
 
 export const PEAKS_SAMPLE_RATE = 8000;
 export const PEAKS_WINDOW_SAMPLES = 80;
@@ -70,7 +71,7 @@ export async function generatePeaks(
 ): Promise<{ output: string; pairs: number; sampleRate: 8000; windowSamples: 80 }> {
   const accumulator = new PeakAccumulator();
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(
+    const child = spawnChild(
       options.ffmpegPath,
       [
         '-hide_banner',
@@ -96,9 +97,9 @@ export async function generatePeaks(
       },
     );
     let stderr = '';
-    child.stdout.on('data', (chunk: Buffer) => accumulator.push(chunk));
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
+    child.stdout?.on('data', (chunk: Buffer) => accumulator.push(chunk));
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
       stderr = (stderr + chunk).slice(-8192);
     });
     child.on('error', reject);

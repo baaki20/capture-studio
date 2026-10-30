@@ -1,7 +1,17 @@
 /**
  * Crash-safe stream writer (§1.5, §9.6). The capture engine's muxer sends `{position, data}`
- * chunks over a MessagePort; each is written at its position with `pwrite`, and the file is
- * fsynced at least every 2 s and on close, so at most ~2 s of media is at risk on a crash.
+ * chunks over a MessagePort; each is written at its position with `pwrite` as soon as it
+ * arrives (no buffering here), and the file is fsynced every second and on close.
+ *
+ * Two kinds of crash, two guarantees (R1.21):
+ * - The app is killed (SIGKILL, a crash): every `pwrite` that returned is already in the kernel's
+ *   page cache and survives the process, so the file holds every fragment the muxer finished
+ *   and this process received. What is lost is upstream of here: the fragment being built
+ *   (≤ 1 s, §1.5) and messages still queued on the port.
+ * - The machine loses power: only fsynced bytes survive, so the fsync cadence (1 s, one
+ *   fragment) bounds the loss. fsync blocks this process's event loop, which also stamps the
+ *   arrival of system audio, so it runs on a timer rather than after every write.
+ *
  * One file per stream: `<dir>/<kind>.rec.mp4`.
  */
 import fs from 'node:fs';
@@ -15,7 +25,8 @@ import type { StreamKind } from '../../shared/ipc/contract';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
 
-export const DEFAULT_FSYNC_INTERVAL_MS = 2000;
+/** At most one fragment (≤ 1 s, §1.5) of written data is ever un-fsynced. */
+export const DEFAULT_FSYNC_INTERVAL_MS = 1000;
 
 export function recordingFileName(kind: StreamKind): string {
   return `${kind}.rec.mp4`;

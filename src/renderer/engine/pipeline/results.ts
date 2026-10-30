@@ -27,6 +27,8 @@ export interface WorkerResult {
   video: NonNullable<EngineStreamResult['video']> | null;
   audio: NonNullable<EngineStreamResult['audio']> | null;
   checkpoints: Checkpoint[];
+  /** Mic only: checkpoints from capture timestamps, for offline comparison (not fitted). */
+  captureCheckpoints?: Checkpoint[];
   writer: StreamStats | null;
   /** Final counters. */
   stats: EngineStreamStats;
@@ -83,6 +85,9 @@ export function streamResult(
     endedEarly: result.endedEarly,
     checkpoints: result.checkpoints.map(([a, b]) => [a, b]),
   };
+  if (result.captureCheckpoints && result.captureCheckpoints.length > 0) {
+    entry.captureCheckpoints = result.captureCheckpoints.map(([a, b]) => [a, b]);
+  }
   if (result.endedAtUs !== null) entry.endedAtUs = result.endedAtUs;
   if (result.error !== null) entry.error = result.error;
   if (result.encoder) entry.encoder = result.encoder;

@@ -211,6 +211,20 @@ describe('stream results', () => {
     expect(RecordedStreamSchema.shape.sync.safeParse(entry.calibration).success).toBe(true);
   });
 
+  it('carries the mic capture-timestamp series when there is one', () => {
+    const entry = streamResult(
+      { ...worker, captureCheckpoints: [[8_100_000, 48_000]] },
+      sync,
+      7_500_000,
+    );
+    expect(entry.captureCheckpoints).toEqual([[8_100_000, 48_000]]);
+    expect(entry.checkpoints).toEqual([[8_000_000, 48_000]]);
+    expect(ENGINE_COMMANDS['engine.stop'].response.safeParse({ streams: [entry] }).success).toBe(
+      true,
+    );
+    expect(streamResult(worker, sync, 7_500_000)).not.toHaveProperty('captureCheckpoints');
+  });
+
   it('omits what is unknown instead of sending nulls', () => {
     const entry = streamResult(missingResult('str_s', 'screen', null, 5), null, 0);
     expect(entry).toMatchObject({ status: 'failed', endedAtUs: 5, endedEarly: false });

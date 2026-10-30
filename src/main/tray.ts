@@ -4,7 +4,12 @@
  */
 import { dialog, Menu, nativeImage, Tray, type NativeImage } from 'electron';
 import type { ActionBus } from './action-bus';
-import { trayMenuTemplate, type ConfirmAction, type TrayRecordingState } from './tray-menu';
+import {
+  confirmWhenRequired,
+  trayMenuTemplate,
+  type ConfirmAction,
+  type TrayRecordingState,
+} from './tray-menu';
 
 export type { TrayRecordingState } from './tray-menu';
 
@@ -64,7 +69,13 @@ const confirmInDialog: ConfirmAction = async (kind) => {
   return response === 0;
 };
 
-export function createTray(bus: ActionBus): AppTray {
+export interface TrayOptions {
+  /** Whether Restart or Abort asks first (Abort's confirmation is a setting, R1.12). */
+  shouldConfirm?: (kind: 'restart' | 'abort') => boolean;
+}
+
+export function createTray(bus: ActionBus, options: TrayOptions = {}): AppTray {
+  const confirm = confirmWhenRequired(confirmInDialog, options.shouldConfirm);
   const icons = new Map<TrayRecordingState, NativeImage>();
   const icon = (state: TrayRecordingState): NativeImage => {
     let image = icons.get(state);
@@ -85,7 +96,7 @@ export function createTray(bus: ActionBus): AppTray {
           ? 'Capture Studio: paused'
           : 'Capture Studio',
     );
-    tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(state, bus, confirmInDialog)));
+    tray.setContextMenu(Menu.buildFromTemplate(trayMenuTemplate(state, bus, confirm)));
   };
   apply('idle');
 

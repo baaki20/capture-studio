@@ -4,6 +4,7 @@
  * transport, timeline and status line. Keyboard shortcuts follow `keyboard.ts`.
  */
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import type { InvokeResponse } from '../../shared/ipc/contract';
 import { ipcErrorMessage } from '../../shared/ipc/errors';
 import { formatTimecode } from '../../shared/time';
 import { timelineDurationUs } from '../../shared/project/timeline-ops';
@@ -28,6 +29,7 @@ export function App() {
   const projectId = new URLSearchParams(window.location.search).get('project');
   const [services, setServices] = useState<EditorServices | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState<OfflineReasons>({});
 
   useEffect(() => {
     if (!projectId) return;
@@ -38,6 +40,7 @@ export function App() {
       (open) => {
         if (cancelled) return;
         created.docStore.getState().load(open);
+        setOffline(open.offline ?? {});
         document.title = `${open.doc.name} – Capture Studio`;
         setServices(created);
       },
@@ -58,6 +61,35 @@ export function App() {
         return client.probe(tUs ?? created.ui.getState().playheadUs);
       },
       saveStatus: () => created.docStore.getState().saveStatus,
+      capturePreview: async (tUs) => {
+        const client = created.preview.current;
+        if (!client) throw new Error('the preview is not ready');
+        const picture = await client.capture(tUs);
+        if (!picture) return null;
+        let binary = '';
+        for (let i = 0; i < picture.rgba.length; i += 0x8000) {
+          binary += String.fromCharCode(...picture.rgba.subarray(i, i + 0x8000));
+        }
+        return {
+          width: picture.width,
+          height: picture.height,
+          exact: picture.exact,
+          rgbaBase64: btoa(binary),
+        };
+      },
+      playbackCounters: () => ({
+        video: created.preview.current?.counters() ?? null,
+        audio: created.scheduler.counters(),
+      }),
+      resetPlaybackCounters: () => {
+        created.preview.current?.resetCounters();
+        created.scheduler.resetCounters();
+      },
+      play: (fromUs) => {
+        if (fromUs !== undefined) created.playback.seek(fromUs);
+        created.playback.play(1);
+      },
+      pause: () => created.playback.pause(),
     };
     return () => {
       cancelled = true;
@@ -77,7 +109,7 @@ export function App() {
   if (!services) return <p className={styles.banner}>Opening the project…</p>;
   return (
     <EditorContext value={services}>
-      <EditorLayout />
+      <EditorLayout offline={offline} onOffline={setOffline} />
     </EditorContext>
   );
 }
@@ -98,7 +130,15 @@ function useCommandContext(): CommandContext {
   );
 }
 
-function EditorLayout() {
+/** Why each offline media is offline (R1.29), from `project.open`. */
+type OfflineReasons = NonNullable<InvokeResponse<'project.open'>['offline']>;
+
+interface OfflineProps {
+  offline: OfflineReasons;
+  onOffline: (offline: OfflineReasons) => void;
+}
+
+function EditorLayout({ offline, onOffline }: OfflineProps) {
   const services = useEditor();
   const { docStore, autosave, ui } = services;
   const context = useCommandContext();
@@ -130,7 +170,7 @@ function EditorLayout() {
   return (
     <div className={styles.editor} data-testid="editor">
       <Toolbar onExport={openExport} />
-      <Banners />
+      <Banners offline={offline} onOffline={onOffline} />
       <div className={styles.main}>
         <PreviewPane />
         <InspectorPanel />
@@ -241,7 +281,7 @@ function Toolbar({ onExport }: { onExport: () => void }) {
   );
 }
 
-function Banners() {
+function Banners({ offline: reasons, onOffline }: OfflineProps) {
   const { docStore, api, projectId, autosave, ui } = useEditor();
   const readOnly = useDocumentStore(docStore, (s) => s.readOnly);
   const notice = useDocumentStore(docStore, (s) => s.notice);
@@ -253,7 +293,9 @@ function Banners() {
       await autosave.flush();
       const result = await api.project.relink(projectId, mediaId);
       if (!result.relinked) return;
-      docStore.getState().load(await api.project.open(projectId));
+      const reopened = await api.project.open(projectId);
+      docStore.getState().load(reopened);
+      onOffline(reopened.offline ?? {});
       ui.getState().setStatus('Media relinked.');
     } catch (e) {
       ui.getState().setStatus(`Relink failed: ${ipcErrorMessage(e)}`);
@@ -289,6 +331,15 @@ function Banners() {
           <span>
             {offline.length === 1 ? 'A media file is' : `${String(offline.length)} media files are`}{' '}
             offline. Their clips cannot play or export until relinked or removed.
+            {offline.map((m) => {
+              const why = reasons[m.id];
+              const name = m.path.split('/').pop() ?? m.path;
+              if (m.status === 'failed') return ` ${name} failed to record.`;
+              if (why?.reason === 'unreadable') {
+                return ` ${name} is damaged or unreadable${why.detail ? ` (${why.detail})` : ''}.`;
+              }
+              return ` ${name} is missing.`;
+            })}
           </span>
           {offline.map((m) => (
             <button key={m.id} type="button" onClick={() => void relink(m.id)}>

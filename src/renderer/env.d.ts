@@ -7,6 +7,8 @@ import type {
   ShellPreloadApi,
 } from '../shared/ipc/preload-api';
 import type { ProjectV1 } from '../shared/project/schema';
+import type { AudioCounters } from './editor/audio/scheduler';
+import type { PreviewCounterValues } from './editor/preview/playback-counters';
 
 /**
  * Editor diagnostics and test hooks (editor window only, set by `editor/App.tsx`). They expose
@@ -19,6 +21,19 @@ interface EditorDebugApi {
   /** Renders the playhead (or `tUs`) and measures the preview picture. */
   probePreview(tUs?: number): Promise<{ meanLuma: number; nonBlack: number; exact: boolean }>;
   saveStatus(): string;
+  /** Renders `tUs` and returns the composited picture, RGBA top-down, base64 (R1.48 parity). */
+  capturePreview(
+    tUs: number,
+  ): Promise<{ width: number; height: number; exact: boolean; rgbaBase64: string } | null>;
+  /** Late video frames and audio underruns since the last reset (§4.6.4). */
+  playbackCounters(): {
+    video: PreviewCounterValues | null;
+    audio: AudioCounters;
+  };
+  resetPlaybackCounters(): void;
+  /** Starts playback at normal speed (from `fromUs` when given); `pause` stops it. */
+  play(fromUs?: number): void;
+  pause(): void;
 }
 
 declare global {

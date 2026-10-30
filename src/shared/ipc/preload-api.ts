@@ -65,7 +65,14 @@ export interface RecordingControlApi extends RecordingEventsApi {
 
 export interface ShellPreloadApi extends PreloadBase {
   readonly caps: CapsApi & { refresh(): Promise<CapabilityReport> };
-  readonly settings: SettingsApi;
+  readonly settings: SettingsApi & {
+    /** Main's folder dialog for the projects or exports folder; null when cancelled. */
+    chooseFolder(
+      which: InvokeRequest<'settings.chooseFolder'>['which'],
+    ): Promise<InvokeResponse<'settings.chooseFolder'>>;
+    /** The settings-recovery notice, once per launch (R1.50). */
+    takeLoadNotice(): Promise<InvokeResponse<'settings.takeLoadNotice'>>;
+  };
   readonly rec: RecordingControlApi & {
     configure(config: InvokeRequest<'rec.configure'>): Promise<void>;
     record(): Promise<InvokeResponse<'rec.record'>>;
@@ -78,6 +85,7 @@ export interface ShellPreloadApi extends PreloadBase {
     rename(id: string, name: string): Promise<InvokeResponse<'library.rename'>>;
     trash(id: string): Promise<InvokeResponse<'library.trash'>>;
     reveal(id: string): Promise<void>;
+    /** Main's folder dialog; adds an existing `.cstudio` project. Null when cancelled. */
     import(): Promise<InvokeResponse<'library.import'>>;
     openFolder(): Promise<void>;
     onChanged(listener: () => void): Unsubscribe;
@@ -125,6 +133,8 @@ export interface EditorPreloadApi extends PreloadBase {
   readonly media: {
     peaks(projectId: string, mediaId: string): Promise<InvokeResponse<'media.peaks'>>;
     thumbs(projectId: string, mediaId: string): Promise<InvokeResponse<'media.thumbs'>>;
+    /** A project's background peaks and thumbnails are done (optional for test doubles). */
+    onCachesReady?(listener: Listener<EventPayload<'media.cachesReady'>>): Unsubscribe;
   };
   readonly export: {
     probeEncoders(): Promise<InvokeResponse<'export.probeEncoders'>>;

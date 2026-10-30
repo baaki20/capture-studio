@@ -73,3 +73,7 @@
 .banner span {
   margin-right: auto;
 }
+
+.warning {
+  background: color-mix(in srgb, #f08c00 18%, transparent);
+}

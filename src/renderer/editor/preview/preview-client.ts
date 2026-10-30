@@ -6,7 +6,8 @@
  * a slow frame never builds a queue (late frames are dropped, not shown late).
  */
 import type { ProjectV1 } from '../../../shared/project/schema';
-import type { LumaProbe } from './compositor-webgl';
+import type { LumaProbe, PixelCapture } from './compositor-webgl';
+import { PlaybackCounters, type PreviewCounterValues } from './playback-counters';
 import type { PreviewEvent, PreviewRequest, PreviewStats } from './protocol';
 
 export interface RenderedInfo {
@@ -22,6 +23,12 @@ export class PreviewClient {
   private pending: { tUs: number; playing: boolean } | null = null;
   private nextProbe = 1;
   private readonly probes = new Map<number, (result: LumaProbe & { exact: boolean }) => void>();
+  private readonly captures = new Map<
+    number,
+    (result: (PixelCapture & { exact: boolean }) | null) => void
+  >();
+  /** Late-frame instrumentation (§4.6.4). */
+  private readonly playbackCounters = new PlaybackCounters();
   private readonly listeners = new Set<(info: RenderedInfo) => void>();
   private readonly errorListeners = new Set<(message: string) => void>();
   private disposed = false;
@@ -48,9 +55,11 @@ export class PreviewClient {
 
   render(tUs: number, playing: boolean): void {
     if (this.inFlight) {
+      this.playbackCounters.request(playing, this.pending?.playing === true);
       this.pending = { tUs, playing };
       return;
     }
+    this.playbackCounters.request(playing, false);
     this.inFlight = true;
     this.post({ type: 'render', tUs, playing });
   }
@@ -62,6 +71,24 @@ export class PreviewClient {
       this.probes.set(id, resolve);
       this.post({ type: 'probe', id, tUs });
     });
+  }
+
+  /** Renders `tUs` and returns the composited picture (preview/export parity, R1.48). */
+  capture(tUs: number): Promise<(PixelCapture & { exact: boolean }) | null> {
+    const id = this.nextProbe++;
+    return new Promise((resolve) => {
+      this.captures.set(id, resolve);
+      this.post({ type: 'capture', id, tUs });
+    });
+  }
+
+  /** Late-frame counters since the last reset. */
+  counters(): PreviewCounterValues {
+    return this.playbackCounters.snapshot();
+  }
+
+  resetCounters(): void {
+    this.playbackCounters.reset();
   }
 
   onRendered(listener: (info: RenderedInfo) => void): () => void {
@@ -91,6 +118,7 @@ export class PreviewClient {
     switch (event.type) {
       case 'rendered': {
         this.inFlight = false;
+        this.playbackCounters.drawn(event.playing, event.exact);
         for (const l of this.listeners) l(event);
         const next = this.pending;
         this.pending = null;
@@ -100,6 +128,10 @@ export class PreviewClient {
       case 'probe':
         this.probes.get(event.id)?.(event.result);
         this.probes.delete(event.id);
+        return;
+      case 'capture':
+        this.captures.get(event.id)?.(event.result);
+        this.captures.delete(event.id);
         return;
       case 'media-error':
         for (const l of this.errorListeners) l(`${event.mediaId}: ${event.message}`);

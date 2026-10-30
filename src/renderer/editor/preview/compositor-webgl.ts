@@ -75,6 +75,13 @@ export interface LumaProbe {
   nonBlack: number;
 }
 
+/** The composited picture, RGBA rows top to bottom, at canvas resolution (parity test, R1.48). */
+export interface PixelCapture {
+  width: number;
+  height: number;
+  rgba: Uint8Array<ArrayBuffer>;
+}
+
 export class WebGlCompositor {
   private readonly gl: WebGL2RenderingContext;
   private readonly program: WebGLProgram;
@@ -172,6 +179,20 @@ export class WebGlCompositor {
     }
     const count = width * height;
     return { meanLuma: count ? sum / count : 0, nonBlack: count ? bright / count : 0 };
+  }
+
+  /** The frame just drawn as top-down RGBA (call in the same task as `draw`). */
+  capture(): PixelCapture {
+    const { gl } = this;
+    const { width, height } = this.size;
+    const bottomUp = new Uint8Array(width * height * 4);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bottomUp);
+    const rgba = new Uint8Array(bottomUp.length);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) {
+      rgba.set(bottomUp.subarray((height - 1 - y) * row, (height - y) * row), y * row);
+    }
+    return { width, height, rgba };
   }
 
   dispose(): void {

@@ -5,7 +5,9 @@
  * the region picker and controls windows, the library and recovery, the tray and the shell
  * window.
  */
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 import type { BrowserWindow } from 'electron';
 import {
   app,
@@ -14,6 +16,7 @@ import {
   desktopCapturer,
   dialog,
   ipcMain,
+  Menu,
   Notification,
   protocol,
   safeStorage,
@@ -21,20 +24,28 @@ import {
   webContents,
 } from 'electron';
 import type { FfmpegEncoderReport } from '../shared/capabilities/types';
-import type { RecordingInfo } from '../shared/project/schema';
+import type { Media, RecordingInfo } from '../shared/project/schema';
 import { SecondInstanceDataSchema, type SecondInstanceData } from '../shared/ipc/actions';
 import { ActionBus } from './action-bus';
+import { appMenuTemplate } from './app-menu';
 import { CapabilityService, defaultExec } from './capabilities/detect';
 import { estimateSinkOutputLatencyUs } from './system-audio/linux-latency';
 import { inferOzonePlatform } from './capabilities/linux';
 import { parseCliArgs } from './cli';
-import { pickScreenSource } from './display-media';
+import {
+  FreeSpaceOverride,
+  HARNESS_SOCKET_ENV,
+  HarnessChannel,
+} from './diagnostics/harness-channel';
+import { harnessCommands, windowRole } from './diagnostics/harness-commands';
+import { MetricsSampler } from './diagnostics/metrics-sampler';
 import { locateFfmpeg, type FfmpegLocation } from './ffmpeg/locate';
 import { registerCoreHandlers } from './ipc/core-handlers';
 import { registerEditorHandlers } from './ipc/editor-handlers';
 import { registerExportHandlers, type ExportService } from './ipc/export-handlers';
 import { IpcRouter } from './ipc/router';
 import { registerSessionHandlers } from './ipc/session-handlers';
+import { applyForceX11, DEV_ONLY_ENV, readLaunchEnv, x11Relaunch } from './launch-env';
 import { forwardRendererConsole, initLogging } from './logging';
 import {
   createMediaHandler,
@@ -42,11 +53,16 @@ import {
   MEDIA_SCHEME_PRIVILEGES,
   ProjectRootRegistry,
 } from './projects/media-protocol';
-import { EditorMedia } from './projects/editor-media';
+import { CacheJobs } from './projects/cache-jobs';
+import { EditorMedia, markMediaPresence } from './projects/editor-media';
 import { Library } from './projects/library';
 import { ProjectStore } from './projects/project-store';
+import { freeBytes } from './recording/disk-monitor';
 import { RecoveryService } from './recording/recovery';
 import { SessionManager } from './recording/session-manager';
+import { QuitGuard } from './quit-guard';
+import { screenPickerOptions } from './display-media';
+import { selectScreenSource } from './screen-source';
 import { isActive, type RecordingState } from './recording/state-machine';
 import { SecretStore } from './secrets/secret-store';
 import { allowMediaCapture, installSecurityGuards, isAppUrl } from './security/web-security';
@@ -58,26 +74,37 @@ import { shouldMinimizeOnStart } from './windows/controls-policy';
 import { EditorWindowHost } from './windows/editor';
 import { EngineHost } from './windows/engine';
 import { RegionPickerHost } from './windows/picker';
+import { SourcePickerHost } from './windows/source-picker';
 import { createShellWindow, focusWindow, type RendererLocation } from './windows/shell';
 
-// Escape hatch for XWayland when native Wayland misbehaves (§4.7 risk 13). Must run before ready.
-if (process.env.CS_FORCE_X11 === '1') {
-  app.commandLine.appendSwitch('ozone-platform', 'x11');
+/** Launch switches; development and test ones only in an unpackaged build (S-1). */
+const launch = readLaunchEnv(process.env, app.isPackaged, HARNESS_SOCKET_ENV);
+
+// Escape hatch for XWayland when native Wayland misbehaves (§4.7 risk 13): relaunch once with
+// the switch on the real command line (see launch-env.ts), then keep children off Wayland.
+const relaunchX11 = launch.forceX11
+  ? x11Relaunch(process.argv, process.execPath, process.env)
+  : null;
+if (relaunchX11) {
+  app.relaunch(relaunchX11);
+  app.exit(0);
 }
+const forcedX11 = launch.forceX11 && applyForceX11(app.commandLine, process.env);
 /**
  * Test mode (§4.6.3; never in a packaged build): end-to-end tests run on an X11 Electron with
  * fake devices and must never open the ScreenCast portal, so the PipeWire capturer stays off.
  */
-const testMode = !app.isPackaged && process.env.CS_TEST === '1';
+const testMode = launch.testMode;
+/** Cancelling the portal makes `getSources` reject (R1.8; see screen-source.ts). */
+const usesPortal =
+  process.platform === 'linux' && !testMode && process.env.XDG_SESSION_TYPE === 'wayland';
 
 // Screen capture through the ScreenCast portal on Wayland (§9.1, spike S1; see display-media.ts).
 if (process.platform === 'linux' && !testMode)
   app.commandLine.appendSwitch('enable-features', 'WebRTCPipeWireCapturer');
 
 // Tests and development can isolate profile data (settings, logs, single-instance lock).
-if (!app.isPackaged && process.env.CS_USER_DATA_DIR) {
-  app.setPath('userData', process.env.CS_USER_DATA_DIR);
-}
+if (launch.userDataDir) app.setPath('userData', launch.userDataDir);
 
 // Every renderer is sandboxed, whatever its webPreferences say (§1.3).
 app.enableSandbox();
@@ -89,9 +116,20 @@ protocol.registerSchemesAsPrivileged([
 
 const log = initLogging();
 forwardRendererConsole();
+if (launch.forceX11) {
+  log.info(
+    forcedX11
+      ? 'CS_FORCE_X11: running on X11 (XWayland)'
+      : 'CS_FORCE_X11 ignored: no X display (DISPLAY is not set)',
+  );
+}
+if (app.isPackaged) {
+  const ignored = DEV_ONLY_ENV.filter((name) => process.env[name]);
+  if (ignored.length > 0) log.warn(`ignoring development variables: ${ignored.join(', ')}`);
+}
 
 const renderer: RendererLocation = {
-  ...(process.env.ELECTRON_RENDERER_URL ? { devServerUrl: process.env.ELECTRON_RENDERER_URL } : {}),
+  ...(launch.rendererUrl ? { devServerUrl: launch.rendererUrl } : {}),
   rendererDir: path.join(import.meta.dirname, '../renderer'),
   preloadDir: path.join(import.meta.dirname, '../preload'),
 };
@@ -114,10 +152,84 @@ let exportService: ExportService | null = null;
 const editorHost = new EditorWindowHost({ router, renderer, logger: log });
 /** Stops the setup panel's system-audio meter (set once the utility exists). */
 let stopSystemMonitor: () => void = () => undefined;
+let trayStateValue: TrayRecordingState = 'idle';
+
+/** Quitting during a recording asks (or, for SIGTERM, saves) first (finding F-7). */
+const quitGuard = new QuitGuard({
+  recorder: () => sessionManager,
+  ask: async () => {
+    const parent = ElectronWindow.getFocusedWindow();
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      title: 'Capture Studio',
+      message: 'A recording is in progress.',
+      detail: 'Save it before quitting, or discard it?',
+      buttons: ['Stop and save', 'Discard', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    };
+    const { response } = parent
+      ? await dialog.showMessageBox(parent, options)
+      : await dialog.showMessageBox(options);
+    return response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
+  },
+  quit: () => app.quit(),
+  logger: log,
+});
+
+/**
+ * Without a tray the app quits when nothing is left open while idle (R1.3): no main window, no
+ * editor (F-8: closing the main window must not take an open editor with it). The hidden engine
+ * window would otherwise keep the app alive.
+ */
+function quitIfNothingOpen(): void {
+  if (tray || quitGuard.isQuitting) return;
+  if (shellWindow && !shellWindow.isDestroyed()) return;
+  if (editorHost.openProjects.length > 0) return;
+  if (isActive(sessionManager?.state ?? 'idle')) return;
+  quitGuard.quitInteractively();
+}
+editorHost.onAllClosed(quitIfNothingOpen);
+/** Test-only control channel for the Wayland harness and e2e tests (unpackaged builds only). */
+const harnessSocket = launch.harnessSocket;
+let harness: HarnessChannel | null = null;
+
+/** Process memory and dropped frames every minute while recording (§4.6.4; R1.22, R1.23). */
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 20 });
+eventLoopDelay.enable();
+const metrics = new MetricsSampler({
+  getAppMetrics: () => app.getAppMetrics(),
+  labelPid: (pid) => {
+    const contents = webContents.getAllWebContents().find((wc) => wc.getOSProcessId() === pid);
+    return contents ? windowRole(contents.getURL()) : null;
+  },
+  eventLoopDelayMs: () => {
+    const max = eventLoopDelay.max / 1e6;
+    eventLoopDelay.reset();
+    return Number.isFinite(max) ? Math.round(max * 10) / 10 : null;
+  },
+  // Shorter sampling for harness dry runs (unpackaged builds only).
+  ...(launch.metricsIntervalMs ? { intervalMs: launch.metricsIntervalMs } : {}),
+  logger: log,
+});
 
 function trayState(state: RecordingState): TrayRecordingState {
   if (state === 'recording' || state === 'paused') return state;
   return isActive(state) ? 'busy' : 'idle';
+}
+
+/** A folder dialog parented to the calling window; the chosen folder or null. */
+async function chooseDirectory(
+  senderId: number,
+  options: Electron.OpenDialogOptions,
+): Promise<string | null> {
+  const sender = webContents.fromId(senderId);
+  const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
+  const result = parent
+    ? await dialog.showOpenDialog(parent, options)
+    : await dialog.showOpenDialog(options);
+  return result.canceled ? null : (result.filePaths[0] ?? null);
 }
 
 function showShell(): void {
@@ -136,14 +248,12 @@ function showShell(): void {
     revokeMedia();
     stopSystemMonitor();
     shellWindow = null;
-    // The hidden engine window would keep the app alive: without a tray, closing the main
-    // window while idle quits (R1.3).
-    if (!tray && !isActive(sessionManager?.state ?? 'idle')) app.quit();
+    quitIfNothingOpen();
   });
 }
 
 actionBus.on(['open-library'], () => showShell());
-actionBus.on(['quit'], () => app.quit());
+actionBus.on(['quit'], () => quitGuard.quitInteractively());
 // New recording opens the shell, which hosts the setup panel; the session manager handles the
 // recording actions themselves.
 actionBus.on(['new-recording'], () => showShell());
@@ -154,6 +264,10 @@ if (cli.error) log.warn(`cli: ${cli.error}`);
 async function start(): Promise<void> {
   // Needs the default session, so it runs after 'ready' but before any window exists.
   installSecurityGuards(renderer, log);
+  // Ctrl+Q and File → Quit ask about a recording in progress (F-7).
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(appMenuTemplate(() => quitGuard.quitInteractively())),
+  );
 
   log.info(
     `Capture Studio ${app.getVersion()} (Electron ${process.versions.electron}, Chromium ${process.versions.chrome}, ` +
@@ -259,6 +373,16 @@ async function start(): Promise<void> {
     settings,
     probeEncoders,
     writeClipboard: (text) => clipboard.writeText(text),
+    // Settings → folders: chosen here, never sent as paths by the renderer (§1.3).
+    chooseFolder: async (which, senderId) => {
+      const current = settings.get()[which];
+      await fs.mkdir(current, { recursive: true }).catch(() => undefined);
+      return chooseDirectory(senderId, {
+        title: which === 'projectsDir' ? 'Projects folder' : 'Exports folder',
+        defaultPath: current,
+        properties: ['openDirectory', 'createDirectory'],
+      });
+    },
     diagnostics: () => ({
       versions: {
         app: app.getVersion(),
@@ -311,6 +435,12 @@ async function start(): Promise<void> {
     snapshot: async () => (await engine.ensure()).command('engine.snapshot', {}),
     lastRegion: () => settings.get().recorder.lastRegion,
   });
+  // X11 with several screens: an in-app picker (R1.53); Wayland uses the portal's own.
+  const sourcePicker = new SourcePickerHost({
+    renderer,
+    logger: log,
+    stateFile: path.join(app.getPath('userData'), 'source-picker.json'),
+  });
   const controls = new ControlsWindowHost({
     router,
     renderer,
@@ -339,45 +469,88 @@ async function start(): Promise<void> {
     }
   });
 
+  // The disk monitor's probe; the control channel can override it (R1.17 tests).
+  const freeSpace = new FreeSpaceOverride(freeBytes);
+
+  /**
+   * Peaks and thumbnails: one low-priority queue for finalize's background pass and the editor's
+   * requests (R1.20, R1.44); held while a recording captures.
+   */
+  const caches = new CacheJobs({ runJob: (job) => utility.runJob(job), logger: log });
+  const generateCaches = async (
+    projectId: string,
+    root: string,
+    media: readonly Media[],
+  ): Promise<void> => {
+    await caches.generateAll(projectId, root, media);
+    libraryChanged();
+    router.broadcast('media.cachesReady', { projectId });
+  };
+
   const manager = new SessionManager({
     settings,
     store,
     utility,
     engine: () => engine.ensure(),
-    selectScreen: async () => {
-      const pick = await pickScreenSource((options) => desktopCapturer.getSources(options), {
-        fps: settings.get().recorder.fps,
-      });
-      if (pick.status === 'failed') throw new Error(pick.message);
-      if (pick.status === 'cancelled') return null;
-      return {
-        sourceId: pick.screen.sourceId,
-        label: pick.source.name,
-        maxWidth: pick.screen.maxWidth,
-        maxHeight: pick.screen.maxHeight,
-      };
-    },
+    // Cancelling the portal returns to the panel without an error (R1.8).
+    selectScreen: () =>
+      selectScreenSource(
+        (options) => desktopCapturer.getSources(options),
+        {
+          fps: settings.get().recorder.fps,
+          portal: usesPortal,
+          ...screenPickerOptions({
+            portal: usesPortal,
+            commandLine: app.commandLine,
+            choose: (sources, initialId) => sourcePicker.choose(sources, initialId),
+          }),
+        },
+        log,
+      ),
     pickRegion: (source) => picker.pick(source),
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
     systemAudioOutputLatencyUs: () => estimateSinkOutputLatencyUs(defaultExec),
     platform,
     appVersion: app.getVersion(),
     logger: log,
+    freeBytes: freeSpace.probe,
+    generateCaches,
     events: {
       state: (payload) => {
+        caches.setHeld(isActive(payload.state) && payload.state !== 'finalizing');
         if (isActive(payload.state)) setSystemMonitor(false);
         if (payload.state !== 'picking-region') picker.cancel();
         router.broadcast('rec.state', payload);
         controls.onState(payload.state);
-        tray?.setState(trayState(payload.state));
+        trayStateValue = trayState(payload.state);
+        tray?.setState(trayStateValue);
+        if (!['recording', 'paused'].includes(payload.state)) void metrics.stop();
+        harness?.broadcast('state', { ...payload, root: sessionManager?.activeRoot ?? null });
       },
-      stats: (payload) => void router.broadcast('rec.stats', payload),
-      notice: (payload) => void router.broadcast('rec.notice', payload),
+      stats: (payload) => {
+        router.broadcast('rec.stats', payload);
+        // Engine stats flow once the project folder exists: sample that session.
+        const root = sessionManager?.activeRoot ?? null;
+        const sessionId = sessionManager?.sessionId ?? null;
+        if (root && sessionId && metrics.root !== root) {
+          metrics.start(root, sessionId);
+          harness?.broadcast('session', { root, sessionId });
+        }
+        metrics.noteStats(payload);
+        harness?.broadcast('stats', payload);
+      },
+      notice: (payload) => {
+        router.broadcast('rec.notice', payload);
+        harness?.broadcast('notice', payload);
+      },
       levels: (payload) => void router.broadcast('rec.levels', payload),
       libraryChanged,
       projectReady: ({ projectId, root, name, afterRecording }) => {
         // R1.20: the editor opens unless "After recording" is "show in library".
         log.info(`recording: project ${projectId} ready at ${root} (after: ${afterRecording})`);
+        harness?.broadcast('project-ready', { projectId, root, name, afterRecording });
+        // Saved because the app is quitting (F-7): nothing to open.
+        if (quitGuard.isQuitting) return;
         const openEditor = (): void => void editorHost.open(projectId);
         if (afterRecording === 'open-editor') openEditor();
         else showShell();
@@ -406,11 +579,16 @@ async function start(): Promise<void> {
     showItemInFolder: (fullPath) => shell.showItemInFolder(fullPath),
     openPath: (fullPath) => shell.openPath(fullPath),
     busyRoots: () => (manager.activeRoot ? [manager.activeRoot] : []),
+    importedRoots: () => settings.get().library.importedRoots,
+    setImportedRoots: async (importedRoots) => {
+      await settings.patch({ library: { importedRoots } });
+    },
     logger: log,
   });
   const recovery = new RecoveryService({
     store,
     utility,
+    generateCaches,
     projectsDir: () => settings.get().projectsDir,
     trashItem: (fullPath) => shell.trashItem(fullPath),
     appVersion: app.getVersion(),
@@ -428,12 +606,18 @@ async function start(): Promise<void> {
     monitorSystem: (enabled) => {
       if (!enabled || !isActive(manager.state)) setSystemMonitor(enabled);
     },
+    chooseImportFolder: (senderId) =>
+      chooseDirectory(senderId, {
+        title: 'Import a Capture Studio project (.cstudio folder)',
+        defaultPath: settings.get().projectsDir,
+        properties: ['openDirectory'],
+      }),
   });
 
   const editorMedia = new EditorMedia({
     store,
     findRoot: (id) => library.findRoot(id),
-    runJob: (job) => utility.runJob(job),
+    caches,
     chooseFile: async (media, senderId) => {
       const sender = webContents.fromId(senderId);
       const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
@@ -465,6 +649,7 @@ async function start(): Promise<void> {
   exportService = registerExportHandlers({
     router,
     runExport: (job, options) => utility.runJob(job, options),
+    checkMedia: (root, doc) => markMediaPresence(root, doc),
     findRoot: (id) => library.findRoot(id),
     readProject: async (root) => (await store.read(root))?.doc ?? null,
     settings: () => settings.get(),
@@ -489,7 +674,52 @@ async function start(): Promise<void> {
   });
 
   const caps = await capabilities.refresh();
-  if (caps.capabilities['ui.tray'].state === 'available') tray = createTray(actionBus);
+  if (caps.capabilities['ui.tray'].state === 'available')
+    tray = createTray(actionBus, {
+      // Abort's confirmation can be turned off in Settings (R1.12); Restart always asks.
+      shouldConfirm: (kind) => kind === 'restart' || settings.get().recorder.confirmAbort,
+    });
+
+  if (harnessSocket) {
+    harness = new HarnessChannel({
+      socketPath: harnessSocket,
+      logger: log,
+      handlers: harnessCommands({
+        status: () => ({
+          ...manager.status(),
+          root: manager.activeRoot,
+          pid: process.pid,
+          projectsDir: settings.get().projectsDir,
+          tray: { present: tray !== null, state: trayStateValue },
+          freeBytesOverride: freeSpace.current,
+        }),
+        dispatch: (type) => actionBus.dispatch({ type, source: 'cli' }),
+        settings,
+        freeSpace,
+        recovery: {
+          list: () => recovery.list(),
+          recover: async (id) => {
+            const result = await recovery.recover(id);
+            libraryChanged();
+            return result;
+          },
+        },
+        openEditor: async (id) => {
+          if (!(await library.findRoot(id))) throw new Error(`project ${id} was not found`);
+          editorHost.open(id);
+        },
+        metrics: () => metrics.snapshot(),
+        capabilities: () => capabilities.current(),
+        closeShell: () => shellWindow?.close(),
+        // Harness quits never wait for a dialog: a recording is saved.
+        quit: () => quitGuard.quitWithoutAsking(),
+      }),
+    });
+    await harness.start().catch((error: unknown) => {
+      log.error('harness: control channel failed to start', error);
+      harness = null;
+    });
+  }
 
   showShell();
   if (cli.action) actionBus.dispatch({ type: cli.action, source: 'cli' });
@@ -497,8 +727,9 @@ async function start(): Promise<void> {
 
 const secondInstanceData: SecondInstanceData = { action: cli.action };
 
-if (!app.requestSingleInstanceLock(secondInstanceData)) {
-  // Another instance is running; it receives our action through 'second-instance' (R1.2).
+if (relaunchX11 || !app.requestSingleInstanceLock(secondInstanceData)) {
+  // Relaunching for X11, or another instance is running: it receives our action through
+  // 'second-instance' (R1.2).
   app.quit();
 } else {
   app.on('second-instance', (_event, argv, _cwd, additionalData) => {
@@ -511,17 +742,23 @@ if (!app.requestSingleInstanceLock(secondInstanceData)) {
 
   app.on('window-all-closed', () => {
     // With a tray the app keeps running in it; without one, closing the window quits (R1.3).
-    if (!tray) app.quit();
+    if (!tray) quitGuard.quitInteractively();
   });
 
-  // Editors save their last edits before the app quits (R1.28).
+  // A recording in progress is saved, discarded or kept first (F-7); then editors save their
+  // last edits before the app quits (R1.28).
   app.on('before-quit', (event) => {
+    if (!quitGuard.isQuitting)
+      log.info(`quit requested (recorder ${sessionManager?.state ?? 'idle'})`);
+    if (!quitGuard.beforeQuit(event)) return;
     if (editorHost.isReleased || editorHost.openProjects.length === 0) return;
     event.preventDefault();
     void editorHost.releaseForQuit().then(() => app.quit());
   });
 
   app.on('will-quit', () => {
+    void metrics.stop();
+    void harness?.close();
     tray?.destroy();
     controlsHost?.dispose();
     sessionManager?.dispose();

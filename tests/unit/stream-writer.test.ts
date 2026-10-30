@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   attachClockPort,
   attachStreamPort,
+  DEFAULT_FSYNC_INTERVAL_MS,
   recordingFileName,
   StreamWriter,
   type PortLike,
@@ -96,28 +97,29 @@ describe('StreamWriter (§1.5, §9.6)', () => {
     );
   });
 
-  it('fsyncs at most every 2 s while data arrives, and on close', () => {
+  it('fsyncs every second while data arrives, and on close', () => {
     vi.useFakeTimers();
     let now = 0;
     const { fs: wfs, counts } = countingFs();
     const writer = new StreamWriter({ dir, kind: 'screen', fs: wfs, now: () => now });
+    expect(DEFAULT_FSYNC_INTERVAL_MS).toBeLessThanOrEqual(1000);
 
     writer.write(0, bytes('a'));
-    vi.advanceTimersByTime(1999);
+    vi.advanceTimersByTime(999);
     expect(counts.fsync).toBe(0);
-    now = 2000;
+    now = 1000;
     vi.advanceTimersByTime(1);
     expect(counts.fsync).toBe(1);
-    expect(writer.stats().lastFsyncAt).toBe(2000);
+    expect(writer.stats().lastFsyncAt).toBe(1000);
 
     // Nothing new: no extra fsync.
     vi.advanceTimersByTime(4000);
     expect(counts.fsync).toBe(1);
 
-    // Continuous writes: one fsync per 2 s tick.
+    // Continuous writes (one fragment every 500 ms): one fsync per 1 s tick.
     for (let t = 0; t < 10; t += 1) {
       writer.write(1 + t, bytes('b'));
-      vi.advanceTimersByTime(1000);
+      vi.advanceTimersByTime(500);
     }
     expect(counts.fsync).toBe(6);
 

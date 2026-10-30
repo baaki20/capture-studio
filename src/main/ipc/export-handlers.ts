@@ -12,10 +12,16 @@
  *   saved project (R1.49). Offline media block it with a message (R1.29).
  * - Auto uses the probe-verified hardware encoder; the utility falls back to libx264 once and the
  *   `export.done` notice says so (§4.3.9, §9.4).
+ * - No temp output outlives its export (R1.47): the utility deletes it on cancel, failure and
+ *   exit; when an export ends any other way (the utility crashed or was killed) its temp files
+ *   are deleted here, quitting deletes those of running exports, and startup sweeps the exports
+ *   folder for temp files older than this process. Only names of the export temp shape
+ *   (`.<name>.mp4.<8 hex>.part`) are touched.
  */
-import { promises as fs } from 'node:fs';
+import { promises as fs, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { FfmpegEncoderReport } from '../../shared/capabilities/types';
+import { exportTempOwner } from '../../shared/export/temp-name';
 import { newId } from '../../shared/ids';
 import type { ExportOptions, InvokeResponse } from '../../shared/ipc/contract';
 import type { JobResult } from '../../shared/ipc/media-utility';
@@ -54,8 +60,15 @@ export interface ExportHandlerDeps {
   /** Resolves with an error message, or '' on success (Electron's `shell.openPath`). */
   openPath: (fullPath: string) => Promise<string>;
   logger: Logger;
+  /**
+   * Re-checks the media files on disk (missing, unreadable or damaged become offline, R1.29), so
+   * a file that broke after the editor opened still blocks the export with a clear message.
+   */
+  checkMedia?: (root: string, doc: ProjectV1) => Promise<ProjectV1>;
   fileExists?: (fullPath: string) => Promise<boolean>;
   now?: () => number;
+  /** When this process started (epoch ms); older temp files are stale. */
+  processStartMs?: number;
 }
 
 interface ChosenTarget {
@@ -96,6 +109,64 @@ export function offlineExportMedia(doc: ProjectV1): string[] {
   return doc.media.filter((m) => offline.has(m.id)).map((m) => m.path);
 }
 
+/** Temp files of an export to `output` (same folder, `.<name>.<token>.part`). */
+function isTempOf(fileName: string, output: string): boolean {
+  return exportTempOwner(fileName) === path.basename(output);
+}
+
+/** Deletes the temp files of an export to `output`, synchronously (quit). Returns their paths. */
+export function removeExportTempsSync(output: string): string[] {
+  const dir = path.dirname(output);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const removed: string[] = [];
+  for (const name of names.filter((n) => isTempOf(n, output))) {
+    try {
+      rmSync(path.join(dir, name), { force: true });
+      removed.push(path.join(dir, name));
+    } catch {
+      // Best effort: the startup sweep retries.
+    }
+  }
+  return removed;
+}
+
+/** Deletes the temp files of an export to `output`. Returns their paths. */
+export async function removeExportTemps(output: string): Promise<string[]> {
+  const dir = path.dirname(output);
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  const temps = names.filter((n) => isTempOf(n, output)).map((n) => path.join(dir, n));
+  await Promise.all(temps.map((file) => fs.rm(file, { force: true })));
+  return temps;
+}
+
+/**
+ * Deletes export temp files in `dir` last modified before `beforeMs` (epoch ms): leftovers of a
+ * process that was killed mid-export. Newer ones may belong to an export running now.
+ */
+export async function sweepStaleExportTemps(dir: string, beforeMs: number): Promise<string[]> {
+  const names = await fs.readdir(dir).catch(() => [] as string[]);
+  const removed: string[] = [];
+  for (const name of names) {
+    const owner = exportTempOwner(name);
+    if (owner === null || path.extname(owner).toLowerCase() !== '.mp4') continue;
+    const file = path.join(dir, name);
+    try {
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.mtimeMs >= beforeMs) continue;
+      await fs.rm(file, { force: true });
+      removed.push(file);
+    } catch {
+      // Gone already, or not ours to delete.
+    }
+  }
+  return removed;
+}
+
 /** Seconds left, from the fraction done and the time spent; null until it is meaningful. */
 export function estimateEtaSec(fraction: number | null, elapsedMs: number): number | null {
   if (fraction === null || fraction < 0.01 || elapsedMs <= 0) return null;
@@ -114,6 +185,8 @@ export class ExportService {
   private readonly finished = new Map<string, string>();
   private readonly fileExists: (fullPath: string) => Promise<boolean>;
   private readonly now: () => number;
+  /** The startup sweep of the exports folder (see `sweepStaleTemps`). */
+  sweeping: Promise<string[]> = Promise.resolve([]);
 
   constructor(private readonly deps: ExportHandlerDeps) {
     this.fileExists =
@@ -127,6 +200,7 @@ export class ExportService {
   }
 
   register(): void {
+    this.sweeping = this.sweepStaleTemps();
     const { router } = this.deps;
     router.handle('export.target', ({ projectId }) => this.target(projectId));
     router.handle('export.chooseOutput', ({ projectId }, context) =>
@@ -148,9 +222,29 @@ export class ExportService {
     });
   }
 
-  /** Cancels every running export (app quit). */
+  /**
+   * Cancels every running export and deletes its temp output (app quit). Synchronous: the
+   * utility is stopped right after and may not get to its own cleanup.
+   */
   dispose(): void {
-    for (const job of this.running.values()) job.controller.abort();
+    for (const job of this.running.values()) {
+      job.controller.abort();
+      const removed = removeExportTempsSync(job.output);
+      if (removed.length > 0) this.deps.logger.info(`export: removed ${removed.join(', ')}`);
+    }
+  }
+
+  /** Deletes temp files that exports of an earlier run left in the exports folder. */
+  async sweepStaleTemps(): Promise<string[]> {
+    const dir = this.deps.settings().exportsDir;
+    const removed = await sweepStaleExportTemps(
+      dir,
+      this.deps.processStartMs ?? performance.timeOrigin,
+    );
+    if (removed.length > 0) {
+      this.deps.logger.info(`export: removed stale temp files ${removed.join(', ')}`);
+    }
+    return removed;
   }
 
   private finishedOutput(jobId: string): string {
@@ -220,7 +314,8 @@ export class ExportService {
       message: string | null,
     ): InvokeResponse<'export.start'> => ({ jobId: null, status, path: output, message });
 
-    const offline = offlineExportMedia(doc);
+    const checked = this.deps.checkMedia ? await this.deps.checkMedia(root, doc) : doc;
+    const offline = offlineExportMedia(checked);
     if (offline.length > 0) {
       return reply(
         'blocked',
@@ -271,6 +366,7 @@ export class ExportService {
     const { router, logger } = this.deps;
     let startedAt = this.now();
     let last = 0;
+    let succeeded = false;
     try {
       const result = await this.deps.runExport(job, {
         signal: controller.signal,
@@ -285,6 +381,7 @@ export class ExportService {
           });
         },
       });
+      succeeded = true;
       this.finished.set(jobId, result.output);
       const notice = result.fallback
         ? `The hardware encoder (${result.fallback.from}) failed, so the video was encoded in software (libx264).`
@@ -309,7 +406,20 @@ export class ExportService {
         cancelled,
       });
     } finally {
+      // The utility deletes its temp output itself unless it died first (crash, kill). Still
+      // listed as running meanwhile, so a new export to the same file cannot start and lose its
+      // temp file to this cleanup.
+      if (!succeeded) await this.removeTemps(job.output);
       this.running.delete(jobId);
+    }
+  }
+
+  private async removeTemps(output: string): Promise<void> {
+    try {
+      const removed = await removeExportTemps(output);
+      if (removed.length > 0) this.deps.logger.info(`export: removed ${removed.join(', ')}`);
+    } catch (error) {
+      this.deps.logger.warn('export: removing temp files failed', error);
     }
   }
 }

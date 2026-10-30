@@ -5,7 +5,13 @@
  * replaced by exact-length silence) → `AudioEncoder` (Opus) → fragmented MP4 → stream port.
  *
  * The file is one continuous sample stream: its time is `samplesWritten / sampleRate`. A drift
- * checkpoint `(arrival session µs, cumulative samples)` is taken about once a second.
+ * checkpoint `(arrival session µs, cumulative samples)` is kept about once a second: the chunk of
+ * that second that arrived earliest relative to its samples (`CheckpointLog`).
+ *
+ * A second series, from the chunks' capture timestamps instead of their arrival, is kept for
+ * offline comparison only (`captureCheckpoints`, written as `media/mic.sync-capture.json`; the
+ * drift fit does not use it). It is collected in media time (jump-corrected timestamp of the
+ * chunk's end) and mapped to session time with the stamper's final offset when the stream ends.
  *
  * The peak of the recorded samples is also posted as `level` at about 15 Hz for the live meters
  * (R1.6, R1.12); paused spans are silence, so the meter drops to zero while paused.
@@ -26,7 +32,10 @@ const LEVEL_INTERVAL_US = 1_000_000 / 15;
 class AudioPipeline extends PipelineBase<AudioData> {
   protected readonly muxer: StreamMuxer;
   private readonly encoder: AudioEncoder;
-  private readonly checkpointLog = new CheckpointLog();
+  /** Created with the continuity planner, once the real sample rate is known. */
+  private checkpointLog: CheckpointLog | null = null;
+  /** Capture-timestamp checkpoints `(media µs of the chunk's end, cumulative samples)`. */
+  private captureLog: CheckpointLog | null = null;
   private config: AudioEncoderConfigLike | null = null;
   private continuity: AudioContinuity | null = null;
   /** Pause and resume calls before the first chunk, replayed into the continuity planner. */
@@ -89,8 +98,9 @@ class AudioPipeline extends PipelineBase<AudioData> {
         this.encodeSegment(data, segment);
       }
       this.counters.samplesWritten = continuity.framesWritten;
-      const checkpoint = this.checkpointLog.offer(arrivalUs, continuity.framesWritten);
+      const checkpoint = this.checkpointLog?.offer(arrivalUs, continuity.framesWritten);
       if (checkpoint) this.counters.addCheckpoint(checkpoint);
+      this.captureLog?.offer(timestampUs + durationUs, continuity.framesWritten);
       this.postLevel(arrivalUs);
     } catch (error) {
       this.fail(`encode failed: ${describe(error)}`);
@@ -123,6 +133,8 @@ class AudioPipeline extends PipelineBase<AudioData> {
     }
     this.pending.length = 0;
     this.continuity = continuity;
+    this.checkpointLog = new CheckpointLog(data.sampleRate);
+    this.captureLog = new CheckpointLog(data.sampleRate);
     return continuity;
   }
 
@@ -176,6 +188,10 @@ class AudioPipeline extends PipelineBase<AudioData> {
   }
 
   protected async flushEncoder(): Promise<void> {
+    // The last second's checkpoint is held until its interval closes.
+    const last = this.checkpointLog?.flush();
+    if (last) this.counters.addCheckpoint(last);
+    this.captureLog?.flush();
     try {
       await this.configuring;
       if (this.encoder.state === 'configured') await this.encoder.flush();
@@ -188,12 +204,20 @@ class AudioPipeline extends PipelineBase<AudioData> {
     return {};
   }
 
+  /** The capture-timestamp series in session time (final stamper offset), or empty. */
+  private captureCheckpoints(): [number, number][] {
+    const offset = this.stamper.offsetUs;
+    if (offset === null || !this.captureLog) return [];
+    return this.captureLog.checkpoints.map(([t, n]) => [Math.round(t + offset), n]);
+  }
+
   protected resultDetails(): Pick<
     WorkerResult,
-    'encoder' | 'codec' | 'video' | 'audio' | 'checkpoints'
+    'encoder' | 'codec' | 'video' | 'audio' | 'checkpoints' | 'captureCheckpoints'
   > {
     const config = this.config ?? this.audio.config;
     return {
+      captureCheckpoints: this.captureCheckpoints(),
       encoder: { name: 'Opus (WebCodecs)', hardware: false },
       codec: 'opus',
       video: null,

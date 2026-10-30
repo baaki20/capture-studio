@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { err, ok, type Result } from '../../shared/result';
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
+const PROBE_TIMEOUT_MS = 60_000;
 
 function run(
   file: string,
@@ -19,6 +20,9 @@ function run(
       args,
       {
         maxBuffer: MAX_OUTPUT_BYTES,
+        // A probe never takes this long; a hung one must not outlive its caller.
+        timeout: PROBE_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
         windowsHide: true,
         encoding: 'utf8',
         ...(signal ? { signal } : {}),

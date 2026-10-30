@@ -32,6 +32,7 @@ import {
 import {
   FRAME_RATES,
   type FrameRate,
+  type Media,
   type ProjectV1,
   type RecordingInfo,
 } from '../../shared/project/schema';
@@ -65,6 +66,11 @@ export type RecoveryCandidate = z.infer<typeof RecoveryCandidateSchema>;
 export interface RecoveryDeps {
   store: ProjectStore;
   utility: JobRunner;
+  /**
+   * Generates peaks and thumbnails in the background once the recovered project is written (the
+   * shared queue in main). Without it they are generated before `project.json` is written.
+   */
+  generateCaches?: (projectId: string, root: string, media: readonly Media[]) => Promise<void>;
   projectsDir: () => string;
   /** `shell.trashItem`. */
   trashItem: (fullPath: string) => Promise<void>;
@@ -268,7 +274,9 @@ export class RecoveryService {
     if (!built.ok) {
       throw new Error(`recovered project is invalid: ${built.error.issues.slice(0, 3).join('; ')}`);
     }
-    await generateCaches(this.deps.utility, root, built.value.media, this.logger);
+    if (!this.deps.generateCaches) {
+      await generateCaches(this.deps.utility, root, built.value.media, this.logger);
+    }
     await this.deps.store.write(root, built.value);
     if (candidate.log) {
       await writeSessionLog(root, {
@@ -280,6 +288,9 @@ export class RecoveryService {
     await removeLock(root);
     this.found.delete(id);
     this.logger.info(`recovery: recovered ${root} (${String(streams.length)} streams)`);
+    void this.deps
+      .generateCaches?.(built.value.id, root, built.value.media)
+      .catch((error: unknown) => this.logger.warn('recovery: background caches failed', error));
     return { projectId: built.value.id };
   }
 

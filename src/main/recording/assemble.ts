@@ -66,6 +66,8 @@ export function expectedStreams(kind: StreamKind): { video: number; audio: numbe
 export const recFileName = (kind: StreamKind): string => `${kind}.rec.mp4`;
 export const finalFileName = (kind: StreamKind): string => `${kind}.mp4`;
 export const syncFileName = (kind: StreamKind): string => `${kind}.sync.json`;
+/** The capture-timestamp checkpoint series, kept for offline comparison (not used by the fit). */
+export const captureSyncFileName = (kind: StreamKind): string => `${kind}.sync-capture.json`;
 
 // ---------------------------------------------------------------------------------------------
 // Session lock
@@ -158,6 +160,8 @@ export const EngineStreamReportSchema = z.looseObject({
   sync: z.looseObject({ reason: z.string() }).optional(),
   /** Drift checkpoints `[sessionUs, cumulativeSamples]` (audio). */
   checkpoints: z.array(z.tuple([z.number(), z.number()])).optional(),
+  /** Mic: the capture-timestamp series (offline comparison only; never fitted). */
+  captureCheckpoints: z.array(z.tuple([z.number(), z.number()])).optional(),
   nominalRate: z.number().positive().optional(),
   video: z
     .object({
@@ -373,33 +377,43 @@ export interface JobRunner {
   runJob<K extends JobKind>(job: Extract<JobSpec, { kind: K }>): Promise<JobResult<K>>;
 }
 
-/** Peaks for audio media and thumbnails for video media (§4.3.5). Failures are only logged. */
+/**
+ * Peaks for audio media and thumbnails for video media (§4.3.5). Failures are only logged. Runs
+ * `concurrency` jobs at a time (peaks first, they are quick). Main runs this after the project is
+ * ready, in the background (`projects/cache-jobs.ts` is the queue it uses there).
+ */
 export async function generateCaches(
   utility: JobRunner,
   root: string,
   media: readonly Media[],
   logger: Logger,
+  concurrency = 2,
 ): Promise<void> {
   const cacheDir = path.join(root, CACHE_DIR);
   await fs.mkdir(cacheDir, { recursive: true });
-  for (const m of media) {
-    if (m.status === 'failed' || m.status === 'missing' || m.durationUs <= 0) continue;
-    const input = path.join(root, ...m.path.split('/'));
-    try {
-      if (m.kind === 'audio') {
-        await utility.runJob({
-          kind: 'peaks',
-          input,
-          output: path.join(cacheDir, `${m.id}.peaks`),
-        });
-      } else {
-        await utility.runJob({ kind: 'thumbnails', input, outDir: cacheDir, mediaId: m.id });
+  const todo = media
+    .filter((m) => m.status !== 'failed' && m.status !== 'missing' && m.durationUs > 0)
+    .sort((a, b) => Number(a.kind !== 'audio') - Number(b.kind !== 'audio'));
+  const next = async (): Promise<void> => {
+    for (let m = todo.shift(); m; m = todo.shift()) {
+      const input = path.join(root, ...m.path.split('/'));
+      try {
+        if (m.kind === 'audio') {
+          await utility.runJob({
+            kind: 'peaks',
+            input,
+            output: path.join(cacheDir, `${m.id}.peaks`),
+          });
+        } else {
+          await utility.runJob({ kind: 'thumbnails', input, outDir: cacheDir, mediaId: m.id });
+        }
+      } catch (error) {
+        logger.warn(
+          `recording: ${m.kind === 'audio' ? 'peaks' : 'thumbnails'} for ${m.id} failed`,
+          error,
+        );
       }
-    } catch (error) {
-      logger.warn(
-        `recording: ${m.kind === 'audio' ? 'peaks' : 'thumbnails'} for ${m.id} failed`,
-        error,
-      );
     }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, concurrency) }, next));
 }

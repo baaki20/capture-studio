@@ -14,6 +14,21 @@ import { ProjectRootRegistry } from '../../src/main/projects/media-protocol';
 import { ProjectStore } from '../../src/main/projects/project-store';
 import { exampleProject } from '../fixtures/example-project';
 
+/** The smallest MP4 the offline check accepts: ftyp, moov with a trak, and media data. */
+function tinyMp4(): Buffer {
+  const box = (type: string, payload: Buffer = Buffer.alloc(0)) => {
+    const head = Buffer.alloc(8);
+    head.writeUInt32BE(8 + payload.length, 0);
+    head.write(type, 4, 'latin1');
+    return Buffer.concat([head, payload]);
+  };
+  return Buffer.concat([
+    box('ftyp', Buffer.alloc(8)),
+    box('moov', box('trak', Buffer.alloc(16))),
+    box('mdat', Buffer.alloc(64, 1)),
+  ]);
+}
+
 vi.mock('electron', () => ({ app: { getVersion: () => '0.0.0' }, BrowserWindow: vi.fn() }));
 const { EditorWindowHost } = await import('../../src/main/windows/editor');
 
@@ -27,7 +42,7 @@ beforeEach(async () => {
   root = path.join(base, 'Lesson.cstudio');
   await fs.mkdir(path.join(root, 'media'), { recursive: true });
   for (const m of doc.media.filter((m) => m.role !== 'camera')) {
-    await fs.writeFile(path.join(root, m.path), 'data');
+    await fs.writeFile(path.join(root, m.path), tinyMp4());
   }
   store = new ProjectStore({ registry: new ProjectRootRegistry() });
   await store.write(root, doc);
@@ -41,10 +56,16 @@ describe('offline media (R1.29)', () => {
   it('marks a missing file offline and a returned one ok again', async () => {
     const marked = await markMediaPresence(root, doc);
     expect(marked.media.map((m) => m.status)).toEqual(['ok', 'missing', 'ok', 'ok']);
-    await fs.writeFile(path.join(root, 'media/camera.mp4'), 'back');
+    await fs.writeFile(path.join(root, 'media/camera.mp4'), tinyMp4());
     const back = await markMediaPresence(root, marked);
     expect(back.media[1]?.status).toBe('ok');
     expect(await markMediaPresence(root, back)).toBe(back);
+  });
+
+  it('marks a present but damaged file offline too (D-4)', async () => {
+    await fs.writeFile(path.join(root, 'media/screen.mp4'), tinyMp4().subarray(0, 40));
+    const marked = await markMediaPresence(root, doc);
+    expect(marked.media[0]?.status).toBe('missing');
   });
 });
 
@@ -195,6 +216,19 @@ describe('EditorWindowHost', () => {
     await vi.waitFor(() => expect(w.destroyed).toBe(true));
     expect(w.js[0]).toContain('__csEditorFlush');
     expect(host.openProjects).toEqual([]);
+  });
+
+  it('reports when the last editor window has closed (F-8: no tray quits only then)', async () => {
+    const { host, windows } = setup();
+    const allClosed = vi.fn();
+    host.onAllClosed(allClosed);
+    host.open('prj_a');
+    host.open('prj_b');
+    await host.releaseForQuit();
+    windows[0]!.close();
+    expect(allClosed).not.toHaveBeenCalled();
+    windows[1]!.close();
+    expect(allClosed).toHaveBeenCalledOnce();
   });
 
   it('flushes every window once before quitting', async () => {

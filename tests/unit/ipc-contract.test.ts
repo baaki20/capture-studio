@@ -23,6 +23,8 @@ describe('IPC contract (§4.3.11)', () => {
       'caps.get',
       'settings.get',
       'settings.patch',
+      'settings.chooseFolder',
+      'settings.takeLoadNotice',
       'rec.configure',
       'rec.record',
       'rec.pause',
@@ -64,6 +66,7 @@ describe('IPC contract (§4.3.11)', () => {
         'export.error',
         'export.progress',
         'library.changed',
+        'media.cachesReady',
         'rec.completed',
         'rec.levels',
         'rec.notice',
@@ -108,6 +111,15 @@ describe('IPC contract (§4.3.11)', () => {
     expect(req('settings.patch', { projectsDir: '/etc' })).toBe(false);
     expect(req('settings.patch', { recorder: { evil: 1 } })).toBe(false);
     expect(req('settings.patch', undefined)).toBe(false);
+    // Abort confirmation is a renderer choice; imported folders are main's alone.
+    expect(req('settings.patch', { recorder: { confirmAbort: false } })).toBe(true);
+    expect(req('settings.patch', { library: { importedRoots: ['/etc'] } })).toBe(false);
+    // Folders are chosen with main's dialog: the renderer names which one, never a path.
+    expect(req('settings.chooseFolder', { which: 'projectsDir' })).toBe(true);
+    expect(req('settings.chooseFolder', { which: 'projectsDir', path: '/etc' })).toBe(false);
+    expect(req('settings.chooseFolder', { which: 'userData' })).toBe(false);
+    expect(req('library.import', undefined)).toBe(true);
+    expect(req('library.import', { path: '/home' })).toBe(false);
   });
 
   it('validates recorder configuration and picker selections', () => {

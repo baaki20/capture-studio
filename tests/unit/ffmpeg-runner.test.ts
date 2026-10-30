@@ -4,7 +4,8 @@ import type { ChildProcess } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createProgressParser,
-  filterComplexScriptArgs,
+  ffmpegTooOldError,
+  filterComplexArgs,
   runFfmpeg,
   RUNNER_GLOBAL_ARGS,
   type FfmpegProgress,
@@ -54,25 +55,22 @@ describe('createProgressParser', () => {
   });
 });
 
-describe('filterComplexScriptArgs (§1.10)', () => {
-  it('uses -/filter_complex from FFmpeg 7.1 and on master builds', () => {
-    expect(filterComplexScriptArgs({ major: 9, minor: 0 }, 'g.txt')).toEqual([
-      '-/filter_complex',
-      'g.txt',
-    ]);
-    expect(filterComplexScriptArgs({ major: 7, minor: 1 }, 'g.txt')).toEqual([
-      '-/filter_complex',
-      'g.txt',
-    ]);
-    expect(filterComplexScriptArgs(null, 'g.txt')).toEqual(['-/filter_complex', 'g.txt']);
-    expect(filterComplexScriptArgs({ major: 7, minor: 0 }, 'g.txt')).toEqual([
-      '-filter_complex_script',
-      'g.txt',
-    ]);
-    expect(filterComplexScriptArgs({ major: 6, minor: 1 }, 'g.txt')).toEqual([
-      '-filter_complex_script',
-      'g.txt',
-    ]);
+describe('filterComplexArgs (§1.10, §9.7)', () => {
+  it('always passes the graph with -/filter_complex, never -filter_complex_script', () => {
+    expect(filterComplexArgs('g.txt')).toEqual(['-/filter_complex', 'g.txt']);
+  });
+
+  it('refuses FFmpeg older than 7.1 with a clear error', () => {
+    const v = (version: string) => parseFfmpegVersion(`ffmpeg version ${version} Copyright`);
+    expect(ffmpegTooOldError(v('n9.0.2-35-g9a9b70bb8c-20261023'))).toBeNull();
+    expect(ffmpegTooOldError(v('7.1.1'))).toBeNull();
+    expect(ffmpegTooOldError(v('N-127957-g935f29eaae-20261023'))).toBeNull();
+    expect(ffmpegTooOldError(null)).toBeNull();
+    for (const old of ['7.0.2', '6.1.1', 'n4.4.2']) {
+      const message = ffmpegTooOldError(v(old));
+      expect(message).toContain(`FFmpeg ${old} is too old`);
+      expect(message).toContain('7.1 or later');
+    }
   });
 });
 

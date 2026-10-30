@@ -58,6 +58,8 @@ function listEncoders(ffmpegPath: string, signal?: AbortSignal): Promise<Set<str
       {
         encoding: 'utf8',
         maxBuffer: 4 * 1024 * 1024,
+        timeout: 30_000,
+        killSignal: 'SIGKILL',
         windowsHide: true,
         ...(signal ? { signal } : {}),
       },

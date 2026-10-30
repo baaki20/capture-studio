@@ -5,7 +5,8 @@
  *
  * - Timing is arrival-calibrated: each chunk is stamped on arrival with
  *   `performance.timeOrigin + performance.now()` (µs), and about once a second a drift
- *   checkpoint `[arrivalUs, cumulativeSamples]` goes to `system.sync.json` (§1.5, §4.4.3).
+ *   checkpoint `[arrivalUs, cumulativeSamples]` goes to `system.sync.json` (§1.5, §4.4.3): the
+ *   chunk of that second that arrived earliest relative to its samples (`CheckpointLog`).
  * - Pause keeps the stream linear: samples whose estimated capture time falls inside a pause are
  *   replaced by digital silence, so nothing from the paused span is stored (§1.5, R1.14).
  * - Stop sends SIGINT to the capture process, lets FFmpeg finish the last fragment, and writes
@@ -14,14 +15,16 @@
  *   (R1.12). `SystemAudioMonitor` runs the same capture without a file, for the setup panel's
  *   meter (R1.5).
  */
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SyncCheckpoints, SystemAudioResult } from '../../shared/ipc/media-utility';
 import type { Logger } from '../../shared/logger';
+import { CheckpointLog } from '../../shared/recording/drift';
 import { silentLogger } from '../../shared/logger';
+import { spawnChild } from './child-processes';
 import { writeJsonAtomic } from './fs-utils';
-import { utilityNowUs } from './stream-writer';
+import { DEFAULT_FSYNC_INTERVAL_MS, utilityNowUs } from './stream-writer';
 
 export const SYSTEM_SAMPLE_RATE = 48_000;
 export const SYSTEM_CHANNELS = 2;
@@ -157,16 +160,14 @@ export class PcmIngest {
   private readonly encoder: ChildProcess;
   private readonly nowUs: () => number;
   private readonly logger: Logger;
-  private readonly checkpointIntervalUs: number;
+  private readonly checkpointLog: CheckpointLog;
   private readonly pauses: PauseSpan[] = [];
-  private readonly checkpoints: [number, number][] = [];
   private readonly timers: ReturnType<typeof setInterval>[] = [];
 
   private carry: Buffer = Buffer.alloc(0);
   private samples = 0;
   private silencedSamples = 0;
   private firstSampleUs: number | null = null;
-  private lastCheckpointUs = Number.NEGATIVE_INFINITY;
   private captureStderr = '';
   private encoderStderr = '';
   private failed: string | null = null;
@@ -183,14 +184,19 @@ export class PcmIngest {
     this.syncPath = path.join(options.dir, SYSTEM_SYNC_FILE_NAME);
     this.nowUs = options.nowUs ?? utilityNowUs;
     this.logger = options.logger ?? silentLogger;
-    this.checkpointIntervalUs = options.checkpointIntervalUs ?? US_PER_SECOND;
-    const spawnFn = options.spawnImpl ?? spawn;
+    this.checkpointLog = new CheckpointLog(
+      SYSTEM_SAMPLE_RATE,
+      options.checkpointIntervalUs ?? US_PER_SECOND,
+    );
     const command = options.command ?? pwRecordCommand();
 
-    this.encoder = spawnFn(options.ffmpegPath, opusEncoderArgs(this.path, options.bitrate), {
-      stdio: ['pipe', 'ignore', 'pipe'],
-      windowsHide: true,
-    });
+    // Both children are tracked and die with this process, even on SIGKILL (child-processes.ts).
+    this.encoder = spawnChild(
+      options.ffmpegPath,
+      opusEncoderArgs(this.path, options.bitrate),
+      { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true },
+      options.spawnImpl,
+    );
     this.encoderExited = exitOf(this.encoder);
     this.encoder.stderr?.setEncoding('utf8');
     this.encoder.stderr?.on('data', (chunk: string) => {
@@ -203,10 +209,12 @@ export class PcmIngest {
         this.fail(`encoder exited early (${String(code)}): ${this.encoderStderr.trim()}`);
     });
 
-    this.capture = spawnFn(command.file, command.args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
+    this.capture = spawnChild(
+      command.file,
+      command.args,
+      { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+      options.spawnImpl,
+    );
     this.captureExited = exitOf(this.capture);
     this.capture.stderr?.setEncoding('utf8');
     this.capture.stderr?.on('data', (chunk: string) => {
@@ -222,7 +230,7 @@ export class PcmIngest {
 
     this.timers.push(
       setInterval(() => this.queueSyncWrite(), options.syncWriteIntervalMs ?? 5000),
-      setInterval(() => this.fsyncOutput(), options.fsyncIntervalMs ?? 2000),
+      setInterval(() => this.fsyncOutput(), options.fsyncIntervalMs ?? DEFAULT_FSYNC_INTERVAL_MS),
     );
     for (const timer of this.timers) timer.unref();
   }
@@ -266,6 +274,7 @@ export class PcmIngest {
       this.failed = `encoder exited with ${String(encoderCode)}: ${this.encoderStderr.trim()}`;
     }
     this.fsyncOutput();
+    this.checkpointLog.flush();
     this.queueSyncWrite();
     await this.syncWriting;
     if (this.failed) this.logger.warn(`pcm-ingest: ${this.failed}`);
@@ -276,7 +285,7 @@ export class PcmIngest {
       samples: this.samples,
       silencedSamples: this.silencedSamples,
       firstSampleUs: this.firstSampleUs,
-      checkpoints: this.checkpoints.length,
+      checkpoints: this.checkpointLog.checkpoints.length,
       exitCode: captureCode,
     };
   }
@@ -299,10 +308,7 @@ export class PcmIngest {
     this.silencedSamples += this.silencePaused(pcm, frames, firstUs);
     this.samples += frames;
 
-    if (arrivalUs - this.lastCheckpointUs >= this.checkpointIntervalUs) {
-      this.checkpoints.push([Math.round(arrivalUs), this.samples]);
-      this.lastCheckpointUs = arrivalUs;
-    }
+    this.checkpointLog.offer(arrivalUs, this.samples);
     this.levels?.offer(pcm, arrivalUs);
     if (!this.failed) this.encoder.stdin?.write(pcm);
   }
@@ -358,7 +364,7 @@ export class PcmIngest {
     const doc: SyncCheckpoints = {
       version: 1,
       nominalRate: SYSTEM_SAMPLE_RATE,
-      checkpoints: this.checkpoints.map(([us, n]) => [us, n]),
+      checkpoints: this.checkpointLog.checkpoints.map(([us, n]) => [us, n]),
     };
     const run = async (): Promise<void> => {
       try {
@@ -391,11 +397,12 @@ export class SystemAudioMonitor {
     const command = options.command ?? pwRecordCommand();
     const nowUs = options.nowUs ?? utilityNowUs;
     const levels = new LevelTracker(options.onLevel);
-    const spawnFn = options.spawnImpl ?? spawn;
-    this.capture = spawnFn(command.file, command.args, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-      windowsHide: true,
-    });
+    this.capture = spawnChild(
+      command.file,
+      command.args,
+      { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
+      options.spawnImpl,
+    );
     this.capture.once('error', (error) =>
       (options.logger ?? silentLogger).warn(`system monitor: ${error.message}`),
     );

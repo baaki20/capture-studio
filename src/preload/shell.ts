@@ -16,6 +16,8 @@ const api: ShellPreloadApi = {
   settings: {
     get: () => invoke('settings.get'),
     patch: (patch) => invoke('settings.patch', patch),
+    chooseFolder: (which) => invoke('settings.chooseFolder', { which }),
+    takeLoadNotice: () => invoke('settings.takeLoadNotice'),
   },
   rec: {
     configure: (config) => invoke('rec.configure', config),

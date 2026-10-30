@@ -50,6 +50,7 @@ export const SettingsPatchSchema = z.strictObject({
       countdownSec: R.countdownSec.optional(),
       minimizeControlsOnStart: R.minimizeControlsOnStart.optional(),
       afterRecording: R.afterRecording.optional(),
+      confirmAbort: z.boolean().optional(),
       lastRegion: R.lastRegion.optional(),
     })
     .optional(),
@@ -164,12 +165,31 @@ export const LibraryEntrySchema = z.object({
   state: z.enum(['recording', 'finalizing', 'complete', 'recovered', 'failed']),
 });
 
+/** Why a media is offline (R1.29): its file is gone, or present but unreadable or damaged. */
+export const OfflineMediaSchema = z.object({
+  reason: z.enum(['missing', 'unreadable']),
+  /** What is wrong with an unreadable file ("the file is truncated…"), or null. */
+  detail: z.string().nullable(),
+});
+export type OfflineMedia = z.infer<typeof OfflineMediaSchema>;
+
 export const ProjectOpenResultSchema = z.object({
   doc: ProjectV1Schema,
   revision: z.int().nonnegative(),
   /** `cs-media://` URL per media id. */
   mediaUrls: z.record(z.string(), z.string()),
   readOnly: z.boolean(),
+  /** Offline media by id, with the reason (added after step 18; optional). */
+  offline: z.record(z.string(), OfflineMediaSchema).optional(),
+});
+
+/** Settings → which folder to choose with main's dialog (renderers never send paths). */
+export const SettingsFolderSchema = z.enum(['projectsDir', 'exportsDir']);
+
+/** Shown once when settings had to be restored from a backup or reset (R1.50). */
+export const SettingsLoadNoticeSchema = z.object({
+  kind: z.enum(['recovered-from-backup', 'reset-to-defaults']),
+  message: z.string(),
 });
 
 export const ProjectSaveSchema = z.strictObject({
@@ -294,6 +314,14 @@ export const INVOKE_CHANNELS = {
 
   'settings.get': invoke(NoPayload, SettingsV1Schema, UI),
   'settings.patch': invoke(SettingsPatchSchema, SettingsV1Schema, ['shell', 'controls', 'editor']),
+  /** Folder dialog in main for the projects or exports folder; null when cancelled. */
+  'settings.chooseFolder': invoke(
+    z.strictObject({ which: SettingsFolderSchema }),
+    SettingsV1Schema.nullable(),
+    SHELL,
+  ),
+  /** The settings-recovery notice, answered once per launch (then null; R1.50). */
+  'settings.takeLoadNotice': invoke(NoPayload, SettingsLoadNoticeSchema.nullable(), SHELL),
 
   'rec.configure': invoke(RecorderConfigSchema, z.undefined(), SHELL),
   'rec.record': invoke(NoPayload, RecordResultSchema, SHELL),
@@ -320,6 +348,7 @@ export const INVOKE_CHANNELS = {
   ),
   'library.trash': invoke(z.strictObject({ id: Id }), z.object({ trashed: z.boolean() }), SHELL),
   'library.reveal': invoke(z.strictObject({ id: Id }), z.undefined(), LIBRARY),
+  /** Folder dialog in main; validates and adds an existing `.cstudio` project (null = cancelled). */
   'library.import': invoke(NoPayload, LibraryEntrySchema.nullable(), SHELL),
   /** Opens the projects folder in the file manager. */
   'library.openFolder': invoke(NoPayload, z.undefined(), SHELL),
@@ -415,6 +444,8 @@ export const EVENT_CHANNELS = {
     windows: ['editor'],
   },
   'library.changed': { payload: z.undefined(), windows: ['shell'] },
+  /** A project's background peaks and thumbnails are done (R1.44). */
+  'media.cachesReady': { payload: z.object({ projectId: Id }), windows: ['shell', 'editor'] },
   'caps.changed': { payload: CapabilityReportSchema, windows: UI },
 } as const satisfies Record<string, { payload: z.ZodType; windows: readonly WindowKind[] }>;
 
@@ -626,6 +657,12 @@ export const EngineStreamResultSchema = EngineStreamStatsSchema.extend({
     .optional(),
   /** Audio: every drift checkpoint of the stream (the full `sync.json` content). */
   checkpoints: z.array(CheckpointSchema),
+  /**
+   * Mic: a second checkpoint series from the chunks' capture timestamps (mapped to session time
+   * with the final offset) instead of their arrival, for offline comparison only
+   * (`media/mic.sync-capture.json`; not used by the drift fit).
+   */
+  captureCheckpoints: z.array(CheckpointSchema).optional(),
   /** The media utility's writer counters from its `closed` reply. */
   writer: z
     .looseObject({ bytesWritten: z.int().nonnegative(), size: z.int().nonnegative() })

@@ -1,6 +1,11 @@
 /**
  * `settings.json` schema v1, Phase 1 subset (§4.4.3). Paths that depend on the OS (projects and
  * exports folders) are supplied by main through `createDefaultSettings`.
+ *
+ * Fields added after the first release have defaults in the schema (`.default`), so files written
+ * before them still validate and older builds simply ignore them: additive changes need no
+ * version bump. A change that renames or reshapes a field bumps `SETTINGS_SCHEMA_VERSION` and adds
+ * a migration step below.
  */
 import { z } from 'zod';
 import { defineMigrations, type Migration } from '../migrate';
@@ -12,6 +17,8 @@ export const SETTINGS_SCHEMA_VERSION = 1;
 /** 2 GB warn / 500 MB stop (R1.17), decimal units as the requirement states them. */
 export const DEFAULT_DISK_WARN_BYTES = 2_000_000_000;
 export const DEFAULT_DISK_STOP_BYTES = 500_000_000;
+/** Imported project folders remembered outside the projects folder. */
+export const MAX_IMPORTED_PROJECTS = 1000;
 
 export const SettingsV1Schema = z.object({
   schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
@@ -32,6 +39,8 @@ export const SettingsV1Schema = z.object({
     /** `auto`: minimize when `ui.excludeFromCapture` is unavailable (R1.11). */
     minimizeControlsOnStart: z.enum(['auto', 'on', 'off']),
     afterRecording: z.enum(['open-editor', 'show-in-library']),
+    /** Abort asks for confirmation in the controls window and the tray (R1.12; added later). */
+    confirmAbort: z.boolean().default(true),
     lastRegion: z
       .object({
         sourceWidth: z.int().positive(),
@@ -50,6 +59,13 @@ export const SettingsV1Schema = z.object({
   }),
   theme: z.enum(['system', 'light', 'dark']),
   language: z.string().min(1),
+  /**
+   * Projects imported from outside the projects folder (R1.27; added later). They stay where they
+   * are; the library lists them from here. Only main changes it (folder dialog).
+   */
+  library: z
+    .object({ importedRoots: z.array(z.string().min(1)).max(MAX_IMPORTED_PROJECTS) })
+    .default({ importedRoots: [] }),
 });
 
 export type Settings = z.infer<typeof SettingsV1Schema>;
@@ -79,12 +95,14 @@ export function createDefaultSettings(paths: SettingsPathDefaults): Settings {
       countdownSec: 3,
       minimizeControlsOnStart: 'auto',
       afterRecording: 'open-editor',
+      confirmAbort: true,
       lastRegion: null,
     },
     export: { preset: 'standard', encoder: 'auto' },
     disk: { warnBytes: DEFAULT_DISK_WARN_BYTES, stopBytes: DEFAULT_DISK_STOP_BYTES },
     theme: 'system',
     language: 'en',
+    library: { importedRoots: [] },
   };
 }
 

@@ -1,19 +1,22 @@
 import { useEffect, useState } from 'react';
-import type { EventPayload } from '../../shared/ipc/contract';
+import type { EventPayload, InvokeResponse } from '../../shared/ipc/contract';
 import styles from './App.module.css';
 import { Diagnostics } from './Diagnostics';
 import { Library } from './Library';
 import { NewRecording } from './NewRecording';
 import { Recovery } from './Recovery';
+import { Settings } from './Settings';
 
 type WorkerState = 'starting' | 'ok' | 'failed';
-type View = 'new' | 'library' | 'diagnostics' | 'about';
+type View = 'new' | 'library' | 'settings' | 'diagnostics' | 'about';
 type RecState = EventPayload<'rec.state'>;
 type Completed = EventPayload<'rec.completed'>;
+type LoadNotice = NonNullable<InvokeResponse<'settings.takeLoadNotice'>>;
 
 const VIEWS: readonly { id: View; label: string }[] = [
   { id: 'new', label: 'New recording' },
   { id: 'library', label: 'Library' },
+  { id: 'settings', label: 'Settings' },
   { id: 'diagnostics', label: 'Diagnostics' },
   { id: 'about', label: 'About' },
 ];
@@ -76,6 +79,14 @@ export function App() {
   const [view, setView] = useState<View>('new');
   const recState = useRecorderState();
   const [completed, setCompleted] = useState<Completed | null>(null);
+  const [settingsNotice, setSettingsNotice] = useState<LoadNotice | null>(null);
+
+  // Settings restored from a backup or reset to defaults: told once per launch (R1.50).
+  useEffect(() => {
+    api.settings
+      .takeLoadNotice()
+      .then(setSettingsNotice, (e: unknown) => console.warn('shell: settings notice failed', e));
+  }, [api]);
 
   useEffect(() => {
     const offState = api.rec.onState((payload) => {
@@ -107,6 +118,21 @@ export function App() {
           ))}
         </nav>
       </header>
+      {settingsNotice ? (
+        <div
+          className={`${styles.banner ?? ''} ${styles.warning ?? ''}`}
+          role="status"
+          data-testid="settings-notice"
+        >
+          <span>{settingsNotice.message}</span>
+          <button type="button" onClick={() => setView('settings')}>
+            Review settings
+          </button>
+          <button type="button" aria-label="Dismiss" onClick={() => setSettingsNotice(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
       {recState === 'finalizing' ? (
         <div className={styles.banner} role="status" data-testid="finalizing">
           <span>Saving the recording…</span>
@@ -150,6 +176,8 @@ export function App() {
         <NewRecording recState={recState} />
       ) : view === 'library' ? (
         <Library />
+      ) : view === 'settings' ? (
+        <Settings />
       ) : view === 'diagnostics' ? (
         <Diagnostics />
       ) : (

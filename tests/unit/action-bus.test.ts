@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ActionBus } from '../../src/main/action-bus';
-import { trayMenuTemplate } from '../../src/main/tray-menu';
+import { confirmWhenRequired, trayMenuTemplate } from '../../src/main/tray-menu';
 import type { AppAction } from '../../src/shared/ipc/actions';
 
 describe('ActionBus', () => {
@@ -100,5 +100,36 @@ describe('tray menu (R1.3)', () => {
     await Promise.resolve();
     expect(asked).toEqual(['restart', 'abort']);
     expect(seen).toEqual(['abort-recording/tray']);
+  });
+});
+
+describe('tray confirmations (R1.12)', () => {
+  it('skips the Abort confirmation when the setting turns it off; Restart still asks', async () => {
+    const ask = vi.fn(() => Promise.resolve(false));
+    let confirmAbort = false;
+    const confirm = confirmWhenRequired(ask, (kind) => kind === 'restart' || confirmAbort);
+    expect(await confirm('abort')).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    expect(await confirm('restart')).toBe(false);
+    expect(ask).toHaveBeenCalledWith('restart');
+    confirmAbort = true;
+    expect(await confirm('abort')).toBe(false);
+  });
+
+  it('dispatches Abort straight away from the tray when no confirmation is needed', async () => {
+    const bus = new ActionBus();
+    const seen: AppAction[] = [];
+    bus.subscribe((a) => seen.push(a));
+    const items = trayMenuTemplate(
+      'recording',
+      bus,
+      confirmWhenRequired(
+        () => Promise.resolve(false),
+        () => false,
+      ),
+    );
+    const abort = items.find((i) => i.label === 'Abort…');
+    (abort?.click as () => void)();
+    await vi.waitFor(() => expect(seen).toEqual([{ type: 'abort-recording', source: 'tray' }]));
   });
 });

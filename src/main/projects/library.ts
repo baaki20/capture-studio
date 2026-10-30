@@ -1,10 +1,13 @@
 /**
  * The project library (R1.25, R1.27): every `*.cstudio` folder directly inside the projects
- * folder. The list is rebuilt from the folders on each request, so it never goes stale; each
- * project found is registered with the project store (and so with `cs-media://`).
+ * folder, plus imported project folders that live elsewhere. The list is rebuilt from the folders
+ * on each request, so it never goes stale; each project found is registered with the project
+ * store (and so with `cs-media://`).
  *
- * Actions: rename (folder and name), move to the OS trash, reveal in the file manager, and open
- * the projects folder. Folders that belong to a running recording are left alone.
+ * Actions: rename (folder and name), move to the OS trash, reveal in the file manager, open the
+ * projects folder, and import an existing `.cstudio` folder. Imported folders stay where they are
+ * and are remembered in settings (`library.importedRoots`); one that disappears is skipped (and
+ * kept, in case its drive comes back). Folders that belong to a running recording are left alone.
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -37,8 +40,22 @@ export interface LibraryOptions {
   openPath: (fullPath: string) => Promise<string>;
   /** Folders of recordings in progress (never renamed or trashed). */
   busyRoots?: () => readonly string[];
+  /** Imported project folders outside the projects folder (settings `library.importedRoots`). */
+  importedRoots?: () => readonly string[];
+  /** Persists a new list of imported folders. */
+  setImportedRoots?: (roots: string[]) => Promise<void>;
   logger?: Logger;
 }
+
+/** A folder chosen for import is not a project, or is one the library already has. */
+export class ImportError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImportError';
+  }
+}
+
+const samePath = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
 /** Timeline length: the end of the last clip, or the recorded length without pauses. */
 export function projectDurationUs(doc: ProjectV1): number {
@@ -74,24 +91,71 @@ export class Library {
   /** All readable projects, newest first. */
   async list(): Promise<LibraryEntry[]> {
     const dir = this.options.projectsDir();
-    let names: string[];
+    let names: string[] = [];
     try {
       names = await fs.readdir(dir);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw error;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
+    const roots = [
+      ...names.filter(isProjectFolderName).map((name) => path.join(dir, name)),
+      ...this.imported().filter((root) => !samePath(path.dirname(root), dir)),
+    ];
     const entries: LibraryEntry[] = [];
-    for (const name of names.filter(isProjectFolderName)) {
-      const root = path.join(dir, name);
+    const seen = new Map<string, string>();
+    for (const root of roots) {
       const stat = await fs.stat(root).catch(() => null);
       if (!stat?.isDirectory()) continue;
       const loaded = await this.options.store.read(root);
       if (!loaded) continue;
+      const other = seen.get(loaded.doc.id);
+      if (other !== undefined) {
+        // A copied folder keeps its project id: list the first one only.
+        if (!samePath(other, root)) {
+          this.logger.warn(`library: ${root} has the same project id as ${other}; skipped`);
+        }
+        continue;
+      }
+      seen.set(loaded.doc.id, root);
       this.options.store.register(loaded.doc.id, root);
       entries.push(await this.entry(loaded.doc, root));
     }
     return entries.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  /**
+   * Adds an existing project folder (R1.27). It must hold a readable `project.json`. A folder
+   * inside the projects folder is simply listed; one elsewhere stays where it is and is
+   * remembered. Importing a project the library already lists from another folder is refused
+   * (copies share their project id).
+   */
+  async importFolder(folder: string): Promise<LibraryEntry> {
+    const root = path.resolve(folder);
+    const stat = await fs.stat(root).catch(() => null);
+    if (!stat?.isDirectory()) throw new ImportError('The chosen folder does not exist.');
+    const loaded = await this.options.store.read(root);
+    if (!loaded) {
+      throw new ImportError(
+        `“${path.basename(root)}” is not a Capture Studio project: it has no readable project.json.`,
+      );
+    }
+    await this.list();
+    const known = this.options.store.rootOf(loaded.doc.id);
+    if (known && !samePath(known, root)) {
+      const stillThere = await fs.stat(projectFilePath(known)).catch(() => null);
+      if (stillThere) {
+        throw new ImportError(
+          `This project is already in the library (${path.basename(known)}). Copies of a project cannot be imported side by side.`,
+        );
+      }
+    }
+    const insideProjects = samePath(path.dirname(root), this.options.projectsDir());
+    if (!insideProjects && !this.imported().some((r) => samePath(r, root))) {
+      await this.setImported([...this.imported(), root]);
+    }
+    this.options.store.register(loaded.doc.id, root);
+    this.logger.info(`library: imported ${root}${insideProjects ? '' : ' (stays in place)'}`);
+    return this.entry(loaded.doc, root);
   }
 
   /** Renames the project and its folder (with a unique-name suffix if the name is taken). */
@@ -110,6 +174,9 @@ export class Library {
       target = path.join(parent, folder);
       await fs.rename(root, target);
       this.options.store.register(id, target);
+      if (this.imported().some((r) => samePath(r, root))) {
+        await this.setImported(this.imported().map((r) => (samePath(r, root) ? target : r)));
+      }
     }
     const doc = await this.options.store.update(id, (d) => ({ ...d, name: displayName }));
     return this.entry(doc, target);
@@ -126,6 +193,9 @@ export class Library {
       return { trashed: false };
     }
     this.options.store.unregister(id);
+    if (this.imported().some((r) => samePath(r, root))) {
+      await this.setImported(this.imported().filter((r) => !samePath(r, root)));
+    }
     return { trashed: true };
   }
 
@@ -153,6 +223,17 @@ export class Library {
     }
     await this.list();
     return this.options.store.rootOf(id);
+  }
+
+  private imported(): string[] {
+    return [...(this.options.importedRoots?.() ?? [])];
+  }
+
+  private async setImported(roots: string[]): Promise<void> {
+    if (!this.options.setImportedRoots) {
+      throw new ImportError('Importing projects from other folders is not available.');
+    }
+    await this.options.setImportedRoots(roots);
   }
 
   private async requireRoot(id: string): Promise<string> {

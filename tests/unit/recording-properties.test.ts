@@ -58,6 +58,37 @@ describe('drift fit (properties)', () => {
       ),
     );
   });
+
+  it('is shift-invariant with drift and mostly exact points (flat loss minima)', () => {
+    // Shrunk counterexample shape of the old fit: most points exactly on the line, a few early.
+    const jitterArb = fc.array(
+      fc.oneof(fc.constant(0), fc.constant(0), fc.integer({ min: -3000, max: 3000 })),
+      { minLength: 30, maxLength: 400 },
+    );
+    fc.assert(
+      fc.property(
+        jitterArb,
+        fc.integer({ min: -(2 ** 45), max: 2 ** 45 }),
+        fc.double({ min: -900, max: 900, noNaN: true }),
+        (jitter, shift, ppm) => {
+          const ratio = 1 + ppm / 1e6;
+          const points: Checkpoint[] = jitter.map((j, i) => [
+            Math.round(i * S * ratio) + j,
+            i * 48_000,
+          ]);
+          const a = fitClockRatio(points, 48_000);
+          const b = fitClockRatio(
+            points.map(([t, n]) => [t + shift, n]),
+            48_000,
+          );
+          expect(b.decision).toBe(a.decision);
+          expect(Math.abs(a.fittedRatio - b.fittedRatio) * 1e6).toBeLessThan(1e-3);
+          expect(Math.abs(b.interceptUs - a.interceptUs - shift)).toBeLessThan(1);
+        },
+      ),
+      { numRuns: 300 },
+    );
+  });
 });
 
 const pausesArb = fc

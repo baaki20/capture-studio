@@ -12,12 +12,21 @@
         color: #888;
         font: 20px sans-serif;
         cursor: none;
+        overflow: hidden;
+      }
+      body.paused {
+        background: #f00;
       }
       #flash {
         position: fixed;
         inset: 0;
         background: #fff;
         visibility: hidden;
+      }
+      #grid {
+        position: fixed;
+        inset: 0;
+        display: none;
       }
       #info {
         position: fixed;
@@ -28,15 +37,23 @@
   </head>
   <body>
     <div id="flash"></div>
+    <canvas id="grid"></canvas>
     <div id="info">Click once to start. Flash + beep every 2 s. Esc to quit.</div>
     <script>
       const PERIOD = 2.0;
       const FLASH = 0.12;
+      const PAUSE_TONE_HZ = 3000;
+      const params = new URLSearchParams(location.search);
       const flash = document.getElementById('flash');
       const info = document.getElementById('info');
       let ctx = null;
+      let out = null;
       let next = 0;
       let count = 0;
+      let paused = false;
+      let pauseTone = null;
+      const scheduled = new Set();
+
       // Beeps are scheduled on the audio clock; the flash is shown when that sound reaches the
       // speakers (contextTime + outputLatency), so screen and system audio start together.
       function schedule() {
@@ -48,32 +65,92 @@
           gain.gain.exponentialRampToValueAtTime(0.8, next + 0.002);
           gain.gain.setValueAtTime(0.8, next + FLASH - 0.01);
           gain.gain.exponentialRampToValueAtTime(0.0001, next + FLASH);
-          osc.connect(gain).connect(ctx.destination);
+          osc.connect(gain).connect(out);
           osc.start(next);
           osc.stop(next + FLASH + 0.01);
+          scheduled.add(osc);
+          osc.onended = () => scheduled.delete(osc);
           next += PERIOD;
         }
       }
       function frame() {
-        schedule();
+        if (!paused) schedule();
         const latency = ctx.outputLatency || ctx.baseLatency || 0;
         const heard = ctx.currentTime - latency;
         const phase = ((heard % PERIOD) + PERIOD) % PERIOD;
-        const on = heard > 1 && phase < FLASH;
+        const on = !paused && heard > 1 && phase < FLASH;
         if (on && flash.style.visibility !== 'visible') count++;
         flash.style.visibility = on ? 'visible' : 'hidden';
-        info.textContent = `beep ${count} · output latency ${(latency * 1000).toFixed(0)} ms · Esc to quit`;
+        info.textContent = paused
+          ? 'pause mode (red, 3 kHz)'
+          : `beep ${count} · output latency ${(latency * 1000).toFixed(0)} ms · Esc to quit`;
         requestAnimationFrame(frame);
       }
-      addEventListener('click', () => {
+      function start() {
         if (ctx) return;
         ctx = new AudioContext({ latencyHint: 'interactive' });
+        out = ctx.createGain();
+        out.gain.value = params.get('mute') === '1' ? 0 : 1;
+        out.connect(ctx.destination);
+        void ctx.resume();
         next = Math.ceil((ctx.currentTime + 1) / PERIOD) * PERIOD;
         requestAnimationFrame(frame);
-      });
+      }
+      // Pause mode (R1.14): red screen and a steady 3 kHz tone instead of flashes and beeps.
+      function setPause(on) {
+        if (!ctx || on === paused) return;
+        paused = on;
+        document.body.classList.toggle('paused', on);
+        if (on) {
+          for (const osc of scheduled) {
+            try {
+              osc.stop();
+            } catch {
+              // Not started yet.
+            }
+          }
+          scheduled.clear();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.frequency.value = PAUSE_TONE_HZ;
+          gain.gain.value = 0.5;
+          osc.connect(gain).connect(out);
+          osc.start();
+          pauseTone = osc;
+        } else {
+          pauseTone?.stop();
+          pauseTone = null;
+          next = Math.ceil((ctx.currentTime + 0.5) / PERIOD) * PERIOD;
+        }
+      }
+      // W6: 1-px white lines every 16 device pixels on black, drawn in device pixels.
+      function drawGrid() {
+        const canvas = document.getElementById('grid');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.style.display = 'block';
+        canvas.style.width = `${innerWidth}px`;
+        canvas.style.height = `${innerHeight}px`;
+        canvas.width = Math.round(innerWidth * dpr);
+        canvas.height = Math.round(innerHeight * dpr);
+        const g = canvas.getContext('2d');
+        g.fillStyle = '#000';
+        g.fillRect(0, 0, canvas.width, canvas.height);
+        g.fillStyle = '#fff';
+        for (let x = 0; x < canvas.width; x += 16) g.fillRect(x, 0, 1, canvas.height);
+        for (let y = 0; y < canvas.height; y += 16) g.fillRect(0, y, canvas.width, 1);
+        info.textContent = `grid · ${canvas.width}×${canvas.height} device px · scale ${dpr}`;
+      }
+      window.pattern = { setPause, start };
+      addEventListener('click', start);
       addEventListener('keydown', (e) => {
         if (e.key === 'Escape') close();
       });
+      if (params.get('mode') === 'grid') {
+        drawGrid();
+        addEventListener('resize', drawGrid);
+      } else if (params.get('autostart') === '1') {
+        start();
+      }
     </script>
   </body>
 </html>

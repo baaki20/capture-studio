@@ -2,15 +2,18 @@
  * The export job (§4.3.9, R1.46, R1.47): builds the graph, writes the filter script and mask PNGs
  * to a private temp folder, runs FFmpeg into a temp file next to the target, and renames it into
  * place only on success. Cancel (`q`, then SIGKILL after 5 s) and failures delete the temp file,
- * so the target path never holds a partial export.
+ * so the target path never holds a partial export. If the utility exits mid-export (app quit),
+ * an exit hook deletes the temp files of the exports still running; main sweeps what a crash
+ * leaves (`export-handlers.ts`).
  *
  * A hardware encoder that fails is retried once with libx264; the result says so, so the user
  * can be told (§4.3.9, §9.4).
  */
 import { randomBytes } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { promises as fs, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { exportTempName } from '../../../shared/export/temp-name';
 import type { ExportOptions } from '../../../shared/ipc/contract';
 import type { JobResult } from '../../../shared/ipc/media-utility';
 import type { ProjectV1 } from '../../../shared/project/schema';
@@ -74,7 +77,37 @@ async function exists(file: string): Promise<boolean> {
 
 /** The temp output: hidden, next to the target (same filesystem, so the rename is atomic). */
 export function tempOutputPath(output: string, token: string): string {
-  return path.join(path.dirname(output), `.${path.basename(output)}.${token}.part`);
+  return path.join(path.dirname(output), exportTempName(path.basename(output), token));
+}
+
+/** Temp outputs and work folders of the exports running in this process. */
+const activeTemps = new Set<string>();
+let exitHookInstalled = false;
+
+/**
+ * Deletes the temp outputs (and work folders) of running exports, synchronously. Runs on process exit: the utility
+ * exits on app quit (`process.exit` after `shutdown`) without waiting for the cancelled export's
+ * own cleanup. FFmpeg may still hold the file open; unlinking it is enough.
+ */
+export function removeActiveExportTempsSync(): string[] {
+  const removed: string[] = [];
+  for (const file of activeTemps) {
+    try {
+      rmSync(file, { recursive: true, force: true });
+      removed.push(file);
+    } catch {
+      // Best effort: main sweeps leftovers.
+    }
+  }
+  activeTemps.clear();
+  return removed;
+}
+
+function trackTemp(file: string): void {
+  activeTemps.add(file);
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => removeActiveExportTempsSync());
 }
 
 function describeFailure(error: FfmpegRunError): string {
@@ -129,6 +162,8 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
 
   const work = await fs.mkdtemp(path.join(options.tempDir ?? os.tmpdir(), 'cs-export-'));
   const temp = tempOutputPath(output, randomBytes(4).toString('hex'));
+  trackTemp(temp);
+  trackTemp(work);
   try {
     await fs.mkdir(path.dirname(output), { recursive: true });
     const mediaColor = options.ffprobePath
@@ -233,6 +268,8 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
     };
   } finally {
     await fs.rm(temp, { force: true });
+    activeTemps.delete(temp);
     await fs.rm(work, { recursive: true, force: true });
+    activeTemps.delete(work);
   }
 }

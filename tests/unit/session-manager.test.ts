@@ -11,6 +11,7 @@ import { ActionBus } from '../../src/main/action-bus';
 import { ProjectRootRegistry } from '../../src/main/projects/media-protocol';
 import { ProjectStore } from '../../src/main/projects/project-store';
 import { readLock, readSessionLog } from '../../src/main/recording/assemble';
+import { selectScreenSource } from '../../src/main/screen-source';
 import {
   SessionManager,
   type EngineLike,
@@ -328,6 +329,7 @@ interface Harness {
   stats: EventPayload<'rec.stats'>[];
   levels: EventPayload<'rec.levels'>[];
   ready: { projectId: string; root: string; name: string }[];
+  cachesReady: { projectId: string; root: string }[];
   libraryChanges: number;
   clock: { us: number };
   free: { bytes: number };
@@ -359,6 +361,8 @@ function harness(
     systemAudio?: boolean;
     countdownTickMs?: number;
     pickRegion?: SessionManagerDeps['pickRegion'];
+    selectScreen?: SessionManagerDeps['selectScreen'];
+    generateCaches?: SessionManagerDeps['generateCaches'];
   } = {},
 ): Harness {
   const settings = createDefaultSettings({
@@ -381,6 +385,7 @@ function harness(
     stats: [],
     levels: [],
     ready: [],
+    cachesReady: [],
     libraryChanges: 0,
     clock,
     free,
@@ -395,6 +400,7 @@ function harness(
       h.libraryChanges += 1;
     },
     projectReady: (info) => h.ready.push(info),
+    cachesReady: (info) => h.cachesReady.push(info),
   };
   h.manager = new SessionManager({
     settings: {
@@ -411,13 +417,16 @@ function harness(
     store,
     utility,
     engine: () => Promise.resolve(engine),
-    selectScreen: () =>
-      Promise.resolve({
-        sourceId: 'screen:1:0',
-        label: 'Entire screen',
-        maxWidth: 3840,
-        maxHeight: 2160,
-      }),
+    ...(options.generateCaches ? { generateCaches: options.generateCaches } : {}),
+    selectScreen:
+      options.selectScreen ??
+      (() =>
+        Promise.resolve({
+          sourceId: 'screen:1:0',
+          label: 'Entire screen',
+          maxWidth: 3840,
+          maxHeight: 2160,
+        })),
     ...(options.pickRegion ? { pickRegion: options.pickRegion } : {}),
     systemAudioAvailable: () => options.systemAudio ?? true,
     systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
@@ -537,15 +546,19 @@ describe('session manager', () => {
       outputLatencyUs: 42_000,
     });
 
-    // Finalize order: engine.stop → system stop → finalize → caches; lock gone; events.
+    // Finalize order: engine.stop → system stop → finalize; lock gone; events. Peaks and
+    // thumbnails follow in the background (R1.20), peaks first.
     expect(h.utility.systemCalls.map((c) => c.type)).toEqual(['start', 'stop']);
+    expect(h.utility.jobs[0]?.kind).toBe('finalize');
+    await h.manager.cachesSettled();
     expect(h.utility.jobs.map((j) => j.kind)).toEqual([
       'finalize',
-      'thumbnails',
-      'thumbnails',
       'peaks',
       'peaks',
+      'thumbnails',
+      'thumbnails',
     ]);
+    expect(h.cachesReady).toEqual([{ projectId: doc.id, root }]);
     expect(h.utility.closed).toEqual([]); // the engine closed every stream itself
     expect(await readLock(root)).toBeNull();
     expect(h.ready).toEqual([
@@ -718,6 +731,83 @@ describe('session manager', () => {
     expect(await h.manager.record()).toEqual({ status: 'cancelled' });
     expect(h.manager.state).toBe('configuring');
     expect(await projectDirs(h)).toEqual([]);
+  });
+
+  it('returns to the panel without an error when getSources rejects on portal cancel (R1.8, D-1)', async () => {
+    const logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+    const h = harness({
+      // What GNOME does: "ScreenCastPortal failed: 2", then getSources rejects.
+      selectScreen: () =>
+        selectScreenSource(
+          () => Promise.reject(new Error('Failed to get sources.')),
+          { fps: 30, portal: true },
+          logger,
+        ),
+    });
+    await h.manager.configure(CONFIG);
+    expect(await h.manager.record()).toEqual({ status: 'cancelled' });
+    expect(h.manager.state).toBe('configuring');
+    expect(h.states.map((s) => s.state)).toEqual(['configuring', 'acquiring', 'configuring']);
+    expect(h.states.every((s) => s.failureReason === null)).toBe(true);
+    expect(h.notices.filter((n) => n.level === 'error')).toEqual([]);
+    expect(await projectDirs(h)).toEqual([]);
+  });
+
+  it('opens the project before its peaks and thumbnails exist (R1.20, D-2)', async () => {
+    let release: () => void = () => undefined;
+    const caches: { projectId: string; media: number }[] = [];
+    const h = harness({
+      generateCaches: (projectId, _root, media) => {
+        caches.push({ projectId, media: media.length });
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+    const root = await startRecording(h);
+    await h.manager.stop();
+    // Ready and complete while the background pass is still running.
+    const doc = await readProject(root);
+    expect(doc.recording?.state).toBe('complete');
+    expect(await readLock(root)).toBeNull();
+    expect(h.ready).toHaveLength(1);
+    expect(caches).toEqual([{ projectId: doc.id, media: 4 }]);
+    expect(h.utility.jobs.map((j) => j.kind)).toEqual(['finalize']);
+    expect(h.cachesReady).toEqual([]);
+    release();
+    await h.manager.cachesSettled();
+    expect(h.cachesReady).toEqual([{ projectId: doc.id, root }]);
+  });
+
+  it('writes the mic capture-timestamp checkpoints apart, without fitting them', async () => {
+    const h = harness();
+    const original = h.engine.command.bind(h.engine);
+    h.engine.command = (async (channel: EngineCommandChannel, payload: never) => {
+      const result = (await original(channel, payload)) as Record<string, unknown>;
+      if (channel !== 'engine.stop') return result;
+      const streams = (result.streams as Record<string, unknown>[]).map((s) =>
+        s.kind === 'mic'
+          ? {
+              ...s,
+              // A slope far from the arrival series: it must not change the clock ratio.
+              captureCheckpoints: Array.from({ length: 11 }, (_, i) => [i * S * 1.01, i * 48_000]),
+            }
+          : s,
+      );
+      return { ...result, streams };
+    }) as typeof h.engine.command;
+    const root = await startRecording(h);
+    await h.manager.stop();
+    const file = JSON.parse(
+      await fs.readFile(path.join(root, 'media', 'mic.sync-capture.json'), 'utf8'),
+    ) as { nominalRate: number; checkpoints: [number, number][] };
+    expect(file.nominalRate).toBe(48_000);
+    expect(file.checkpoints).toHaveLength(11);
+    expect(file.checkpoints[10]).toEqual([Math.round(10 * S * 1.01), 480_000]);
+    const mic = (await readProject(root)).media.find((m) => m.role === 'microphone');
+    expect(mic?.clockRatio).toBeCloseTo(1.00005, 6);
+    expect(mic?.audio?.syncCheckpointsPath).toBe('media/mic.sync.json');
+    await h.manager.cachesSettled();
   });
 
   it('cancels the countdown without creating a project (R1.10)', async () => {

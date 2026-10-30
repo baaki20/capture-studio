@@ -22,6 +22,11 @@ export interface CoreHandlerDeps {
   /** Cached or freshly run FFmpeg encoder probe. */
   probeEncoders: () => Promise<FfmpegEncoderReport>;
   writeClipboard: (text: string) => void | Promise<void>;
+  /**
+   * Settings → projects or exports folder: main's folder dialog (renderers never send paths).
+   * Resolves with the chosen folder, or null when cancelled.
+   */
+  chooseFolder?: (which: 'projectsDir' | 'exportsDir', senderId: number) => Promise<string | null>;
 }
 
 export function registerCoreHandlers(deps: CoreHandlerDeps): void {
@@ -35,6 +40,19 @@ export function registerCoreHandlers(deps: CoreHandlerDeps): void {
 
   router.handle('settings.get', () => deps.settings.get());
   router.handle('settings.patch', (patch) => deps.settings.patch(patch));
+  router.handle('settings.chooseFolder', async ({ which }, context) => {
+    const chosen = await deps.chooseFolder?.(which, context.senderId);
+    if (!chosen) return null;
+    return deps.settings.patch({ [which]: chosen });
+  });
+  // The recovery notice is shown once per launch (R1.50): the first shell to ask gets it.
+  let noticeTaken = false;
+  router.handle('settings.takeLoadNotice', () => {
+    const notice = deps.settings.loadNotice;
+    if (noticeTaken || !notice) return null;
+    noticeTaken = true;
+    return { kind: notice.kind, message: notice.message };
+  });
 
   router.handle('diag.get', report);
   router.handle('diag.copyReport', async () => {

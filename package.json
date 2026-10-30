@@ -4,8 +4,12 @@
   "version": "0.1.0",
   "private": true,
   "description": "Screen recorder and teaching-focused video editor.",
+  "homepage": "https://github.com/baaki20/capture-studio",
   "license": "GPL-3.0-or-later",
-  "author": "Capture Studio contributors",
+  "author": {
+    "name": "Capture Studio contributors"
+  },
+  "desktopName": "org.capturestudio.CaptureStudio.desktop",
   "type": "module",
   "main": "out/main/index.js",
   "engines": {
@@ -24,9 +28,13 @@
     "test:integration": "vitest run --project integration",
     "test:watch": "vitest",
     "test:e2e": "electron-vite build && playwright test",
+    "test:wayland": "tsx tests/wayland/run.ts",
+    "test:soak": "tsx tests/wayland/run.ts soak",
     "fetch:ffmpeg": "tsx scripts/fetch-ffmpeg.ts",
     "gen:schema": "tsx scripts/gen-schema.ts",
-    "package:linux": "npm run fetch:ffmpeg -- --platform linux-x64 && electron-vite build && electron-builder --linux"
+    "gen:icons": "tsx scripts/gen-icons.ts",
+    "package:linux": "npm run fetch:ffmpeg -- --platform linux-x64 && electron-vite build && electron-builder --linux --x64",
+    "smoke:linux": "tsx scripts/smoke-linux-package.ts"
   },
   "dependencies": {
     "electron-log": "5.4.4",

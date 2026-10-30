@@ -20,6 +20,7 @@
 import { audioSegments, type AudioSegment } from '../../../shared/project/render-plan';
 import type { ProjectV1 } from '../../../shared/project/schema';
 import {
+  chunkLatenessS,
   LOOKAHEAD_US,
   planChunk,
   scheduleSignature,
@@ -41,6 +42,16 @@ export interface AudioSchedulerOptions {
   tickMs?: number;
 }
 
+/** Instrumentation for the preview performance test (§4.6.4): audible gaps while playing. */
+export interface AudioCounters {
+  /** Chunks scheduled while playing. */
+  chunks: number;
+  /** Chunks that started late (a gap was heard). */
+  underruns: number;
+  /** Total lateness of those chunks, seconds. */
+  underrunSeconds: number;
+}
+
 interface PlayingNode {
   node: AudioBufferSourceNode;
   endsAt: number;
@@ -60,6 +71,7 @@ export class AudioScheduler {
   private readonly tickMs: number;
   /** Scheduling errors (decode failures), for the status line. */
   lastError: string | null = null;
+  private counterValues: AudioCounters = { chunks: 0, underruns: 0, underrunSeconds: 0 };
 
   constructor(
     readonly context: AudioContext,
@@ -69,6 +81,15 @@ export class AudioScheduler {
     this.master.connect(context.destination);
     this.lookaheadUs = options.lookaheadUs ?? LOOKAHEAD_US;
     this.tickMs = options.tickMs ?? 200;
+  }
+
+  /** Underrun counters since the last reset (tests, diagnostics). */
+  counters(): AudioCounters {
+    return { ...this.counterValues };
+  }
+
+  resetCounters(): void {
+    this.counterValues = { chunks: 0, underruns: 0, underrunSeconds: 0 };
   }
 
   /** The timeline time being heard now, or null when stopped. */
@@ -207,7 +228,14 @@ export class AudioScheduler {
     chunk: PcmChunk,
     anchor: TransportAnchor,
   ): void {
-    const plan = planChunk(segment, chunk, anchor, this.context.currentTime);
+    const now = this.context.currentTime;
+    const late = chunkLatenessS(segment, chunk, anchor, now);
+    this.counterValues.chunks += 1;
+    if (late > 0) {
+      this.counterValues.underruns += 1;
+      this.counterValues.underrunSeconds += late;
+    }
+    const plan = planChunk(segment, chunk, anchor, now);
     if (!plan) return;
     const buffer = this.context.createBuffer(
       chunk.channels.length,

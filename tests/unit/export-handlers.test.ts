@@ -3,8 +3,12 @@
  * media (R1.29), the snapshot sent to the utility (R1.49), Auto vs Software encoder, progress
  * with ETA, done/error events, cancel, reveal/open after completion.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { existsSync, promises as fs, utimesSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FfmpegEncoderReport } from '../../src/shared/capabilities/types';
+import { exportTempName, exportTempOwner } from '../../src/shared/export/temp-name';
 import type { EventChannel, EventPayload, ExportOptions } from '../../src/shared/ipc/contract';
 import type { JobResult } from '../../src/shared/ipc/media-utility';
 import { silentLogger } from '../../src/shared/logger';
@@ -15,6 +19,7 @@ import {
   ExportService,
   exportFileName,
   offlineExportMedia,
+  sweepStaleExportTemps,
   withMp4Extension,
   type ExportHandlerDeps,
 } from '../../src/main/ipc/export-handlers';
@@ -155,6 +160,25 @@ describe('export handlers', () => {
     expect(withMp4Extension('/a/b.MP4')).toBe('/a/b.MP4');
   });
 
+  it('blocks with a clear message when a media file broke after the editor opened (R1.29)', async () => {
+    const { doc, call, jobs } = setup({
+      // The editor's snapshot still says ok; the file on disk is now damaged.
+      checkMedia: (_root, d) =>
+        Promise.resolve({
+          ...d,
+          media: d.media.map((m) => (m.role === 'screen' ? { ...m, status: 'missing' } : m)),
+        }),
+    });
+    const result = await call<{ status: string; message: string }>('export.start', {
+      projectId: doc.id,
+      options: OPTIONS,
+      doc,
+    });
+    expect(result.status).toBe('blocked');
+    expect(result.message).toMatch(/missing or unreadable: media\/screen\.mp4/);
+    expect(jobs).toHaveLength(0);
+  });
+
   it('keeps the target when the dialog is cancelled', async () => {
     const { doc, call } = setup({ showSaveDialog: () => Promise.resolve(null) });
     expect(await call('export.chooseOutput', { projectId: doc.id })).toBeNull();
@@ -282,6 +306,114 @@ describe('export handlers', () => {
       channel: 'export.error',
       payload: { jobId, message: 'Export failed: disk full', cancelled: false },
     });
+  });
+});
+
+describe('export temp files (R1.47)', () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(dirs.splice(0).map((d) => fs.rm(d, { recursive: true, force: true })));
+  });
+
+  /** A real exports folder with our temp file for `Lesson test.mp4` and lookalikes. */
+  async function exportsDir() {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-export-handlers-'));
+    dirs.push(dir);
+    const ours = path.join(dir, exportTempName('Lesson test.mp4', '0123abcd'));
+    const keep = [
+      'Lesson test.mp4', // a finished export
+      '.Lesson test.mp4.part', // no token
+      '.Lesson test.mp4.0123ABCD.part', // not our token shape
+      exportTempName('Other.mp4', '89abcdef'), // another export's temp file
+      'notes.part',
+    ].map((name) => path.join(dir, name));
+    for (const file of [ours, ...keep]) await fs.writeFile(file, 'x');
+    return { dir, ours, keep };
+  }
+
+  const withExportsDir = (dir: string): Partial<ExportHandlerDeps> => ({
+    settings: () => createDefaultSettings({ projectsDir: '/videos/CS', exportsDir: dir }),
+  });
+
+  it('deletes the temp output when the utility dies mid-export', async () => {
+    const { dir, ours, keep } = await exportsDir();
+    const { doc, call, jobs, events } = setup({ ...withExportsDir(dir), processStartMs: 0 });
+    const { jobId } = await call<{ jobId: string }>('export.start', {
+      projectId: doc.id,
+      options: OPTIONS,
+    });
+    // `runJob` rejects every outstanding job when the utility process exits.
+    jobs[0]?.result.reject(new Error('media utility exited (null)'));
+    await vi.waitFor(() => expect(existsSync(ours)).toBe(false));
+    expect(keep.every((file) => existsSync(file))).toBe(true);
+    expect(events.at(-1)).toMatchObject({ channel: 'export.error', payload: { jobId } });
+  });
+
+  it('cancels running exports and deletes their temp output on quit', async () => {
+    const { dir, ours, keep } = await exportsDir();
+    const { doc, call, jobs, service } = setup({ ...withExportsDir(dir), processStartMs: 0 });
+    await call('export.start', { projectId: doc.id, options: OPTIONS });
+    service.dispose();
+    // Synchronous: the utility is stopped right after.
+    expect(jobs[0]?.options.signal?.aborted).toBe(true);
+    expect(existsSync(ours)).toBe(false);
+    expect(keep.every((file) => existsSync(file))).toBe(true);
+  });
+
+  it('leaves the output and other files alone when an export succeeds', async () => {
+    const { dir, ours } = await exportsDir();
+    const { doc, call, jobs } = setup({ ...withExportsDir(dir), processStartMs: 0 });
+    await call('export.start', { projectId: doc.id, options: OPTIONS });
+    jobs[0]?.result.resolve({
+      output: path.join(dir, 'Lesson test.mp4'),
+      encoder: 'libx264',
+      fallback: null,
+      durationUs: 1,
+      sizeBytes: 1,
+      elapsedMs: 1,
+    });
+    await flush();
+    await flush();
+    // An unrelated leftover of the same name is the startup sweep's business, not this job's.
+    expect(existsSync(ours)).toBe(true);
+  });
+
+  it('sweeps stale temp files of ours from the exports folder at startup', async () => {
+    const { dir, ours, keep } = await exportsDir();
+    const fresh = path.join(dir, exportTempName('Running.mp4', 'aaaabbbb'));
+    await fs.writeFile(fresh, 'x');
+    const startMs = Date.now() - 1000;
+    const old = new Date(startMs - 60_000);
+    for (const file of [ours, ...keep]) utimesSync(file, old, old);
+    const { service } = setup({ ...withExportsDir(dir), processStartMs: startMs });
+    expect(await service.sweeping).toEqual(
+      [ours, path.join(dir, exportTempName('Other.mp4', '89abcdef'))].sort(),
+    );
+    expect(existsSync(ours)).toBe(false);
+    // Newer than the process: possibly an export running now.
+    expect(existsSync(fresh)).toBe(true);
+    expect(keep.filter((f) => !f.includes('Other.mp4')).every((f) => existsSync(f))).toBe(true);
+  });
+
+  it('ignores a missing exports folder', async () => {
+    expect(await sweepStaleExportTemps('/nonexistent/Exports', Date.now())).toEqual([]);
+  });
+
+  it('names temp files so that only ours match', () => {
+    expect(exportTempName('Lesson.mp4', '0123abcd')).toBe('.Lesson.mp4.0123abcd.part');
+    expect(() => exportTempName('Lesson.mp4', 'xyz')).toThrow();
+    expect(exportTempOwner('.Lesson.mp4.0123abcd.part')).toBe('Lesson.mp4');
+    expect(exportTempOwner('.a.b.mp4.ffffffff.part')).toBe('a.b.mp4');
+    for (const name of [
+      'Lesson.mp4',
+      '.Lesson.mp4.part',
+      '.Lesson.mp4.0123abc.part',
+      '.Lesson.mp4.0123abcdd.part',
+      'Lesson.mp4.0123abcd.part',
+      '.0123abcd.part',
+    ]) {
+      expect(exportTempOwner(name), name).toBeNull();
+    }
   });
 });
 

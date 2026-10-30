@@ -105,6 +105,30 @@ export function planChunk(
   return { when, offset, duration, playbackRate, timelineStartUs };
 }
 
+/**
+ * How late (s) the part of `chunk` from the anchor's start onwards would begin playing; 0 when on
+ * time. Above 0 the listener hears a gap: the preview counts it as an audio underrun (§4.6.4).
+ * The part before the anchor (a chunk that starts before the playhead) is skipped on purpose and
+ * never counts.
+ */
+export function chunkLatenessS(
+  segment: ScheduledSegment,
+  chunk: ChunkSpan,
+  anchor: TransportAnchor,
+  nowContext: number,
+): number {
+  if (anchor.rate <= 0) return 0;
+  const start = Math.max(
+    chunk.fileStartUs,
+    segment.fileStartSeconds * 1_000_000,
+    segmentFileAt(segment, anchor.timelineUs),
+  );
+  const end = Math.min(chunk.fileEndUs, segment.fileEndSeconds * 1_000_000);
+  if (end <= start) return 0;
+  const when = contextTimeFor(anchor, segmentTimelineAt(segment, start));
+  return Math.max(0, nowContext - START_SLACK_S - when);
+}
+
 export interface PcmPiece {
   /** File-local start, µs. */
   timestampUs: number;

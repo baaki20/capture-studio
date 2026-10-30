@@ -2,7 +2,7 @@
  * Handlers for the recording, library, project and recovery channels (§4.3.11, steps 10, 12 and
  * 13). Each forwards to its module; errors reach the renderer as rejected invokes.
  */
-import { markMediaPresence } from '../projects/editor-media';
+import { checkMediaPresence } from '../projects/editor-media';
 import type { Library } from '../projects/library';
 import type { ProjectStore } from '../projects/project-store';
 import type { RecoveryService } from '../recording/recovery';
@@ -19,6 +19,8 @@ export interface SessionHandlerDeps {
   libraryChanged: () => void;
   /** Starts or stops the setup panel's system-audio meter (R1.5). */
   monitorSystem: (enabled: boolean) => void;
+  /** Library → Import: main's folder dialog; null when cancelled (R1.27). */
+  chooseImportFolder?: (senderId: number) => Promise<string | null>;
 }
 
 /** Invoke channels without a result answer `undefined`. */
@@ -48,13 +50,21 @@ export function registerSessionHandlers(deps: SessionHandlerDeps): void {
   router.handle('library.trash', ({ id }) => library.trash(id));
   router.handle('library.reveal', ({ id }) => done(library.reveal(id)));
   router.handle('library.openFolder', () => done(library.openFolder()));
+  router.handle('library.import', async (_payload, context) => {
+    const folder = await deps.chooseImportFolder?.(context.senderId);
+    if (!folder) return null;
+    const entry = await library.importFolder(folder);
+    deps.libraryChanged();
+    return entry;
+  });
 
   router.handle('project.open', async ({ id }) => {
     const root = await library.findRoot(id);
     if (!root) throw new Error(`project ${id} was not found`);
     const open = await store.open(id);
-    // Media whose file is gone open as offline clips with a Relink action (R1.29).
-    return { ...open, doc: await markMediaPresence(root, open.doc) };
+    // Media whose file is gone, unreadable or damaged open as offline clips with Relink (R1.29).
+    const checked = await checkMediaPresence(root, open.doc);
+    return { ...open, doc: checked.doc, offline: checked.offline };
   });
   router.handle('project.save', ({ id, revision, doc }) => store.save(id, revision, doc));
 

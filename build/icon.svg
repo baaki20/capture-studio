@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Capture Studio</title>
+  <defs>
+    <linearGradient id="fill0" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2f558c"/>
+      <stop offset="1" stop-color="#162742"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="448" height="448" rx="96" fill="url(#fill0)"/>
+  <rect x="120" y="144" width="272" height="184" rx="16" fill="none" stroke="#f5f7fa" stroke-width="24"/>
+  <rect x="196" y="368" width="120" height="26" rx="13" fill="#f5f7fa"/>
+  <circle cx="256" cy="236" r="56" fill="#ff4d4f"/>
+</svg>

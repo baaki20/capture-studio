@@ -8,7 +8,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { ThumbnailIndex } from '../../shared/ipc/media-utility';
 import { writeJsonAtomic } from './fs-utils';
-import { filterComplexScriptArgs, runFfmpeg } from './ffmpeg-runner';
+import { filterComplexArgs, runFfmpeg } from './ffmpeg-runner';
 import { probeMedia } from './probe';
 
 export const THUMB_INTERVAL_US = 2_000_000;
@@ -24,8 +24,6 @@ export interface ThumbnailOptions {
   mediaId: string;
   signal?: AbortSignal;
   onProgress?: (fraction: number | null) => void;
-  /** From the version probe; selects the script-file flag. Null means a recent FFmpeg. */
-  ffmpegRelease?: { major: number; minor: number } | null;
   /** For tests. */
   columns?: number;
   rows?: number;
@@ -71,40 +69,63 @@ export async function generateThumbnails(
     `[0:v:0]fps=1/${String(seconds)},scale=-2:${String(THUMB_HEIGHT)},split=2[count][thumbs];` +
       `[thumbs]tile=${String(columns)}x${String(rows)}[sheets]\n`,
   );
-  let count = 0;
-  const result = await runFfmpeg({
-    ffmpegPath: options.ffmpegPath,
-    ...(probe.value.durationUs ? { durationUs: probe.value.durationUs } : {}),
-    ...(options.signal ? { signal: options.signal } : {}),
-    onProgress: (p) => {
-      if (p.frame !== null) count = p.frame;
-      options.onProgress?.(p.fraction);
-    },
-    args: [
-      '-i',
-      options.input,
-      ...filterComplexScriptArgs(options.ffmpegRelease ?? null, graphPath),
-      '-map',
-      '[count]',
-      '-f',
-      'null',
-      '-',
-      '-map',
-      '[sheets]',
-      '-q:v',
-      '5',
-      '-start_number',
-      '0',
-      '-y',
-      path.join(options.outDir, `${prefix}%d.jpg`),
-    ],
-  }).finally(() => fs.rm(graphPath, { force: true }));
-  if (!result.ok) {
-    throw new Error(
-      result.error.kind === 'failed'
-        ? `thumbnails: ffmpeg failed: ${result.error.stderrTail.trim().split('\n').slice(-3).join(' ')}`
-        : `thumbnails: ${result.error.kind}`,
-    );
+  // Decode keyframes only first: recordings have one about every second (R1.13), and a thumbnail
+  // every 2 s does not need the frames between them (about twice as fast). A file with sparse
+  // keyframes yields too few thumbnails that way, so it is decoded in full instead.
+  const render = async (keyframesOnly: boolean): Promise<number> => {
+    let count = 0;
+    const result = await runFfmpeg({
+      ffmpegPath: options.ffmpegPath,
+      ...(probe.value.durationUs ? { durationUs: probe.value.durationUs } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      onProgress: (p) => {
+        if (p.frame !== null) count = p.frame;
+        options.onProgress?.(p.fraction);
+      },
+      args: [
+        ...(keyframesOnly ? ['-skip_frame', 'nokey'] : []),
+        '-i',
+        options.input,
+        ...filterComplexArgs(graphPath),
+        '-map',
+        '[count]',
+        '-f',
+        'null',
+        '-',
+        '-map',
+        '[sheets]',
+        '-q:v',
+        '5',
+        '-start_number',
+        '0',
+        '-y',
+        path.join(options.outDir, `${prefix}%d.jpg`),
+      ],
+    });
+    if (!result.ok) {
+      throw new Error(
+        result.error.kind === 'failed'
+          ? `thumbnails: ffmpeg failed: ${result.error.stderrTail.trim().split('\n').slice(-3).join(' ')}`
+          : `thumbnails: ${result.error.kind}`,
+      );
+    }
+    return count;
+  };
+  let count: number;
+  try {
+    count = await render(true);
+    const expected = probe.value.durationUs
+      ? Math.floor(probe.value.durationUs / THUMB_INTERVAL_US) + 1
+      : 0;
+    if (count < expected - 1) {
+      for (const name of await fs.readdir(options.outDir)) {
+        if (name.startsWith(prefix) && name.endsWith('.jpg'))
+          await fs.rm(path.join(options.outDir, name));
+      }
+      count = await render(false);
+    }
+  } finally {
+    await fs.rm(graphPath, { force: true });
   }
 
   const sheets: string[] = [];

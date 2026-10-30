@@ -32,7 +32,7 @@ function cspPlugin(env: ConfigEnv): Plugin {
 }
 
 /** Every window has a preload entry (§4.2), even before its page exists. */
-const PRELOADS = ['shell', 'controls', 'picker', 'editor', 'engine'] as const;
+const PRELOADS = ['shell', 'controls', 'picker', 'editor', 'engine', 'source-picker'] as const;
 
 /**
  * Renderer pages are added as their `index.html` appears, so later steps (controls, picker,

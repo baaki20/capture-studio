@@ -47,8 +47,15 @@ export class EditorWindowHost {
   private readonly windows = new Map<string, BrowserWindow>();
   /** Set once every window was flushed for quitting; close handlers then let windows go. */
   private released = false;
+  private readonly allClosedListeners = new Set<() => void>();
 
   constructor(private readonly options: EditorHostOptions) {}
+
+  /** Called whenever the last editor window has closed. */
+  onAllClosed(listener: () => void): () => void {
+    this.allClosedListeners.add(listener);
+    return () => this.allClosedListeners.delete(listener);
+  }
 
   /** True once `releaseForQuit` has run: windows close without flushing again. */
   get isReleased(): boolean {
@@ -85,6 +92,7 @@ export class EditorWindowHost {
     window.on('closed', () => {
       unregister();
       if (this.windows.get(projectId) === window) this.windows.delete(projectId);
+      if (this.windows.size === 0) for (const listener of [...this.allClosedListeners]) listener();
     });
     this.options.logger.info(`editor: opened ${projectId}`);
     return window;

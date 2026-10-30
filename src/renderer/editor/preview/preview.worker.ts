@@ -13,7 +13,7 @@ import type { PreviewEvent, PreviewRequest } from './protocol';
 /** The worker global, typed with what this file uses (the renderer lib is DOM). */
 interface WorkerScope {
   onmessage: ((event: MessageEvent<PreviewRequest>) => void) | null;
-  postMessage(message: PreviewEvent): void;
+  postMessage(message: PreviewEvent, transfer?: Transferable[]): void;
   close(): void;
 }
 const scope = self as unknown as WorkerScope;
@@ -29,7 +29,7 @@ function post(event: PreviewEvent): void {
 function draw(tUs: number, playing: boolean): void {
   if (!renderer) return;
   const exact = renderer.render(tUs, playing);
-  post({ type: 'rendered', tUs, exact, stats: renderer.stats() });
+  post({ type: 'rendered', tUs, exact, playing, stats: renderer.stats() });
 }
 
 /** A frame the last render waited for has arrived: draw the same time again, once per tick. */
@@ -68,6 +68,14 @@ scope.onmessage = (event) => {
           post({ type: 'probe', id: message.id, result: renderer.probe(message.tUs) });
         }
         return;
+      case 'capture': {
+        const result = renderer?.capture(message.tUs) ?? null;
+        scope.postMessage(
+          { type: 'capture', id: message.id, result },
+          result ? [result.rgba.buffer] : [],
+        );
+        return;
+      }
       case 'dispose':
         pool?.dispose();
         pool = null;

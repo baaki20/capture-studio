@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { InvokeResponse } from '../../shared/ipc/contract';
+import { ipcErrorMessage } from '../../shared/ipc/errors';
 import styles from './Library.module.css';
 
 type Entry = InvokeResponse<'library.list'>[number];
@@ -25,12 +26,16 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** The project library (R1.27): list, open in the editor, rename, move to trash, reveal, open the folder. */
+/**
+ * The project library (R1.27): list, open in the editor, rename, move to trash, reveal, open the
+ * folder, and import an existing `.cstudio` folder (main shows the folder dialog).
+ */
 export function Library() {
   const api = window.captureStudio;
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [imported, setImported] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api.library.list().then(
@@ -51,6 +56,19 @@ export function Library() {
     task.then(load, (e: unknown) => setError(errorText(e)));
   };
 
+  const importProject = () => {
+    setImported(null);
+    api.library.import().then(
+      (entry) => {
+        if (!entry) return;
+        setError(null);
+        setImported(entry.name);
+        load();
+      },
+      (e: unknown) => setError(ipcErrorMessage(e)),
+    );
+  };
+
   const submitRename = () => {
     if (!renaming) return;
     const name = renaming.name.trim();
@@ -62,11 +80,21 @@ export function Library() {
     <section className={styles.page} aria-labelledby="library-title">
       <header className={styles.header}>
         <h2 id="library-title">Library</h2>
-        <button type="button" onClick={() => act(api.library.openFolder())}>
-          Open folder
-        </button>
+        <span className={styles.headerActions}>
+          <button type="button" onClick={importProject} data-testid="library-import">
+            Import…
+          </button>
+          <button type="button" onClick={() => act(api.library.openFolder())}>
+            Open folder
+          </button>
+        </span>
       </header>
       {error ? <p role="alert">{error}</p> : null}
+      {imported ? (
+        <p role="status" className={styles.muted}>
+          Imported “{imported}”.
+        </p>
+      ) : null}
       {!entries ? (
         <p>Loading…</p>
       ) : entries.length === 0 ? (

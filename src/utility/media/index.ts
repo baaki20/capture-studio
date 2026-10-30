@@ -4,6 +4,7 @@
  * encoder probe and exports. Requests are handled by `MediaService`.
  */
 import type { MediaUtilityEvent } from '../../shared/ipc/media-utility';
+import { installChildReaper } from './child-processes';
 import { MediaService } from './service';
 
 const logger = {
@@ -23,7 +24,7 @@ process.parentPort.on('message', (message) => {
   });
 });
 
-// Main asks us to exit on quit; flush writers and stop captures first.
-process.on('SIGTERM', () => {
-  void service.shutdown().finally(() => process.exit(0));
-});
+// Main asks us to exit on quit (SIGTERM); flush writers and stop captures first, for at most
+// 5 s. Exit then SIGKILLs any FFmpeg or pw-record still running; a crash of this process is
+// covered by their parent-death signal (child-processes.ts).
+installChildReaper(() => service.shutdown(), 5000);

@@ -10,7 +10,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { locateFfmpeg, type FfmpegLocation } from '../../src/main/ffmpeg/locate';
 import {
-  filterComplexScriptArgs,
+  filterComplexArgs,
   runFfmpeg,
   type FfmpegProgress,
 } from '../../src/utility/media/ffmpeg-runner';
@@ -127,7 +127,7 @@ describe('bundled FFmpeg', () => {
         'lavfi',
         '-i',
         'testsrc2=size=640x360:rate=30:duration=1',
-        ...filterComplexScriptArgs(version.release, script),
+        ...filterComplexArgs(script),
         '-map',
         '[v]',
         '-c:v',
