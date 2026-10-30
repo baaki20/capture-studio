@@ -1,0 +1,700 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-10-30T08:08:07.884Z",
+  "finishedAt": "2026-10-30T09:35:18.809Z",
+  "machine": {
+    "host": "test-laptop",
+    "kernel": "redacted",
+    "cpus": "redacted",
+    "memory": "redacted",
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "5d766a8 (phase1-editor)"
+  },
+  "scenarios": [
+    {
+      "id": "R1.20",
+      "title": "Finalize a 10-minute recording within 10 s",
+      "requirements": ["R1.20"],
+      "humanActions": [],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.20",
+          "name": "finalize a 10-minute recording",
+          "status": "pass",
+          "value": "3.3 s",
+          "limit": "≤ 10 s",
+          "detail": "remux 3.3 s + drift 22 ms + peaks/thumbnails 13.9 s; 596 MB"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalize",
+          "status": "info",
+          "value": "3.3 s"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "peaks mic",
+          "status": "info",
+          "value": "4.4 s"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "peaks system",
+          "status": "info",
+          "value": "6.4 s"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "thumbnails camera",
+          "status": "info",
+          "value": "4.1 s"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "thumbnails screen",
+          "status": "info",
+          "value": "9.4 s"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "screen finalized",
+          "status": "pass",
+          "value": "ok"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "camera finalized",
+          "status": "pass",
+          "value": "ok"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "mic finalized",
+          "status": "pass",
+          "value": "ok"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "system finalized",
+          "status": "pass",
+          "value": "ok"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-10-30T09:03:23.699Z",
+      "durationS": 27.884
+    },
+    {
+      "id": "W1",
+      "title": "Full screen, all components, sync-check pattern",
+      "requirements": ["R1.24", "R1.22", "R1.11", "R1.13", "R1.25"],
+      "humanActions": [
+        "1 portal click (pick the monitor, Share)",
+        "camera sees the screen (small mirror by the webcam) or the room lit only by the screen",
+        "speakers on",
+        "clap 5 times in view of the camera when asked"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.11",
+          "name": "controls window minimized while recording",
+          "status": "pass",
+          "value": "minimized"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "1182 ms",
+          "detail": "includes starting the second instance (1992 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "1.5 s"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.13",
+          "name": "one file per enabled stream",
+          "status": "pass",
+          "value": "screen, camera, microphone, system-audio"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "screen dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "camera dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "screen encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "camera encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "mic encoder",
+          "status": "info",
+          "value": "Opus (WebCodecs)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "system encoder",
+          "status": "info",
+          "value": "Opus (FFmpeg libopus)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen flashes found",
+          "status": "info",
+          "value": "30"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ system audio",
+          "status": "pass",
+          "value": "-7.2 ms",
+          "limit": "≤ 40 ms",
+          "detail": "30 pairs, p10 -28.5 ms, p90 12.4 ms, trend -349.1 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ mic",
+          "status": "pass",
+          "value": "-37.6 ms",
+          "limit": "≤ 40 ms",
+          "detail": "28 pairs, p10 -75.1 ms, p90 -23.8 ms, trend -816.3 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "camera ↔ mic (flash)",
+          "status": "pass",
+          "value": "30.4 ms",
+          "limit": "≤ 60 ms",
+          "detail": "25 pairs"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "claps heard / paired",
+          "status": "info",
+          "value": "8 / 8",
+          "detail": "camera − mic 28.0 ms"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "export: screen ↔ audio mix",
+          "status": "pass",
+          "value": "-12.5 ms",
+          "limit": "≤ 40 ms",
+          "detail": "30 pairs"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-06.cstudio"
+      ],
+      "startedAt": "2026-10-30T09:03:51.583Z",
+      "durationS": 312.238
+    },
+    {
+      "id": "W2",
+      "title": "Region recording with a pause in the middle",
+      "requirements": ["R1.14", "R1.9", "R1.24", "R1.32"],
+      "humanActions": ["1 portal click (the region drag and Enter are automated)", "speakers on"],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.2",
+          "name": "CLI pause → paused",
+          "status": "info",
+          "value": "1552 ms"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "scenario run",
+          "status": "error",
+          "detail": "no matching state within 15 s"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-10.cstudio"
+      ],
+      "startedAt": "2026-10-30T09:09:03.841Z",
+      "durationS": 151.375
+    },
+    {
+      "id": "W3",
+      "title": "Stop from the GNOME \"stop sharing\" indicator",
+      "requirements": ["R1.15"],
+      "humanActions": ["1 portal click", "1 click on the top-bar sharing indicator → Stop sharing"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.15",
+          "name": "the recording stops gracefully (finalizing, not failed)",
+          "status": "pass",
+          "value": "finalizing"
+        },
+        {
+          "requirement": "R1.15",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.15",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.15",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "3/3"
+        },
+        {
+          "requirement": "R1.15",
+          "name": "a notice says screen sharing ended",
+          "status": "pass",
+          "value": "Screen sharing ended; the recording was stopped."
+        },
+        {
+          "requirement": "R1.15",
+          "name": "the screen file covers the recording",
+          "status": "pass",
+          "value": "31.2 s of 32.1 s"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-11.cstudio"
+      ],
+      "startedAt": "2026-10-30T09:11:35.216Z",
+      "durationS": 47.776
+    },
+    {
+      "id": "W4",
+      "title": "Unplug the USB headset (mic) mid-recording",
+      "requirements": ["R1.16"],
+      "humanActions": [
+        "1 portal click",
+        "unplug the USB headset when asked, plug it back in at the end"
+      ],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R1.16",
+          "name": "notice",
+          "status": "info",
+          "value": "The microphone could not be opened; recording without it."
+        },
+        {
+          "requirement": "R1.16",
+          "name": "the notice names the device",
+          "status": "fail",
+          "value": "The microphone could not be opened; recording without it."
+        },
+        {
+          "requirement": "R1.16",
+          "name": "recording continues",
+          "status": "pass",
+          "value": "recording"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "1157 ms",
+          "detail": "includes starting the second instance (1935 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "1.1 s"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "3/3"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "mic media is marked endedEarly",
+          "status": "fail",
+          "value": "no mic media"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "mic ends near the unplug time",
+          "status": "fail",
+          "value": "0.0 s (unplugged at -0.0 s)"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "screen keeps going after the unplug",
+          "status": "pass",
+          "value": "18.6 s"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-13.cstudio"
+      ],
+      "startedAt": "2026-10-30T09:12:22.993Z",
+      "durationS": 58.722
+    },
+    {
+      "id": "W5",
+      "title": "Cancel the portal dialog",
+      "requirements": ["R1.8"],
+      "humanActions": ["1 click: Cancel in the portal dialog"],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R1.8",
+          "name": "returns to the setup panel",
+          "status": "fail",
+          "value": "countdown"
+        },
+        {
+          "requirement": "R1.8",
+          "name": "no project folder is created",
+          "status": "fail",
+          "value": "1 new"
+        },
+        {
+          "requirement": "R1.8",
+          "name": "no error notice",
+          "status": "pass",
+          "value": "none"
+        },
+        {
+          "requirement": "R1.8",
+          "name": "no error shown in the panel",
+          "status": "pass",
+          "value": "none"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-10-30T09:13:21.718Z",
+      "durationS": 12.578
+    },
+    {
+      "id": "W6",
+      "title": "Fractional scaling, two monitors, region on monitor 2",
+      "requirements": ["R1.9", "R1.53"],
+      "humanActions": ["set monitor 2 to 125 % (if not already)", "1 portal click: pick monitor 2"],
+      "status": "not-testable",
+      "checks": [
+        {
+          "requirement": "W6",
+          "name": "outputs",
+          "status": "info",
+          "value": "Built-in display 1536×864 @1.25"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "region on a second monitor with a different scale",
+          "status": "not-testable",
+          "detail": "only one output is connected"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-10-30T09:13:34.297Z",
+      "durationS": 3.065
+    },
+    {
+      "id": "W7",
+      "title": "SIGKILL during recording, relaunch, recover",
+      "requirements": ["R1.21", "R1.24"],
+      "humanActions": ["1 portal click"],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.21",
+          "name": "killed after",
+          "status": "info",
+          "value": "20.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "no capture process outlives the kill",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "the next launch offers the recording",
+          "status": "pass",
+          "value": "1 candidate(s)"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "the main window shows \"Recover\"",
+          "status": "pass",
+          "value": "shown"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "recording.state is \"recovered\"",
+          "status": "pass",
+          "value": "recovered"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "3/3"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "screen reaches within 2 s of the kill",
+          "status": "fail",
+          "value": "ends at 17.4 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "camera reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 18.7 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "system-audio reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 19.3 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen flashes found",
+          "status": "info",
+          "value": "9"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen ↔ system audio",
+          "status": "pass",
+          "value": "8.9 ms",
+          "limit": "≤ 40 ms",
+          "detail": "9 pairs, p10 -3.4 ms, p90 23.6 ms, trend 1803.9 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen ↔ mic",
+          "status": "error",
+          "detail": "no matched events (0 pairs)"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-14.cstudio"
+      ],
+      "startedAt": "2026-10-30T09:13:37.363Z",
+      "durationS": 84.726
+    },
+    {
+      "id": "W9",
+      "title": "Tray present versus absent",
+      "requirements": ["R1.3"],
+      "humanActions": [
+        "1 portal click per variant (2)",
+        "disable and re-enable the AppIndicator extension"
+      ],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R1.3",
+          "name": "with AppIndicator: tray icon present",
+          "status": "pass",
+          "value": "true"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows idle",
+          "status": "pass",
+          "value": "idle"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows recording",
+          "status": "pass",
+          "value": "recording"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows paused",
+          "status": "pass",
+          "value": "paused"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray menu items (human)",
+          "status": "fail",
+          "value": "different"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "Stop from the tray menu stops",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray back to idle",
+          "status": "pass",
+          "value": "idle"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "without AppIndicator: no tray icon",
+          "status": "fail",
+          "value": "true"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "controls window available as the fallback",
+          "status": "pass",
+          "value": "present"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "closing the main window while idle quits",
+          "status": "fail",
+          "value": "still running"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-15.cstudio",
+        "~/.cache/capture-studio-harness/runs/20261030-080807/projects/Lesson 2026-10-30 09-24.cstudio"
+      ],
+      "startedAt": "2026-10-30T09:15:02.091Z",
+      "durationS": 616.808
+    },
+    {
+      "id": "W10",
+      "title": "Global shortcuts through GNOME custom shortcuts",
+      "requirements": ["R1.2", "R1.4"],
+      "humanActions": [
+        "bind 2 GNOME custom shortcuts once",
+        "press them while another window is focused",
+        "1 portal click"
+      ],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.4",
+          "name": "portal global shortcuts",
+          "status": "not-testable",
+          "detail": "spike S7: no-go on GNOME Wayland (§9.8); custom shortcuts are the path"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "Capture Studio is not focused before the shortcut",
+          "status": "pass",
+          "value": "unfocused"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "scenario run",
+          "status": "error",
+          "detail": "no response within 120 s"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-10-30T09:25:18.906Z",
+      "durationS": 599.902
+    }
+  ],
+  "totals": {
+    "pass": 3,
+    "fail": 3,
+    "error": 3,
+    "not-testable": 1,
+    "info": 0
+  }
+}

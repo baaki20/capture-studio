@@ -211,7 +211,11 @@ export class CaptureEngine {
       track.contentHint = CONTENT_HINTS.camera;
       return await this.addVideo(acquisition, 'camera', stream, track, CAMERA_IDEAL.frameRate);
     } catch (error) {
-      warnings.push({ kind: 'camera', message: `camera unavailable: ${describeError(error)}` });
+      warnings.push({
+        kind: 'camera',
+        message: `camera unavailable: ${describeError(error)}`,
+        label: await deviceLabel(camera.deviceId),
+      });
       this.dropTrack(acquisition, 'camera');
       return null;
     }
@@ -239,7 +243,11 @@ export class CaptureEngine {
       acquisition.tracks.set('mic', audio);
       return audio;
     } catch (error) {
-      warnings.push({ kind: 'mic', message: `microphone unavailable: ${describeError(error)}` });
+      warnings.push({
+        kind: 'mic',
+        message: `microphone unavailable: ${describeError(error)}`,
+        label: await deviceLabel(mic.deviceId),
+      });
       this.dropTrack(acquisition, 'mic');
       return null;
     }
@@ -750,6 +758,17 @@ export class CaptureEngine {
   private requireSession(channel: string): Session {
     if (!this.session) throw new Error(`${channel}: not recording`);
     return this.session;
+  }
+}
+
+/** The name of a device that failed to open, for the notice (null when it is gone or hidden). */
+async function deviceLabel(deviceId: string): Promise<string | null> {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const label = devices.find((d) => d.deviceId === deviceId)?.label;
+    return label === undefined || label === '' ? null : label;
+  } catch {
+    return null;
   }
 }
 

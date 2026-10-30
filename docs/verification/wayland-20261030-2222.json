@@ -1,0 +1,142 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-10-30T22:22:33.983Z",
+  "finishedAt": "2026-10-30T22:24:07.908Z",
+  "machine": {
+    "host": "test-laptop",
+    "kernel": "redacted",
+    "cpus": "redacted",
+    "memory": "redacted",
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "5d766a8 (phase1-editor, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W9",
+      "title": "Tray present versus absent",
+      "requirements": ["R1.3"],
+      "humanActions": [
+        "1 portal click per variant (2)",
+        "disable and re-enable the AppIndicator extension"
+      ],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.3",
+          "name": "with AppIndicator: tray icon present",
+          "status": "pass",
+          "value": "true"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows idle",
+          "status": "pass",
+          "value": "idle"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows recording",
+          "status": "pass",
+          "value": "recording"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows paused",
+          "status": "pass",
+          "value": "paused"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "scenario run",
+          "status": "error",
+          "detail": "the recording already stopped (state completed) before the tray Stop; use the Capture Studio tray icon, not GNOME's screen-sharing indicator"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-10-30T22:22:52.524Z",
+      "durationS": 33.337
+    },
+    {
+      "id": "W10",
+      "title": "Global shortcuts through GNOME custom shortcuts",
+      "requirements": ["R1.2", "R1.4"],
+      "humanActions": [
+        "bind 2 GNOME custom shortcuts once",
+        "press them while another window is focused",
+        "1 portal click"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.4",
+          "name": "portal global shortcuts",
+          "status": "not-testable",
+          "detail": "spike S7: no-go on GNOME Wayland (§9.8); custom shortcuts are the path"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "Capture Studio is not focused before the shortcut",
+          "status": "pass",
+          "value": "unfocused"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "shortcut starts a recording while unfocused",
+          "status": "pass",
+          "value": "acquiring"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "pause shortcut pauses",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "pause shortcut resumes",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "record shortcut stops",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-222233/projects/Lesson 2026-10-30 22-23 (2).cstudio"
+      ],
+      "startedAt": "2026-10-30T22:23:25.861Z",
+      "durationS": 42.046
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 0,
+    "error": 1,
+    "not-testable": 0,
+    "info": 0
+  }
+}

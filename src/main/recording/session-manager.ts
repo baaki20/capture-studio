@@ -457,10 +457,22 @@ export class SessionManager {
         await this.releaseTracks(engine);
         return { status: 'cancelled' };
       }
+      const named = (kind: 'camera' | 'mic') => {
+        const label = acquired.warnings?.find((w) => w.kind === kind)?.label;
+        return label ? ` (${label})` : '';
+      };
       if (config.cameraId && !acquired.camera)
-        this.notice('warning', 'The camera could not be opened; recording without it.', 'camera');
+        this.notice(
+          'warning',
+          `The camera${named('camera')} could not be opened; recording without it.`,
+          'camera',
+        );
       if (config.micId && !acquired.mic)
-        this.notice('warning', 'The microphone could not be opened; recording without it.', 'mic');
+        this.notice(
+          'warning',
+          `The microphone${named('mic')} could not be opened; recording without it.`,
+          'mic',
+        );
 
       session = {
         sessionId: newId('session'),

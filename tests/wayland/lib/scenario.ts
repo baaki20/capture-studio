@@ -66,11 +66,42 @@ export interface Scenario {
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The recorder setup for a scenario, on top of the harness defaults. */
+/** Waits until the camera and mic a scenario needs are plugged in (real runs ask the human). */
+export async function requireDevices(
+  ctx: Context,
+  app: AppSession,
+  ids: (string | null | undefined)[],
+) {
+  const wanted = ids.filter((id): id is string => !!id);
+  for (;;) {
+    const present = await app.evalIn<string[]>(
+      'shell',
+      `navigator.mediaDevices.enumerateDevices().then((l) => l.map((d) => d.deviceId))`,
+    );
+    const missing = wanted.filter((id) => !present.includes(id));
+    if (missing.length === 0) return;
+    const d = ctx.devices;
+    const names = missing.map(
+      (id) =>
+        (id === d.cameraId ? d.cameraLabel : id === d.unplugMicId ? d.unplugMicLabel : null) ??
+        (id === d.roomMicId ? d.roomMicLabel : null) ??
+        id.slice(0, 12),
+    );
+    if (ctx.mode !== 'real') throw new Error(`device missing: ${names.join(', ')}`);
+    ctx.human.instruct('Device not connected', [
+      `Plug in: ${names.join(', ')}.`,
+      'Then press Enter.',
+    ]);
+    await ctx.human.enter();
+  }
+}
+
 export async function configure(
   ctx: Context,
   app: AppSession,
   recorder: Partial<Settings['recorder']>,
 ): Promise<void> {
+  await requireDevices(ctx, app, [recorder.cameraId, recorder.micId]);
   await app.configure({
     projectsDir: ctx.projectsDir,
     exportsDir: path.join(ctx.runDir, 'exports'),
@@ -166,6 +197,11 @@ export async function stopAndFinalize(
   requirement = 'R1.2',
 ): Promise<{ root: string; checks: Check[]; finalizeMs: number }> {
   const since = Date.now();
+  const before = await app.status();
+  if (!['recording', 'paused'].includes(before.state))
+    throw new Error(
+      `the recording stopped before the harness asked (state ${before.state}); app.log names the source ("action: stop (from …)")`,
+    );
   const mark = app.mark();
   const cli = await app.cli('stop-recording');
   const finalizing = await app.waitState((s) => s.state === 'finalizing', 15_000, mark);

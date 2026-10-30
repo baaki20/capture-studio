@@ -1,0 +1,123 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-10-30T22:26:35.731Z",
+  "finishedAt": "2026-10-30T22:29:34.922Z",
+  "machine": {
+    "host": "test-laptop",
+    "kernel": "redacted",
+    "cpus": "redacted",
+    "memory": "redacted",
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "5d766a8 (phase1-editor, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W9",
+      "title": "Tray present versus absent",
+      "requirements": ["R1.3"],
+      "humanActions": [
+        "1 portal click per variant (2)",
+        "disable and re-enable the AppIndicator extension"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.3",
+          "name": "with AppIndicator: tray icon present",
+          "status": "pass",
+          "value": "true"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows idle",
+          "status": "pass",
+          "value": "idle"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows recording",
+          "status": "pass",
+          "value": "recording"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray shows paused",
+          "status": "pass",
+          "value": "paused"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "Stop from the tray menu stops",
+          "status": "pass",
+          "value": "from tray"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray menu items (human)",
+          "status": "pass",
+          "value": "as specified"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "tray back to idle",
+          "status": "pass",
+          "value": "idle"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "without AppIndicator: no tray icon",
+          "status": "pass",
+          "value": "false"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "controls window available as the fallback",
+          "status": "pass",
+          "value": "present"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R1.3",
+          "name": "closing the main window while idle quits",
+          "status": "pass",
+          "value": "app exited"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261030-222635/projects/Lesson 2026-10-30 22-27.cstudio",
+        "~/.cache/capture-studio-harness/runs/20261030-222635/projects/Lesson 2026-10-30 22-28.cstudio"
+      ],
+      "startedAt": "2026-10-30T22:27:07.651Z",
+      "durationS": 147.27
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 0,
+    "error": 0,
+    "not-testable": 0,
+    "info": 0
+  }
+}

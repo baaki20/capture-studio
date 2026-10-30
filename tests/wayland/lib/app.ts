@@ -10,7 +10,7 @@
  *   capturer (no portal), like the e2e tests, so the harness can run with nobody present.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createWriteStream, promises as fs } from 'node:fs';
+import { createWriteStream, readFileSync, statSync, promises as fs } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Settings } from '../../../src/shared/settings/schema';
@@ -19,7 +19,26 @@ import { ChannelClient } from './channel-client';
 export const ROOT = path.resolve(import.meta.dirname, '../../..');
 export const MAIN = path.join(ROOT, 'out/main/index.js');
 export const BIN_DIR = path.join(ROOT, 'resources/bin', `${process.platform}-${process.arch}`);
+
 export const ELECTRON = createRequire(import.meta.url)('electron') as unknown as string;
+
+/**
+ * True when the dev Electron cannot start its sandbox outside this terminal. Ubuntu 24.04+
+ * blocks unprivileged user namespaces unless an AppArmor profile allows them (the .deb installs
+ * one); this terminal inherits a profile that does, but GNOME's shortcut daemon does not, so
+ * Electron falls back to `chrome-sandbox`, which is not setuid root in node_modules, and aborts.
+ * Only the shortcut command (W10) is affected; the installed .deb has its profile.
+ */
+export function devSandboxBlocked(): boolean {
+  try {
+    const restricted =
+      readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', 'utf8').trim() === '1';
+    const helper = statSync(path.join(path.dirname(ELECTRON), 'chrome-sandbox'));
+    return restricted && !(helper.uid === 0 && (helper.mode & 0o4000) !== 0);
+  } catch {
+    return false;
+  }
+}
 
 export type Mode = 'real' | 'dry-run';
 
@@ -213,6 +232,7 @@ export class AppSession {
       `CS_USER_DATA_DIR=${quote(this.options.profileDir)}`,
       `CS_FFMPEG_DIR=${quote(BIN_DIR)}`,
       quote(ELECTRON),
+      ...(devSandboxBlocked() ? ['--no-sandbox'] : []),
       quote(MAIN),
       '--action',
       type,

@@ -11,6 +11,7 @@ import { check, info, inspectProject, notTestable, projectChecks, type Check } f
 import {
   configure,
   recordFor,
+  requireDevices,
   sleep,
   startRecording,
   stopAndFinalize,
@@ -130,12 +131,21 @@ export const w4: Scenario = {
       const { root, startedAt } = await startRecording(ctx, app);
       out.projects.push(root);
       await recordFor('W4 recording', 8_000);
+      // The mic must be recording before the unplug, or the test measures nothing.
+      const early = app.notices.find((n) => n.value.stream === 'mic');
+      if (early) {
+        out.checks.push(
+          check('R1.16', 'the mic opened before the unplug', false, early.value.message),
+        );
+        return;
+      }
+      const noticesBefore = app.notices.length;
       const notice = await ctx.human.act(
         'W4 — unplug the headset',
         [`Unplug the USB headset now (${ctx.devices.unplugMicLabel ?? 'the chosen mic'}).`],
         (async () => {
           for (;;) {
-            const hit = app.notices.find((n) => n.value.stream === 'mic');
+            const hit = app.notices.slice(noticesBefore).find((n) => n.value.stream === 'mic');
             if (hit) return hit;
             await sleep(200);
           }
@@ -188,8 +198,9 @@ export const w4: Scenario = {
           `${((screen?.probedUs ?? 0) / 1e6).toFixed(1)} s`,
         ),
       );
-      ctx.human.instruct('W4 — done', ['Plug the headset back in.']);
     } finally {
+      // Asks for the headset back (only if it is still unplugged) before the next scenario.
+      await requireDevices(ctx, app, [ctx.devices.unplugMicId]).catch(() => undefined);
       await app.quit();
     }
   },

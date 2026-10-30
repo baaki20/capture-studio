@@ -157,18 +157,35 @@ async function chooseDevices(
     prefer(cameras, saved?.cameraLabel, /integrated|built-?in|webcam|hd/i),
     true,
   );
+  const builtIn = mics.findIndex((d) =>
+    /built-?in|internal|analog|digital mic|sof|hda/i.test(d.label),
+  );
   const room = await pick(
     'Microphone that hears the speakers (W1, W2, W7, W8, soak) — the built-in mic is best',
     mics,
-    prefer(mics, saved?.roomMicLabel, /built-?in|internal|analog|digital mic|sof|hda/i),
+    // The built-in mic before a remembered one: a USB headset would break W4 (it gets unplugged).
+    builtIn >= 0 ? builtIn : prefer(mics, saved?.roomMicLabel, /$^/),
     false,
   );
-  const unplug = await pick(
-    'Microphone you will unplug in W4 (the USB headset)',
-    mics,
-    prefer(mics, saved?.unplugMicLabel, mode === 'real' ? /usb|headset/i : /$^/),
-    true,
-  );
+  // The room mic stays connected through the whole run, so it cannot be the one W4 unplugs.
+  let unplug: MediaDevice | null;
+  for (;;) {
+    unplug = await pick(
+      'Microphone you will unplug in W4 (the USB headset)',
+      mics,
+      prefer(mics, saved?.unplugMicLabel, mode === 'real' ? /usb|headset/i : /$^/),
+      true,
+    );
+    if (unplug?.deviceId !== room?.deviceId || !unplug) break;
+    // A dry run cannot pick again: it has one fake mic, so W4 has none to unplug.
+    if (human.auto) {
+      unplug = null;
+      break;
+    }
+    human.info(
+      'That is also the room mic. Pick another, or (none) to skip W4; or restart and pick the built-in mic for the room.',
+    );
+  }
   const devices: Devices = {
     cameraId: camera?.deviceId ?? null,
     cameraLabel: camera?.label ?? null,

@@ -8,6 +8,10 @@
  * timing (VFR); the engine maps it to the session clock with the calibrated offset
  * (`startOffsetUs`). Frames larger than the encoder size (sources above 1440p, §8) are scaled
  * through an `OffscreenCanvas`.
+ *
+ * A still screen sends no frames on Wayland, and a fragment is only written when the next frame
+ * arrives, so a crash during a still stretch would lose it. When nothing has arrived for
+ * `REPEAT_AFTER_US`, the last frame is encoded again to keep fragments closing (R1.21).
  */
 import { CheckpointLog, VIDEO_SYNC_RATE } from '../../../shared/recording/drift';
 import { FrameRateMeter } from '../encoder-select';
@@ -18,6 +22,12 @@ import type { VideoInit, WorkerResult } from '../protocol';
 import { StreamMuxer } from './muxer';
 import { describe, PipelineBase, servePipeline } from './pipeline-base';
 
+/** Repeat the last frame once nothing has arrived for this long. */
+const REPEAT_AFTER_US = 600_000;
+/** Repeats stay this far behind the clock, so the next real frame still sorts after them. */
+const REPEAT_LAG_US = 100_000;
+const REPEAT_CHECK_MS = 200;
+
 class VideoPipeline extends PipelineBase<VideoFrame> {
   protected readonly muxer: StreamMuxer;
   private readonly encoder: VideoEncoder;
@@ -27,6 +37,10 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   private readonly cadence: KeyframeCadence;
   private readonly frameDurationUs: number;
   private scaler: OffscreenCanvasRenderingContext2D | null = null;
+  /** The latest source frame (file time and arrival), kept for repeats on a still screen. */
+  private last: { frame: VideoFrame; fileUs: number; arrivalUs: number } | null = null;
+  private lastFileUs = -1;
+  private repeatTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly video: VideoInit) {
     super(video, video.fps);
@@ -45,6 +59,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
 
   protected setUp(): Promise<void> {
     this.encoder.configure(this.video.config);
+    this.repeatTimer = setInterval(() => this.repeatLast(), REPEAT_CHECK_MS);
     return Promise.resolve();
   }
 
@@ -62,6 +77,9 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
       const sessionUs = this.stamper.toSession(frame.timestamp, arrivalUs);
       if (this.pauses.isPaused(sessionUs)) {
         this.counters.framesPaused += 1;
+        // Not encoded, but a still screen after the resume repeats what is on it now.
+        if (this.firstTimestampUs !== null)
+          this.keep(frame.clone(), frame.timestamp - this.firstTimestampUs, arrivalUs);
         return;
       }
       if (
@@ -72,8 +90,9 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
         return;
       }
       this.firstTimestampUs ??= frame.timestamp;
-      const fileUs = frame.timestamp - this.firstTimestampUs;
-      if (fileUs < 0) {
+      // After a repeat, a real frame must still come later in the file.
+      const fileUs = Math.max(frame.timestamp - this.firstTimestampUs, this.lastFileUs + 1);
+      if (frame.timestamp < this.firstTimestampUs) {
         this.counters.framesDropped += 1;
         return;
       }
@@ -82,7 +101,8 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
       if (checkpoint) this.counters.addCheckpoint(checkpoint);
       const input = this.prepare(frame, fileUs);
       try {
-        this.encoder.encode(input, { keyFrame: this.cadence.next(fileUs) });
+        this.encode(input, fileUs);
+        this.keep(frame.clone(), fileUs, arrivalUs);
       } finally {
         input.close();
       }
@@ -90,6 +110,45 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
       this.fail(`encode failed: ${describe(error)}`);
     } finally {
       frame.close();
+    }
+  }
+
+  private encode(input: VideoFrame, fileUs: number): void {
+    this.encoder.encode(input, { keyFrame: this.cadence.next(fileUs) });
+    this.lastFileUs = fileUs;
+  }
+
+  private keep(frame: VideoFrame | null, fileUs = 0, arrivalUs = 0): void {
+    this.last?.frame.close();
+    this.last = frame ? { frame, fileUs, arrivalUs } : null;
+  }
+
+  /** Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`. */
+  private repeatLast(): void {
+    const last = this.last;
+    if (!last || this.failure !== null || this.encoder.state !== 'configured') return;
+    const nowUs = sessionNowUs();
+    // The repeat lands `REPEAT_LAG_US` back, which must not fall inside a pause either.
+    const pausedAt = (us: number) => this.pauses.isPaused(us);
+    if (
+      nowUs - last.arrivalUs < REPEAT_AFTER_US ||
+      pausedAt(nowUs) ||
+      pausedAt(nowUs - REPEAT_LAG_US)
+    )
+      return;
+    if (shouldDropForBackpressure(this.encoder.encodeQueueSize, this.video.fps)) return;
+    const fileUs = last.fileUs + (nowUs - last.arrivalUs) - REPEAT_LAG_US;
+    if (fileUs <= this.lastFileUs) return;
+    let repeat: VideoFrame | null = null;
+    try {
+      repeat = this.prepare(last.frame, fileUs);
+      this.encode(repeat, fileUs);
+      last.fileUs = fileUs + REPEAT_LAG_US;
+      last.arrivalUs = nowUs;
+    } catch (error) {
+      this.fail(`repeat failed: ${describe(error)}`);
+    } finally {
+      repeat?.close();
     }
   }
 
@@ -114,6 +173,9 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
 
   protected async flushEncoder(): Promise<void> {
     // The last second's checkpoint is held until its interval closes.
+    if (this.repeatTimer) clearInterval(this.repeatTimer);
+    this.repeatTimer = null;
+    this.keep(null);
     const last = this.checkpointLog.flush();
     if (last) this.counters.addCheckpoint(last);
     try {

@@ -599,6 +599,7 @@ async function start(): Promise<void> {
   registerSessionHandlers({
     router,
     manager,
+    logger: log,
     library,
     store,
     recovery,

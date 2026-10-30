@@ -83,6 +83,16 @@ export class Human {
     }
   }
 
+  /** A line of free text (auto: `autoAnswer`). */
+  async ask(question: string, autoAnswer = ''): Promise<string> {
+    if (this.auto) {
+      console.log(`${question} → ${autoAnswer} (auto)`);
+      return autoAnswer;
+    }
+    process.stdout.write(`${BOLD}${question}${RESET} `);
+    return (await this.readLine()).trim();
+  }
+
   /** A numbered choice; returns the index (auto: `fallback`). */
   async choose(question: string, options: readonly string[], fallback: number): Promise<number> {
     console.log(`\n${BOLD}${question}${RESET}`);

@@ -489,6 +489,8 @@ const TrackInfoSchema = z.object({
 export const EngineAcquireWarningSchema = z.object({
   kind: StreamKindSchema,
   message: z.string(),
+  /** The device's name, when the renderer knows it (R1.16: notices name the device). */
+  label: z.string().nullish(),
 });
 
 export const EngineAcquireResultSchema = z.object({

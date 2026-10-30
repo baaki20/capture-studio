@@ -2,6 +2,7 @@
  * Handlers for the recording, library, project and recovery channels (§4.3.11, steps 10, 12 and
  * 13). Each forwards to its module; errors reach the renderer as rejected invokes.
  */
+import type { Logger } from '../../shared/logger';
 import { checkMediaPresence } from '../projects/editor-media';
 import type { Library } from '../projects/library';
 import type { ProjectStore } from '../projects/project-store';
@@ -15,6 +16,8 @@ export interface SessionHandlerDeps {
   library: Library;
   store: ProjectStore;
   recovery: RecoveryService;
+  /** Logs which window asked to stop, pause, resume, restart or abort. */
+  logger?: Logger;
   /** After a recovery: tell windows the library changed. */
   libraryChanged: () => void;
   /** Starts or stops the setup panel's system-audio meter (R1.5). */
@@ -31,14 +34,32 @@ export function registerSessionHandlers(deps: SessionHandlerDeps): void {
 
   router.handle('rec.configure', (config) => done(manager.configure(config)));
   router.handle('rec.record', () => manager.record());
-  router.handle('rec.pause', () => done(manager.pause()));
-  router.handle('rec.resume', () => done(manager.resume()));
+  // Same line format as the action bus, so every stop in the log says where it came from.
+  const from = (action: string, kind: string) =>
+    deps.logger?.info(`action: ${action} (from ${kind} window, state ${manager.state})`);
+  router.handle('rec.pause', (_, ctx) => {
+    from('pause', ctx.kind);
+    return done(manager.pause());
+  });
+  router.handle('rec.resume', (_, ctx) => {
+    from('resume', ctx.kind);
+    return done(manager.resume());
+  });
   // Stop before recording starts cancels acquisition, the picker or the countdown (R1.10).
-  router.handle('rec.stop', () =>
-    done(['recording', 'paused'].includes(manager.state) ? manager.stop() : manager.cancel()),
-  );
-  router.handle('rec.restart', () => done(manager.restart()));
-  router.handle('rec.abort', () => done(manager.abort()));
+  router.handle('rec.stop', (_, ctx) => {
+    from('stop', ctx.kind);
+    return done(
+      ['recording', 'paused'].includes(manager.state) ? manager.stop() : manager.cancel(),
+    );
+  });
+  router.handle('rec.restart', (_, ctx) => {
+    from('restart', ctx.kind);
+    return done(manager.restart());
+  });
+  router.handle('rec.abort', (_, ctx) => {
+    from('abort', ctx.kind);
+    return done(manager.abort());
+  });
   router.handle('rec.status', () => manager.status());
   router.handle('rec.monitorSystem', ({ enabled }) => {
     deps.monitorSystem(enabled);
