@@ -1,0 +1,505 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-02T10:12:11.223Z",
+  "finishedAt": "2026-11-02T10:21:12.644Z",
+  "machine": {
+    "host": "test-laptop",
+    "kernel": "redacted",
+    "cpus": "redacted",
+    "memory": "redacted",
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "2ad3434 (, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W1",
+      "title": "Full screen, all components, sync-check pattern",
+      "requirements": ["R1.24", "R1.22", "R1.11", "R1.13", "R1.25"],
+      "humanActions": [
+        "1 portal click (pick the monitor, Share)",
+        "camera sees the screen (small mirror by the webcam) or the room lit only by the screen",
+        "speakers on",
+        "clap 5 times in view of the camera when asked"
+      ],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.11",
+          "name": "controls window minimized while recording",
+          "status": "pass",
+          "value": "minimized"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "261 ms",
+          "detail": "includes starting the second instance (470 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.5 s"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.13",
+          "name": "one file per enabled stream",
+          "status": "pass",
+          "value": "screen, camera, microphone, system-audio"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "screen dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "camera dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "screen encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "camera encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "mic encoder",
+          "status": "info",
+          "value": "Opus (WebCodecs)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "system encoder",
+          "status": "info",
+          "value": "Opus (FFmpeg libopus)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen flashes found",
+          "status": "info",
+          "value": "1"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ system audio",
+          "status": "error",
+          "detail": "no matched events (1 pairs)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ mic",
+          "status": "error",
+          "detail": "no matched events (1 pairs)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "camera ↔ mic (clap)",
+          "status": "pass",
+          "value": "38.8 ms",
+          "limit": "≤ 60 ms",
+          "detail": "4 pairs; claps are accurate to about one camera frame"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "claps heard / paired",
+          "status": "info",
+          "value": "6 / 4",
+          "detail": "camera − mic 38.8 ms"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "export: screen ↔ audio mix",
+          "status": "error",
+          "detail": "2 flashes, 30 beeps matched none"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261102-101211/projects/Lesson 2026-11-02 10-15.cstudio"
+      ],
+      "startedAt": "2026-11-02T10:14:24.441Z",
+      "durationS": 165.994
+    },
+    {
+      "id": "W2",
+      "title": "Region recording with a pause in the middle",
+      "requirements": ["R1.14", "R1.9", "R1.24", "R1.32"],
+      "humanActions": ["1 portal click (the region drag and Enter are automated)", "speakers on"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.2",
+          "name": "CLI pause → paused",
+          "status": "info",
+          "value": "277 ms"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "286 ms",
+          "detail": "includes starting the second instance (470 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.3 s"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "one pause recorded",
+          "status": "pass",
+          "value": "1"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "the region is kept as the screen crop",
+          "status": "pass",
+          "value": "1152×912 at 384,84"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "screen: no frames inside the pause",
+          "status": "pass",
+          "value": "0"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "screen: no pause-mode (red) frames",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "camera: no frames inside the pause",
+          "status": "pass",
+          "value": "0"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "microphone: no pause tone (3 kHz)",
+          "status": "pass",
+          "value": "absent"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "system-audio: no pause tone (3 kHz)",
+          "status": "pass",
+          "value": "absent"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "after resume: screen flashes found",
+          "status": "info",
+          "value": "8"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "after resume: screen ↔ system audio",
+          "status": "pass",
+          "value": "-25.5 ms",
+          "limit": "≤ 40 ms",
+          "detail": "8 pairs, p10 -44.6 ms, p90 -14.9 ms, trend -2520.4 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "after resume: screen ↔ mic",
+          "status": "pass",
+          "value": "-32.0 ms",
+          "limit": "≤ 40 ms",
+          "detail": "8 pairs, p10 -48.8 ms, p90 -22.7 ms, trend -1925.3 ppm"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "Screen: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "Face: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "Voice: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "System audio: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        }
+      ],
+      "notes": [
+        "Listen to the mic track around the pause in the editor: the TTS phrase must not be audible (not checked automatically)."
+      ],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261102-101211/projects/Lesson 2026-11-02 10-18.cstudio"
+      ],
+      "startedAt": "2026-11-02T10:17:10.436Z",
+      "durationS": 108.457
+    },
+    {
+      "id": "W4",
+      "title": "Unplug the USB headset (mic) mid-recording",
+      "requirements": ["R1.16"],
+      "humanActions": [
+        "1 portal click",
+        "unplug the USB headset when asked, plug it back in at the end"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.16",
+          "name": "notice",
+          "status": "info",
+          "value": "Microphone (USB headset) disconnected; the recording continues without it."
+        },
+        {
+          "requirement": "R1.16",
+          "name": "the notice names the device",
+          "status": "pass",
+          "value": "Microphone (USB headset) disconnected; the recording continues without it."
+        },
+        {
+          "requirement": "R1.16",
+          "name": "recording continues",
+          "status": "pass",
+          "value": "recording"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "224 ms",
+          "detail": "includes starting the second instance (403 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.3 s"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "mic media is marked endedEarly",
+          "status": "pass",
+          "value": "true"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "mic ends near the unplug time",
+          "status": "pass",
+          "value": "14.6 s (unplugged at 14.8 s)"
+        },
+        {
+          "requirement": "R1.16",
+          "name": "screen keeps going after the unplug",
+          "status": "pass",
+          "value": "24.9 s"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261102-101211/projects/Lesson 2026-11-02 10-19.cstudio"
+      ],
+      "startedAt": "2026-11-02T10:18:58.894Z",
+      "durationS": 62.876
+    },
+    {
+      "id": "W7",
+      "title": "SIGKILL during recording, relaunch, recover",
+      "requirements": ["R1.21", "R1.24"],
+      "humanActions": ["1 portal click"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.21",
+          "name": "killed after",
+          "status": "info",
+          "value": "20.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "no capture process outlives the kill",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "the next launch offers the recording",
+          "status": "pass",
+          "value": "1 candidate(s)"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "the main window shows \"Recover\"",
+          "status": "pass",
+          "value": "shown"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "recording.state is \"recovered\"",
+          "status": "pass",
+          "value": "recovered"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "screen reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 18.8 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "camera reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 19.8 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "microphone reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 19.8 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "system-audio reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 19.1 s",
+          "limit": "≥ 18.0 s"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen flashes found",
+          "status": "info",
+          "value": "10"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen ↔ system audio",
+          "status": "pass",
+          "value": "19.4 ms",
+          "limit": "≤ 40 ms",
+          "detail": "10 pairs, p10 -11.6 ms, p90 28.4 ms, trend 2782.5 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen ↔ mic",
+          "status": "pass",
+          "value": "-4.4 ms",
+          "limit": "≤ 40 ms",
+          "detail": "10 pairs, p10 -34.4 ms, p90 5.2 ms, trend 2720.5 ppm"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261102-101211/projects/Lesson 2026-11-02 10-20.cstudio"
+      ],
+      "startedAt": "2026-11-02T10:20:01.771Z",
+      "durationS": 70.873
+    }
+  ],
+  "totals": {
+    "pass": 3,
+    "fail": 0,
+    "error": 1,
+    "not-testable": 0,
+    "info": 0
+  }
+}

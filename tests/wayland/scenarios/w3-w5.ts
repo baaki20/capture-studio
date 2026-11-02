@@ -182,12 +182,14 @@ export const w4: Scenario = {
           String(mic?.endedEarly ?? 'no mic media'),
         ),
       );
+      // Session time: the mic file starts at its offset (1.5 s in the re-run), not at 0.
+      const micEndS = ((mic?.startOffsetUs ?? 0) + (mic?.probedUs ?? 0)) / 1e6;
       out.checks.push(
         check(
           'R1.16',
           'mic ends near the unplug time',
-          mic !== undefined && Math.abs((mic.probedUs ?? 0) / 1e6 - unpluggedS) < 3,
-          `${((mic?.probedUs ?? 0) / 1e6).toFixed(1)} s (unplugged at ${unpluggedS.toFixed(1)} s)`,
+          mic !== undefined && Math.abs(micEndS - unpluggedS) < 3,
+          `${micEndS.toFixed(1)} s (unplugged at ${unpluggedS.toFixed(1)} s)`,
         ),
       );
       out.checks.push(

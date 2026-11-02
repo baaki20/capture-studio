@@ -184,11 +184,22 @@ export async function pickRegion(
     if (windows.some((w) => w.role === 'picker' && w.visible)) break;
     await sleep(200);
   }
-  // The picker ignores keys for 500 ms after opening and needs its frame loaded.
-  await sleep(1_500);
-  await app.call('drag', { window: 'picker', from: region.from, to: region.to });
-  await sleep(300);
-  await app.call('key', { window: 'picker', key: 'Enter' });
+  // The picker ignores keys for 500 ms after opening and input until its frame has loaded,
+  // which takes longer on a busy machine: retry until it leaves picking-region.
+  for (let attempt = 1; ; attempt++) {
+    await sleep(1_500);
+    const mark = app.mark();
+    await app.call('drag', { window: 'picker', from: region.from, to: region.to });
+    await sleep(300);
+    await app.call('key', { window: 'picker', key: 'Enter' });
+    try {
+      await app.waitState((s) => s.state !== 'picking-region', 3_000, mark);
+      return;
+    } catch (error) {
+      if (attempt >= 5)
+        throw new Error('the region picker did not take the drag and Enter', { cause: error });
+    }
+  }
 }
 
 /** Stops through the real CLI and waits for the project; returns timing checks. */

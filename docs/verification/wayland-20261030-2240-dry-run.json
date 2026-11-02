@@ -1,0 +1,254 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "dry-run",
+  "startedAt": "2026-10-30T22:40:17.008Z",
+  "finishedAt": "2026-10-30T22:42:15.124Z",
+  "machine": {
+    "host": "test-laptop",
+    "kernel": "redacted",
+    "cpus": "redacted",
+    "memory": "redacted",
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "2ad3434 (feature/mcp-automation, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W2",
+      "title": "Region recording with a pause in the middle",
+      "requirements": ["R1.14", "R1.9", "R1.24", "R1.32"],
+      "humanActions": ["1 portal click (the region drag and Enter are automated)", "speakers on"],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.2",
+          "name": "CLI pause → paused",
+          "status": "info",
+          "value": "1437 ms"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "1481 ms",
+          "detail": "includes starting the second instance (2374 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "1.2 s"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "3/3"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "one pause recorded",
+          "status": "pass",
+          "value": "1"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "the region is kept as the screen crop",
+          "status": "pass",
+          "value": "1152×864 at 384,108"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "screen: no frames inside the pause",
+          "status": "pass",
+          "value": "0"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "screen: no pause-mode (red) frames",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "camera: no frames inside the pause",
+          "status": "pass",
+          "value": "0"
+        },
+        {
+          "requirement": "R1.14",
+          "name": "microphone: no pause tone (3 kHz)",
+          "status": "pass",
+          "value": "absent"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "after resume: screen flashes found",
+          "status": "info",
+          "value": "5"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "after resume: screen ↔ system audio",
+          "status": "error",
+          "detail": "no matched events (0 pairs)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "after resume: screen ↔ mic",
+          "status": "error",
+          "detail": "no matched events (2 pairs)"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "Screen: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "Face: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        },
+        {
+          "requirement": "R1.32",
+          "name": "Voice: one clip per active interval",
+          "status": "pass",
+          "value": "2",
+          "limit": "2"
+        }
+      ],
+      "notes": [
+        "No TTS phrase during the pause (spd-say not installed, or dry run); the 3 kHz tone stands in."
+      ],
+      "projects": [
+        "/tmp/cs-harness-wkBISK/runs/20261030-224017/projects/Lesson 2026-10-30 22-40.cstudio"
+      ],
+      "startedAt": "2026-10-30T22:40:20.315Z",
+      "durationS": 64.237
+    },
+    {
+      "id": "W7",
+      "title": "SIGKILL during recording, relaunch, recover",
+      "requirements": ["R1.21", "R1.24"],
+      "humanActions": ["1 portal click"],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R1.21",
+          "name": "killed after",
+          "status": "info",
+          "value": "10.2 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "no capture process outlives the kill",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "the next launch offers the recording",
+          "status": "pass",
+          "value": "1 candidate(s)"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "the main window shows \"Recover\"",
+          "status": "pass",
+          "value": "shown"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "recording.state is \"recovered\"",
+          "status": "pass",
+          "value": "recovered"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "3/3"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "screen reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 8.9 s",
+          "limit": "≥ 8.2 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "camera reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 9.0 s",
+          "limit": "≥ 8.2 s"
+        },
+        {
+          "requirement": "R1.21",
+          "name": "microphone reaches within 2 s of the kill",
+          "status": "pass",
+          "value": "ends at 8.9 s",
+          "limit": "≥ 8.2 s"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen flashes found",
+          "status": "info",
+          "value": "4"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen ↔ system audio",
+          "status": "error",
+          "detail": "no matched events (0 pairs)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "recovered: screen ↔ mic",
+          "status": "fail",
+          "value": "-281.9 ms",
+          "limit": "≤ 40 ms",
+          "detail": "3 pairs, p10 -325.7 ms, p90 187.4 ms, trend -85791.5 ppm"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "/tmp/cs-harness-wkBISK/runs/20261030-224017/projects/Lesson 2026-10-30 22-41.cstudio"
+      ],
+      "startedAt": "2026-10-30T22:41:24.557Z",
+      "durationS": 50.565
+    }
+  ],
+  "totals": {
+    "pass": 0,
+    "fail": 0,
+    "error": 2,
+    "not-testable": 0,
+    "info": 0
+  }
+}

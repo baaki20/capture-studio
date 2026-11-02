@@ -72,6 +72,8 @@ export interface MediaFileInfo {
   exists: boolean;
   durationUs: number;
   probedUs: number | null;
+  /** Where the file starts on the session clock. */
+  startOffsetUs: number;
   endedEarly: boolean;
 }
 
@@ -134,6 +136,7 @@ export async function inspectProject(root: string): Promise<ProjectInfo> {
       exists,
       durationUs: m.durationUs,
       probedUs: exists ? probeDurationUs(file) : null,
+      startOffsetUs: m.startOffsetUs,
       endedEarly: m.endedEarly === true,
     };
   });

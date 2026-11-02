@@ -11,7 +11,10 @@
  *
  * A still screen sends no frames on Wayland, and a fragment is only written when the next frame
  * arrives, so a crash during a still stretch would lose it. When nothing has arrived for
- * `REPEAT_AFTER_US`, the last frame is encoded again to keep fragments closing (R1.21).
+ * `REPEAT_AFTER_US`, the last frame is encoded again to keep fragments closing (R1.21). The
+ * screen pipeline draws each frame into its own canvas for that: holding the captured frame
+ * itself would keep a capture buffer from the source's small pool and starve it (seen on the
+ * camera: 28 → 12 fps). The camera never goes still, so it keeps nothing.
  */
 import { CheckpointLog, VIDEO_SYNC_RATE } from '../../../shared/recording/drift';
 import { FrameRateMeter } from '../encoder-select';
@@ -37,8 +40,10 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   private readonly cadence: KeyframeCadence;
   private readonly frameDurationUs: number;
   private scaler: OffscreenCanvasRenderingContext2D | null = null;
-  /** The latest source frame (file time and arrival), kept for repeats on a still screen. */
-  private last: { frame: VideoFrame; fileUs: number; arrivalUs: number } | null = null;
+  /** File time and arrival of the latest screen frame, whose image is in `still`. */
+  private last: { fileUs: number; arrivalUs: number } | null = null;
+  /** A copy of the latest screen frame at the encoder size, for repeats. */
+  private still: OffscreenCanvasRenderingContext2D | null = null;
   private lastFileUs = -1;
   private repeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -59,7 +64,8 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
 
   protected setUp(): Promise<void> {
     this.encoder.configure(this.video.config);
-    this.repeatTimer = setInterval(() => this.repeatLast(), REPEAT_CHECK_MS);
+    if (this.video.kind === 'screen')
+      this.repeatTimer = setInterval(() => this.repeatLast(), REPEAT_CHECK_MS);
     return Promise.resolve();
   }
 
@@ -79,7 +85,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
         this.counters.framesPaused += 1;
         // Not encoded, but a still screen after the resume repeats what is on it now.
         if (this.firstTimestampUs !== null)
-          this.keep(frame.clone(), frame.timestamp - this.firstTimestampUs, arrivalUs);
+          this.keep(frame, frame.timestamp - this.firstTimestampUs, arrivalUs);
         return;
       }
       if (
@@ -102,7 +108,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
       const input = this.prepare(frame, fileUs);
       try {
         this.encode(input, fileUs);
-        this.keep(frame.clone(), fileUs, arrivalUs);
+        this.keep(frame, fileUs, arrivalUs);
       } finally {
         input.close();
       }
@@ -118,15 +124,23 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     this.lastFileUs = fileUs;
   }
 
-  private keep(frame: VideoFrame | null, fileUs = 0, arrivalUs = 0): void {
-    this.last?.frame.close();
-    this.last = frame ? { frame, fileUs, arrivalUs } : null;
+  /** Copies a screen frame for repeats (the caller still owns and closes `frame`). */
+  private keep(frame: VideoFrame, fileUs: number, arrivalUs: number): void {
+    if (this.video.kind !== 'screen') return;
+    const { width, height } = this.video.config;
+    if (!this.still) {
+      this.still = new OffscreenCanvas(width, height).getContext('2d');
+      if (!this.still) return;
+    }
+    this.still.drawImage(frame, 0, 0, width, height);
+    this.last = { fileUs, arrivalUs };
   }
 
   /** Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`. */
   private repeatLast(): void {
     const last = this.last;
-    if (!last || this.failure !== null || this.encoder.state !== 'configured') return;
+    const still = this.still;
+    if (!last || !still || this.failure !== null || this.encoder.state !== 'configured') return;
     const nowUs = sessionNowUs();
     // The repeat lands `REPEAT_LAG_US` back, which must not fall inside a pause either.
     const pausedAt = (us: number) => this.pauses.isPaused(us);
@@ -141,7 +155,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     if (fileUs <= this.lastFileUs) return;
     let repeat: VideoFrame | null = null;
     try {
-      repeat = this.prepare(last.frame, fileUs);
+      repeat = new VideoFrame(still.canvas, { timestamp: fileUs, duration: this.frameDurationUs });
       this.encode(repeat, fileUs);
       last.fileUs = fileUs + REPEAT_LAG_US;
       last.arrivalUs = nowUs;
@@ -175,7 +189,7 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     // The last second's checkpoint is held until its interval closes.
     if (this.repeatTimer) clearInterval(this.repeatTimer);
     this.repeatTimer = null;
-    this.keep(null);
+    this.last = null;
     const last = this.checkpointLog.flush();
     if (last) this.counters.addCheckpoint(last);
     try {

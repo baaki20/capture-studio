@@ -117,6 +117,33 @@ const ENUMERATE = `(async () => {
   return list.map((d) => ({ deviceId: d.deviceId, kind: d.kind, label: d.label }));
 })()`;
 
+/** The default output's name, from PipeWire (null when wpctl is missing). */
+function defaultOutputName(): string | null {
+  const result = spawnSync('wpctl', ['inspect', '@DEFAULT_AUDIO_SINK@'], { encoding: 'utf8' });
+  if (result.status !== 0) return null;
+  return /node\.description = "([^"]*)"/.exec(result.stdout)?.[1] ?? null;
+}
+
+/**
+ * The pattern's beeps must come out of the speakers so the room mic hears them. GNOME switches
+ * the output to a USB headset when it is plugged in; then the room mic hears nothing (session 1
+ * re-run: mic "sync" from noise) and unplugging it in W4 cuts the system-audio capture.
+ */
+async function requireSpeakerOutput(human: Human, devices: Devices): Promise<void> {
+  const headset = devices.unplugMicLabel?.split(' ')[0];
+  if (!headset) return;
+  for (;;) {
+    const output = defaultOutputName();
+    if (!output?.includes(headset)) return;
+    human.instruct('Sound output', [
+      `The sound output is "${output}". Switch it to the built-in speakers:`,
+      'Settings → Sound → Output Device → the built-in speakers (or the top-bar sound menu).',
+      'Then press Enter.',
+    ]);
+    await human.enter();
+  }
+}
+
 /** Chooses the camera, the room mic and the unpluggable mic (remembered between real runs). */
 async function chooseDevices(
   human: Human,
@@ -263,6 +290,7 @@ async function main(): Promise<void> {
   } finally {
     await setup.quit();
   }
+  if (mode === 'real') await requireSpeakerOutput(human, devices);
 
   console.log('\nPlan:');
   for (const s of scenarios) {
