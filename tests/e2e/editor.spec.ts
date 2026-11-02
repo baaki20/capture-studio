@@ -48,6 +48,8 @@ async function launch(): Promise<Launched> {
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
+      // No GPU under Xvfb (CI): Chromium only falls back to software WebGL for the preview when asked.
+      '--enable-unsafe-swiftshader',
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
       '--disable-features=WebRTCPipeWireCapturer',

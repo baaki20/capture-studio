@@ -172,7 +172,13 @@ test('preview and export agree: SSIM ≥ 0.98 and the face box within 2 px (R1.4
   const { root, doc } = makeProject(projects);
   const socket = path.join(userData, 'control.sock');
   const app = await electron.launch({
-    args: ['--ozone-platform=x11', '--disable-features=WebRTCPipeWireCapturer', MAIN],
+    // No GPU under Xvfb (CI): Chromium only falls back to software WebGL for the preview when asked.
+    args: [
+      '--ozone-platform=x11',
+      '--enable-unsafe-swiftshader',
+      '--disable-features=WebRTCPipeWireCapturer',
+      MAIN,
+    ],
     cwd: ROOT,
     env: {
       ...process.env,
