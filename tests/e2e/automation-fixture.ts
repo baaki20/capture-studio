@@ -98,7 +98,13 @@ export function writeAutomationSettings(userData: string, projects: string): voi
 /** Electron's launch options for the built app in test mode on X11. */
 export function launchOptions(userData: string) {
   return {
-    args: ['--ozone-platform=x11', '--disable-features=WebRTCPipeWireCapturer', MAIN],
+    // No GPU under Xvfb (CI): Chromium only falls back to software WebGL for the preview when asked.
+    args: [
+      '--ozone-platform=x11',
+      '--enable-unsafe-swiftshader',
+      '--disable-features=WebRTCPipeWireCapturer',
+      MAIN,
+    ],
     cwd: ROOT,
     env: {
       ...process.env,

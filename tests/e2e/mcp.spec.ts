@@ -2,7 +2,7 @@
  * The MCP server end to end: an MCP client (as Claude Code uses) starts `src/mcp/server.ts` over
  * stdio, pointed at the real app's automation socket, and edits a synthetic project with tool
  * calls: trim the start, move the face, remove the pause, undo and redo, look at a frame, and
- * export, checking the result in the editor and with ffprobe.
+ * export, checking the result in the editor and with ffprobe. Runs under Xvfb with software WebGL.
  */
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
@@ -24,7 +24,7 @@ import {
 interface ToolReply {
   isError: boolean;
   text: string;
-  content: { type: string; text?: string; data?: string }[];
+  content: { type: string; text?: string; data?: string; mimeType?: string }[];
 }
 
 test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
@@ -117,17 +117,23 @@ test('an assistant edits and exports a project through the MCP server', async ()
     expect((await call('redo', { project: doc.id })).text).toMatch(/^Redid "Remove 1 pause"/);
     expect(timelineDurationUs(await liveDoc())).toBe(afterPauseUs);
 
-    // Frames need the preview's WebGL2 compositor, which plain Xvfb may lack (see automation.spec).
-    const frame = await call('get_frame', { project: doc.id, at: 0.5, maxWidth: 320 });
-    if (frame.isError) {
-      expect(frame.text).toMatch(/preview is not ready/);
-      test.info().annotations.push({
-        type: 'not run',
-        description: 'get_frame: the preview cannot render on this display (no WebGL2)',
-      });
-    } else {
-      expect(frame.content[0]).toMatchObject({ type: 'image' });
-    }
+    // A picture of the composed frame (the preview may take a moment to decode its first one).
+    let frame: ToolReply | null = null;
+    await expect
+      .poll(
+        async () => {
+          frame = await call('get_frame', { project: doc.id, at: 0.5, maxWidth: 320 });
+          return frame.isError ? frame.text : 'ok';
+        },
+        { timeout: 30_000 },
+      )
+      .toBe('ok');
+    expect(frame!.content[0]).toMatchObject({
+      type: 'image',
+      mimeType: 'image/png',
+      data: expect.stringMatching(/^iVBORw0KGgo/),
+    });
+    expect(frame!.content[1]).toEqual({ type: 'text', text: 'Frame at 00:00:00:15 (320×180).' });
 
     const started = await call('export_project', {
       project: doc.id,

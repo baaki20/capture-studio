@@ -186,50 +186,23 @@ test('an assistant lists, edits, undoes, finds pauses, captures and exports over
     const trimmedUs = await durationOf();
     expect(trimmedUs / S).toBeCloseTo(5 - 1.8, 1);
 
-    // Frames come from the preview's WebGL2 compositor. Software-only virtual displays (plain
-    // Xvfb) may not provide it, which the parity test needs too: then this step is noted, not run.
-    const previewWorks = await expect
+    // The composed frame (the preview may take a moment to decode its first picture).
+    await expect
       .poll(
-        () =>
-          editor.evaluate(
-            async () => (await window.csEditorDebug?.capturePreview(500_000)) != null,
-          ),
-        { timeout: 15_000 },
+        async () => {
+          const reply = await c.request('preview.frame', {
+            projectId: doc.id,
+            atUs: 500_000,
+            maxWidth: 320,
+          });
+          return reply.ok ? (reply.result as { pngBase64: string; width: number }) : null;
+        },
+        { timeout: 30_000 },
       )
-      .toBe(true)
-      .then(
-        () => true,
-        () => false,
-      );
-    if (previewWorks) {
-      await expect
-        .poll(
-          async () => {
-            const reply = await c.request('preview.frame', {
-              projectId: doc.id,
-              atUs: 500_000,
-              maxWidth: 320,
-            });
-            return reply.ok ? (reply.result as { pngBase64: string; width: number }) : null;
-          },
-          { timeout: 30_000 },
-        )
-        .toMatchObject({
-          width: 320,
-          pngBase64: expect.stringMatching(/^iVBORw0KGgo/),
-        });
-    } else {
-      const reply = await c.request('preview.frame', {
-        projectId: doc.id,
-        atUs: 500_000,
-        maxWidth: 320,
+      .toMatchObject({
+        width: 320,
+        pngBase64: expect.stringMatching(/^iVBORw0KGgo/),
       });
-      expect(reply).toMatchObject({ ok: false, error: { code: 'not-ready' } });
-      test.info().annotations.push({
-        type: 'not run',
-        description: 'frame capture: the preview cannot render on this display (no WebGL2)',
-      });
-    }
 
     const started = await c.call<{ status: string; jobId: string; path: string }>('export.start', {
       projectId: doc.id,
