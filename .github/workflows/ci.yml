@@ -54,3 +54,12 @@ jobs:
 
       - name: E2E tests (Xvfb, X11)
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e
+
+      # Playwright's logs, traces and the app's main.log, to diagnose a failure on the runner.
+      - name: Upload E2E results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: test-results/
+          retention-days: 7
