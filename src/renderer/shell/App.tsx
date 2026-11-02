@@ -81,11 +81,16 @@ export function App() {
   const [completed, setCompleted] = useState<Completed | null>(null);
   const [settingsNotice, setSettingsNotice] = useState<LoadNotice | null>(null);
 
-  // Settings restored from a backup or reset to defaults: told once per launch (R1.50).
+  // Settings restored from a backup or reset to defaults: told once per launch (R1.50). Main
+  // hands the notice to the first call only, so an empty answer must not clear it (React's
+  // StrictMode runs this effect twice in development).
   useEffect(() => {
-    api.settings
-      .takeLoadNotice()
-      .then(setSettingsNotice, (e: unknown) => console.warn('shell: settings notice failed', e));
+    api.settings.takeLoadNotice().then(
+      (notice) => {
+        if (notice) setSettingsNotice(notice);
+      },
+      (e: unknown) => console.warn('shell: settings notice failed', e),
+    );
   }, [api]);
 
   useEffect(() => {

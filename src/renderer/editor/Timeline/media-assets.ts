@@ -1,14 +1,20 @@
 /**
  * Loads waveform peaks and thumbnail sheets for the timeline (R1.44) through `media.peaks` and
  * `media.thumbs`. Both are optional decorations: the timeline draws plain clips until they
- * arrive, polls while main is still generating them, and gives up quietly when unavailable.
+ * arrive, asks again when main announces `media.cachesReady` for the project, and gives up
+ * quietly when unavailable. A slow poll stays as a safety net (and is the only path for API
+ * doubles without the event).
  */
 import type { EditorPreloadApi } from '../../../shared/ipc/preload-api';
 import type { ThumbnailIndex } from '../../../shared/ipc/media-utility';
 import type { ProjectV1 } from '../../../shared/project/schema';
+import { PendingLoads } from './pending-loads';
 import { parsePeaks } from './waveform';
 
+/** Poll interval when the API has no `onCachesReady` event. */
 export const ASSET_POLL_MS = 2_000;
+/** Safety-net poll when the event is available (main announces when caches are ready). */
+export const ASSET_FALLBACK_POLL_MS = 10_000;
 
 export interface Thumbs {
   index: ThumbnailIndex;
@@ -22,14 +28,22 @@ export class MediaAssets {
   readonly peaks = new Map<string, Int16Array>();
   readonly thumbs = new Map<string, Thumbs>();
   private readonly requested = new Set<string>();
-  private readonly timers = new Set<ReturnType<typeof setTimeout>>();
   private readonly listeners = new Set<() => void>();
+  /** Loads still waiting for main; run again on `media.cachesReady`. */
+  private readonly pending: PendingLoads;
+  private readonly unsubscribe: (() => void) | null;
   private disposed = false;
 
   constructor(
     private readonly api: MediaApi,
     private readonly projectId: string,
-  ) {}
+  ) {
+    this.pending = new PendingLoads(api.onCachesReady ? ASSET_FALLBACK_POLL_MS : ASSET_POLL_MS);
+    this.unsubscribe =
+      api.onCachesReady?.((payload) => {
+        if (payload.projectId === this.projectId) this.pending.retryNow();
+      }) ?? null;
+  }
 
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -50,8 +64,8 @@ export class MediaAssets {
 
   dispose(): void {
     this.disposed = true;
-    for (const t of this.timers) clearTimeout(t);
-    this.timers.clear();
+    this.unsubscribe?.();
+    this.pending.dispose();
     this.listeners.clear();
   }
 
@@ -59,19 +73,11 @@ export class MediaAssets {
     if (!this.disposed) for (const l of this.listeners) l();
   }
 
-  private retry(fn: () => Promise<void>): void {
-    const timer = setTimeout(() => {
-      this.timers.delete(timer);
-      if (!this.disposed) void fn();
-    }, ASSET_POLL_MS);
-    this.timers.add(timer);
-  }
-
   private async loadPeaks(mediaId: string): Promise<void> {
     try {
       const result = await this.api.peaks(this.projectId, mediaId);
       if (result.status === 'pending') {
-        this.retry(() => this.loadPeaks(mediaId));
+        this.pending.retry(`peaks:${mediaId}`, () => void this.loadPeaks(mediaId));
         return;
       }
       if (result.status !== 'ready' || !result.url) return;
@@ -88,7 +94,7 @@ export class MediaAssets {
     try {
       const result = await this.api.thumbs(this.projectId, mediaId);
       if (result.status === 'pending') {
-        this.retry(() => this.loadThumbs(mediaId));
+        this.pending.retry(`thumbs:${mediaId}`, () => void this.loadThumbs(mediaId));
         return;
       }
       if (result.status !== 'ready' || !result.url) return;

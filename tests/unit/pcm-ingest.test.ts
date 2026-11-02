@@ -6,6 +6,8 @@ import { PassThrough } from 'node:stream';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  GAP_CONFIRM_US,
+  GapDetector,
   LevelTracker,
   opusEncoderArgs,
   PcmIngest,
@@ -130,6 +132,7 @@ describe('PcmIngest (unit, fake processes)', () => {
     expect(result).toMatchObject({
       samples: 4800 + 480 + 48_000,
       silencedSamples: 0,
+      gapSamples: 0,
       firstSampleUs: 9_900_000,
       checkpoints: 2,
       path: path.join(dir, 'system.rec.mp4'),
@@ -190,6 +193,88 @@ describe('PcmIngest (unit, fake processes)', () => {
     expect(errors[0]).toContain('pw-record exited early (1)');
     const result = await ingest.stop();
     expect(result.exitCode).toBe(1);
+  });
+});
+
+/**
+ * Feeds `seconds` of 10 ms chunks (480 frames) starting at `startUs`, with `jitter(i)` µs of
+ * extra arrival delay on chunk i. Returns the frames of silence asked for and the next start.
+ */
+function feed(
+  detector: GapDetector,
+  state: { samples: number },
+  startUs: number,
+  seconds: number,
+  jitter: (i: number) => number = () => 0,
+): { inserted: number; endUs: number } {
+  let inserted = 0;
+  const chunks = Math.round(seconds * 100);
+  for (let i = 0; i < chunks; i += 1) {
+    state.samples += 480;
+    const gap = detector.observe(startUs + (i + 1) * 10_000 + jitter(i), state.samples);
+    state.samples += gap;
+    inserted += gap;
+  }
+  return { inserted, endUs: startUs + chunks * 10_000 };
+}
+
+describe('GapDetector (lost system-audio samples)', () => {
+  it('fills a 1.5 s loss with 1.5 s of silence once it has lasted 2 s', () => {
+    const detector = new GapDetector();
+    const state = { samples: 0 };
+    let { endUs } = feed(detector, state, 0, 5);
+    // The output device changes: 1.5 s of audio never arrives.
+    endUs += 1_500_000;
+    const after = feed(detector, state, endUs, 5);
+    expect(after.inserted).toBe(72_000);
+    // Lined up again: the sample count matches the clock.
+    expect(state.samples).toBe(Math.round(((after.endUs - 0) * 48_000) / 1e6));
+  });
+
+  it('does not fill audio that was only delayed and then caught up', () => {
+    const detector = new GapDetector();
+    const state = { samples: 0 };
+    const { endUs } = feed(detector, state, 0, 5);
+    // 1 s of chunks arrive up to 800 ms late (a busy machine), then a burst catches up.
+    const late = feed(detector, state, endUs, 1, (i) => 800_000 - i * 8_000);
+    const rest = feed(detector, state, late.endUs, 5);
+    expect(late.inserted + rest.inserted).toBe(0);
+  });
+
+  it('ignores jitter below the threshold and slow clock drift', () => {
+    const detector = new GapDetector();
+    const state = { samples: 0 };
+    // ±80 ms of jitter plus 300 ppm of drift for a minute.
+    const run = feed(detector, state, 0, 60, (i) => ((i * 7919) % 160_000) - 80_000 + i * 3);
+    expect(run.inserted).toBe(0);
+  });
+
+  it('waits for the confirmation time before filling', () => {
+    const detector = new GapDetector();
+    const state = { samples: 0 };
+    let { endUs } = feed(detector, state, 0, 3);
+    endUs += 500_000;
+    const early = feed(detector, state, endUs, (GAP_CONFIRM_US - 100_000) / 1e6);
+    expect(early.inserted).toBe(0);
+    const later = feed(detector, state, early.endUs, 1);
+    expect(later.inserted).toBe(24_000);
+  });
+});
+
+describe('PcmIngest gap filling', () => {
+  it('writes the silence to the encoder and counts it (R1.24 after a device change)', async () => {
+    const fake = fakeSpawn();
+    const ingest = new PcmIngest({ ffmpegPath: 'ffmpeg', dir, spawnImpl: fake.spawnImpl });
+    let t = 1_000_000;
+    for (let i = 0; i < 300; i += 1) ingest.onPcm(pcm(480), (t += 10_000));
+    t += 1_000_000; // 1 s of audio lost
+    for (let i = 0; i < 300; i += 1) ingest.onPcm(pcm(480), (t += 10_000));
+    const result = await ingest.stop();
+    expect(result.gapSamples).toBe(48_000);
+    expect(result.samples).toBe(600 * 480 + 48_000);
+    const left = leftSamples(fake.encoderInput);
+    expect(left).toHaveLength(result.samples);
+    expect(left.filter((v) => v === 0)).toHaveLength(48_000);
   });
 });
 

@@ -125,6 +125,7 @@ class FakeUtility implements UtilityLike {
       syncPath: path.join(dir, 'system.sync.json'),
       samples: 480_000,
       silencedSamples: 0,
+      gapSamples: 0,
       firstSampleUs: T0 + UTILITY_OFFSET + 20_000,
       checkpoints: 10,
       exitCode: captureId ? 0 : null,

@@ -190,6 +190,8 @@ export const SystemAudioResultSchema = z.object({
   samples: z.int().nonnegative(),
   /** Samples replaced by silence while paused. */
   silencedSamples: z.int().nonnegative(),
+  /** Samples of silence inserted where captured audio never arrived (output device changes). */
+  gapSamples: z.int().nonnegative(),
   /** Utility clock (µs) of the first chunk's first sample, or null if nothing arrived. */
   firstSampleUs: z.number().nullable(),
   checkpoints: z.int().nonnegative(),

@@ -7,6 +7,9 @@
  *   `performance.timeOrigin + performance.now()` (µs), and about once a second a drift
  *   checkpoint `[arrivalUs, cumulativeSamples]` goes to `system.sync.json` (§1.5, §4.4.3): the
  *   chunk of that second that arrived earliest relative to its samples (`CheckpointLog`).
+ * - Lost samples are put back as silence (`GapDetector`): when the output device changes,
+ *   PipeWire moves the capture stream and the samples of the switch never arrive, which would
+ *   shift everything after it early. A lasting jump in arrival lateness is filled with silence.
  * - Pause keeps the stream linear: samples whose estimated capture time falls inside a pause are
  *   replaced by digital silence, so nothing from the paused span is stored (§1.5, R1.14).
  * - Stop sends SIGINT to the capture process, lets FFmpeg finish the last fragment, and writes
@@ -145,6 +148,52 @@ export class LevelTracker {
   }
 }
 
+/** A loss shows as arrival lateness this far above the baseline… */
+export const GAP_MIN_US = 200_000;
+/** …held for this long (late audio that is only delayed catches up well before). */
+export const GAP_CONFIRM_US = 2_000_000;
+/** The baseline is the least lateness over this window, so clock drift moves it slowly. */
+export const GAP_BASELINE_WINDOW_US = 10_000_000;
+
+/**
+ * Finds samples that never arrived. Lateness is how far a chunk's arrival trails the time its
+ * sample count says it should have arrived at. It jitters a little above a baseline and moves
+ * slowly with clock drift; lost samples raise it by their duration for good, while a busy
+ * machine only delays chunks and they catch up. `observe` returns how many frames of silence
+ * to insert now so the stream lines up with the clock again.
+ */
+export class GapDetector {
+  private anchorUs: number | null = null;
+  private readonly recent: { atUs: number; latenessUs: number }[] = [];
+  private suspect: { sinceUs: number; minLatenessUs: number } | null = null;
+
+  constructor(private readonly sampleRate = SYSTEM_SAMPLE_RATE) {}
+
+  /** `totalSamples` counts every frame so far, the newest chunk's included. */
+  observe(arrivalUs: number, totalSamples: number): number {
+    const expectedUs = (totalSamples * US_PER_SECOND) / this.sampleRate;
+    this.anchorUs ??= arrivalUs - expectedUs;
+    const latenessUs = arrivalUs - (this.anchorUs + expectedUs);
+    while ((this.recent[0]?.atUs ?? arrivalUs) < arrivalUs - GAP_BASELINE_WINDOW_US)
+      this.recent.shift();
+    const baselineUs = Math.min(...this.recent.map((r) => r.latenessUs), latenessUs);
+
+    if (latenessUs - baselineUs < GAP_MIN_US) {
+      this.suspect = null;
+      this.recent.push({ atUs: arrivalUs, latenessUs });
+      return 0;
+    }
+    this.suspect ??= { sinceUs: arrivalUs, minLatenessUs: latenessUs };
+    this.suspect.minLatenessUs = Math.min(this.suspect.minLatenessUs, latenessUs);
+    if (arrivalUs - this.suspect.sinceUs < GAP_CONFIRM_US) return 0;
+    const gapUs = this.suspect.minLatenessUs - baselineUs;
+    this.suspect = null;
+    // After the silence the lateness is back at the baseline.
+    this.recent.push({ atUs: arrivalUs, latenessUs: latenessUs - gapUs });
+    return Math.round((gapUs * this.sampleRate) / US_PER_SECOND);
+  }
+}
+
 interface PauseSpan {
   startUs: number;
   endUs: number | null;
@@ -161,12 +210,14 @@ export class PcmIngest {
   private readonly nowUs: () => number;
   private readonly logger: Logger;
   private readonly checkpointLog: CheckpointLog;
+  private readonly gaps = new GapDetector();
   private readonly pauses: PauseSpan[] = [];
   private readonly timers: ReturnType<typeof setInterval>[] = [];
 
   private carry: Buffer = Buffer.alloc(0);
   private samples = 0;
   private silencedSamples = 0;
+  private gapSamples = 0;
   private firstSampleUs: number | null = null;
   private captureStderr = '';
   private encoderStderr = '';
@@ -284,6 +335,7 @@ export class PcmIngest {
       syncPath: this.syncPath,
       samples: this.samples,
       silencedSamples: this.silencedSamples,
+      gapSamples: this.gapSamples,
       firstSampleUs: this.firstSampleUs,
       checkpoints: this.checkpointLog.checkpoints.length,
       exitCode: captureCode,
@@ -308,9 +360,19 @@ export class PcmIngest {
     this.silencedSamples += this.silencePaused(pcm, frames, firstUs);
     this.samples += frames;
 
-    this.checkpointLog.offer(arrivalUs, this.samples);
     this.levels?.offer(pcm, arrivalUs);
     if (!this.failed) this.encoder.stdin?.write(pcm);
+
+    const gap = this.gaps.observe(arrivalUs, this.samples);
+    if (gap > 0) {
+      this.logger.warn(
+        `pcm-ingest: ${String(Math.round((gap * 1000) / SYSTEM_SAMPLE_RATE))} ms of system audio never arrived (output device change?); filled with silence`,
+      );
+      this.samples += gap;
+      this.gapSamples += gap;
+      if (!this.failed) this.encoder.stdin?.write(Buffer.alloc(gap * BYTES_PER_FRAME));
+    }
+    this.checkpointLog.offer(arrivalUs, this.samples);
   }
 
   /** Zeroes the frames whose capture time lies in a pause span. Returns how many. */
