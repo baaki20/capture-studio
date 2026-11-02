@@ -1,9 +1,40 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { _electron as electron, expect, test } from '@playwright/test';
+import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 
 const ROOT = path.join(import.meta.dirname, '../..');
+
+/**
+ * Closes the app, but does not wait forever: if it has not quit after `ms`, the app's log and
+ * process tree are attached (to see which shutdown step hangs) and the process is killed.
+ */
+async function closeWithin(app: ElectronApplication, userData: string, ms: number) {
+  const pid = app.process().pid;
+  const closed = app.close().then(() => true);
+  const quit = await Promise.race([
+    closed,
+    new Promise<false>((r) => setTimeout(() => r(false), ms)),
+  ]);
+  if (quit) return;
+  const log = path.join(userData, 'logs', 'main.log');
+  if (existsSync(log)) await test.info().attach('main.log', { path: log });
+  if (pid !== undefined) {
+    const tree = execFileSync(
+      'ps',
+      ['-o', 'pid,ppid,stat,etime,args', '--ppid', String(pid), '-p', String(pid)],
+      {
+        encoding: 'utf8',
+      },
+    );
+    await test.info().attach('processes.txt', { body: tree });
+    app.process().kill('SIGKILL');
+  }
+  throw new Error(
+    `the app did not quit within ${String(ms / 1000)} s (see main.log and processes.txt)`,
+  );
+}
 
 test('the shell window opens sandboxed, with its preload and worker working', async () => {
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-'));
@@ -55,7 +86,10 @@ test('the shell window opens sandboxed, with its preload and worker working', as
 
     expect(errors).toEqual([]);
   } finally {
-    await app.close();
-    rmSync(userData, { recursive: true, force: true });
+    try {
+      await closeWithin(app, userData, 15_000);
+    } finally {
+      rmSync(userData, { recursive: true, force: true });
+    }
   }
 });

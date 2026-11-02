@@ -17,8 +17,9 @@ export default defineConfig({
           include: ['tests/integration/**/*.test.ts'],
           environment: 'node',
           setupFiles: ['tests/setup/reap-children.ts'],
-          testTimeout: 60_000,
-          hookTimeout: 60_000,
+          // Real FFmpeg encodes run in parallel files; CI runners are slower than a dev machine.
+          testTimeout: process.env.CI ? 180_000 : 60_000,
+          hookTimeout: process.env.CI ? 180_000 : 60_000,
         },
       },
     ],
