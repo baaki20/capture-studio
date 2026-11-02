@@ -20,17 +20,14 @@ async function closeWithin(app: ElectronApplication, userData: string, ms: numbe
   if (quit) return;
   const log = path.join(userData, 'logs', 'main.log');
   if (existsSync(log)) await test.info().attach('main.log', { path: log });
-  if (pid !== undefined) {
-    const tree = execFileSync(
-      'ps',
-      ['-o', 'pid,ppid,stat,etime,args', '--ppid', String(pid), '-p', String(pid)],
-      {
-        encoding: 'utf8',
-      },
-    );
-    await test.info().attach('processes.txt', { body: tree });
-    app.process().kill('SIGKILL');
-  }
+  // Every Electron process with its parent and group: the main process may be gone while a
+  // helper (zygote, GPU, utility) still holds the stdio pipes Playwright waits on.
+  const tree = execFileSync('ps', ['-eo', 'pid,ppid,pgid,stat,etime,args'], { encoding: 'utf8' })
+    .split('\n')
+    .filter((line, i) => i === 0 || /electron|chrome-sandbox|capture-studio/.test(line))
+    .join('\n');
+  await test.info().attach('processes.txt', { body: `main pid ${String(pid)}\n${tree}` });
+  app.process().kill('SIGKILL');
   throw new Error(
     `the app did not quit within ${String(ms / 1000)} s (see main.log and processes.txt)`,
   );
