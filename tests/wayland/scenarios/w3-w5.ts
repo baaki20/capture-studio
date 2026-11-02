@@ -103,10 +103,7 @@ export const w4: Scenario = {
   id: 'W4',
   title: 'Unplug the USB headset (mic) mid-recording',
   requirements: ['R1.16'],
-  humanActions: [
-    '1 portal click',
-    'unplug the USB headset when asked, plug it back in at the end',
-  ],
+  humanActions: ['1 portal click', 'unplug the USB headset when asked, plug it back in at the end'],
   async run(ctx, out) {
     if (dryRun(ctx, 'R1.16', out, 'a disconnected device ends early and recording continues'))
       return;
