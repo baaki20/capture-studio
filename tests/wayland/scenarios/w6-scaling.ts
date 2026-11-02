@@ -98,6 +98,16 @@ export const w6: Scenario = {
         systemAudio: false,
       });
       pattern = await Pattern.start({ mode: ctx.mode, display: index, grid: true });
+      // A native Wayland window cannot pick its monitor (`--display` only works on X11), so the
+      // grid may open on the other screen; the human moves it before sharing.
+      if (ctx.mode === 'real') {
+        ctx.human.instruct('W6 — put the grid on the second monitor', [
+          `The grid (thin lines on black) must fill the ${target.label || 'second'} monitor (${String(target.bounds.width)}×${String(target.bounds.height)} @${String(target.scaleFactor)}).`,
+          'If it opened on the other screen, click it and press Super+Shift+→ (or ←) to move it there.',
+          'Then click this terminal and press Enter.',
+        ]);
+        await ctx.human.enter();
+      }
       const { root } = await startRecording(ctx, app, {
         region: { from: [0.3, 0.3], to: [0.7, 0.7] },
         portalSteps: [

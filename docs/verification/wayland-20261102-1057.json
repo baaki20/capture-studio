@@ -1,0 +1,97 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-02T10:57:11.071Z",
+  "finishedAt": "2026-11-02T10:58:33.076Z",
+  "machine": {
+    "host": "test-laptop",
+    "kernel": "redacted",
+    "cpus": "redacted",
+    "memory": "redacted",
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "dbe8108 (, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W6",
+      "title": "Fractional scaling, two monitors, region on monitor 2",
+      "requirements": ["R1.9", "R1.53"],
+      "humanActions": ["set monitor 2 to 125 % (if not already)", "1 portal click: pick monitor 2"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "W6",
+          "name": "outputs",
+          "status": "info",
+          "value": "Built-in display 1536×864 @1.25; External monitor 1920×1080 @1"
+        },
+        {
+          "requirement": "W6",
+          "name": "monitors have different scales",
+          "status": "pass",
+          "value": "1.25 / 1"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "region (source px)",
+          "status": "info",
+          "value": "768×608 at 576,236"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "canvas equals the region (no rescale)",
+          "status": "pass",
+          "value": "768×608"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "vertical grid lines at the exact columns",
+          "status": "pass",
+          "value": "100 %",
+          "limit": "≥ 90 %"
+        },
+        {
+          "requirement": "R1.9",
+          "name": "horizontal grid lines at the exact rows",
+          "status": "pass",
+          "value": "100 %",
+          "limit": "≥ 90 %"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261102-105711/projects/Lesson 2026-11-02 10-58.cstudio"
+      ],
+      "startedAt": "2026-11-02T10:58:06.365Z",
+      "durationS": 26.711
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 0,
+    "error": 0,
+    "not-testable": 0,
+    "info": 0
+  }
+}
