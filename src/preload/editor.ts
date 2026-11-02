@@ -36,6 +36,11 @@ const api: EditorPreloadApi = {
     onDone: (listener) => subscribe('export.done', listener),
     onError: (listener) => subscribe('export.error', listener),
   },
+  automation: {
+    onRequest: (listener) => subscribe('automation.request', listener),
+    reply: (reply) => invoke('automation.reply', reply),
+    ready: (projectId) => invoke('automation.ready', { projectId }),
+  },
 };
 
 contextBridge.exposeInMainWorld('csEditor', api);

@@ -40,6 +40,11 @@ import {
 import { harnessCommands, windowRole } from './diagnostics/harness-commands';
 import { MetricsSampler } from './diagnostics/metrics-sampler';
 import { locateFfmpeg, type FfmpegLocation } from './ffmpeg/locate';
+import {
+  automationSocketPath,
+  registerAutomation,
+  type AutomationHandle,
+} from './ipc/automation-handlers';
 import { registerCoreHandlers } from './ipc/core-handlers';
 import { registerEditorHandlers } from './ipc/editor-handlers';
 import { registerExportHandlers, type ExportService } from './ipc/export-handlers';
@@ -148,6 +153,8 @@ let engineHost: EngineHost | null = null;
 let sessionManager: SessionManager | null = null;
 let controlsHost: ControlsWindowHost | null = null;
 let exportService: ExportService | null = null;
+/** The assistants' automation socket (on only while enabled in Settings). */
+let automation: AutomationHandle | null = null;
 /** One editor window per project (steps 16–18). */
 const editorHost = new EditorWindowHost({ router, renderer, logger: log });
 /** Stops the setup panel's system-audio meter (set once the utility exists). */
@@ -406,6 +413,11 @@ async function start(): Promise<void> {
         execPath: process.execPath,
         appPath: app.getAppPath(),
         appImage: process.env.APPIMAGE,
+      },
+      automation: {
+        enabled: settings.get().automation.enabled,
+        listening: automation?.listening ?? false,
+        socketPath: automation?.socketPath ?? automationSocketPath(app.getPath('userData')),
       },
     }),
   });
@@ -674,6 +686,23 @@ async function start(): Promise<void> {
     logger: log,
   });
 
+  automation = registerAutomation({
+    router,
+    editorHost,
+    settings,
+    socketPath: automationSocketPath(app.getPath('userData')),
+    appVersion: app.getVersion(),
+    listProjects: () => library.list(),
+    readProject: async (projectId) => {
+      const root = await library.findRoot(projectId);
+      const loaded = root ? await store.read(root) : null;
+      return loaded ? { doc: loaded.doc, readOnly: loaded.readOnly } : null;
+    },
+    peaksFile: (projectId, mediaId) => editorMedia.assetFile('peaks', projectId, mediaId),
+    exports: exportService,
+    logger: log,
+  });
+
   const caps = await capabilities.refresh();
   if (caps.capabilities['ui.tray'].state === 'available')
     tray = createTray(actionBus, {
@@ -760,6 +789,7 @@ if (relaunchX11 || !app.requestSingleInstanceLock(secondInstanceData)) {
   app.on('will-quit', () => {
     void metrics.stop();
     void harness?.close();
+    void automation?.dispose();
     tray?.destroy();
     controlsHost?.dispose();
     sessionManager?.dispose();

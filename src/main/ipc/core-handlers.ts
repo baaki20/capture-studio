@@ -39,7 +39,13 @@ export function registerCoreHandlers(deps: CoreHandlerDeps): void {
   router.handle('caps.refresh', () => capabilities.refresh());
 
   router.handle('settings.get', () => deps.settings.get());
-  router.handle('settings.patch', (patch) => deps.settings.patch(patch));
+  router.handle('settings.patch', (patch, context) => {
+    // Turning automation on lets other programs edit projects: only Settings in the shell may.
+    if (patch.automation !== undefined && context.kind !== 'shell') {
+      throw new Error(`${context.kind} window may not change automation settings`);
+    }
+    return deps.settings.patch(patch);
+  });
   router.handle('settings.chooseFolder', async ({ which }, context) => {
     const chosen = await deps.chooseFolder?.(which, context.senderId);
     if (!chosen) return null;

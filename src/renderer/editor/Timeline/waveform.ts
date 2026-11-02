@@ -3,16 +3,9 @@
  * one pair per 10 ms of the file (`utility/media/peaks.ts`). These helpers fold them into one
  * `[min, max]` per pixel column for a clip's file range. Pure.
  */
-export const PEAK_WINDOW_US = 10_000;
+import { PEAK_WINDOW_US } from '../../../shared/project/peaks';
 
-/** Parses the peaks file (an even number of Int16 values). */
-export function parsePeaks(bytes: ArrayBuffer): Int16Array {
-  const count = Math.floor(bytes.byteLength / 4) * 2;
-  const view = new DataView(bytes);
-  const out = new Int16Array(count);
-  for (let i = 0; i < count; i++) out[i] = view.getInt16(i * 2, true);
-  return out;
-}
+export { PEAK_WINDOW_US, parsePeaks } from '../../../shared/project/peaks';
 
 /**
  * `[min, max]` per column (−1..1) for the file range `[fromFileUs, toFileUs)` split into

@@ -85,6 +85,7 @@ export class SettingsStore {
 
   private current: Settings;
   private saving: Promise<void> = Promise.resolve();
+  private readonly changeListeners = new Set<(settings: Settings) => void>();
 
   private constructor(
     private readonly options: SettingsStoreOptions,
@@ -168,7 +169,20 @@ export class SettingsStore {
     const next = SettingsV1Schema.parse(deepMerge(this.current, patch));
     this.current = next;
     await this.save();
+    for (const listener of [...this.changeListeners]) {
+      try {
+        listener(this.get());
+      } catch (error) {
+        (this.options.logger ?? silentLogger).warn('settings: change listener failed', error);
+      }
+    }
     return this.get();
+  }
+
+  /** Called after every successful `patch`. Returns an unsubscribe function. */
+  onChange(listener: (settings: Settings) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
   }
 
   /** Writes the current settings. Saves are serialized so they land in call order. */

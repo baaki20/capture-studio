@@ -12,7 +12,7 @@ export const PROJECT_EXTENSION = '.cstudio';
 export const PROJECT_FILE_NAME = 'project.json';
 
 /** IDs are `<prefix>_<token>`. New IDs use ULID tokens (see `ids.ts`); readers accept any token. */
-function prefixedId(prefix: string) {
+export function prefixedId(prefix: string) {
   return z
     .string()
     .regex(new RegExp(`^${prefix}_[0-9A-Za-z]+$`), `must be an ID starting with "${prefix}_"`);

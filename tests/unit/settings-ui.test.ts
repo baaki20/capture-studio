@@ -41,8 +41,8 @@ async function handlers(options: { chooseFolder?: () => Promise<string | null> }
     writeClipboard: () => undefined,
     ...(options.chooseFolder ? { chooseFolder: options.chooseFolder } : {}),
   });
-  const call = (channel: string, payload?: unknown) =>
-    Promise.resolve(registered.get(channel)?.(payload, { kind: 'shell', senderId: 1 }));
+  const call = (channel: string, payload?: unknown, kind = 'shell') =>
+    Promise.resolve().then(() => registered.get(channel)?.(payload, { kind, senderId: 1 }));
   return { store, call };
 }
 
@@ -57,6 +57,30 @@ describe('settings added after the first release', () => {
     expect(store.loadNotice).toBeNull();
     expect(store.get().recorder.confirmAbort).toBe(true);
     expect(store.get().library).toEqual({ importedRoots: [] });
+  });
+});
+
+describe('automation setting', () => {
+  it('is off by default and loads as off from older files', async () => {
+    const old = createDefaultSettings(defaults) as Record<string, unknown>;
+    delete old.automation;
+    await fs.writeFile(path.join(dir, 'settings.json'), JSON.stringify(old));
+    const store = await SettingsStore.open({ dir, defaults });
+    expect(store.get().automation).toEqual({ enabled: false });
+  });
+
+  it('can be changed only from the shell, and tells listeners', async () => {
+    const { store, call } = await handlers();
+    const seen: boolean[] = [];
+    store.onChange((s) => seen.push(s.automation.enabled));
+    await expect(
+      call('settings.patch', { automation: { enabled: true } }, 'editor'),
+    ).rejects.toThrow(/may not change automation/);
+    expect(store.get().automation.enabled).toBe(false);
+    await call('settings.patch', { automation: { enabled: true } });
+    expect(store.get().automation.enabled).toBe(true);
+    await call('settings.patch', { theme: 'dark' }, 'editor');
+    expect(seen).toEqual([true, true]);
   });
 });
 

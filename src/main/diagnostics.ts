@@ -9,7 +9,7 @@ import {
 } from '../shared/capabilities/types';
 import { CLI_ACTION_LABELS, CLI_ACTIONS } from '../shared/ipc/actions';
 import type { DiagnosticsReport } from '../shared/ipc/contract';
-import { buildActionCommand, type LaunchCommandContext } from './cli';
+import { buildActionCommand, shellQuote, type LaunchCommandContext } from './cli';
 
 export interface DiagnosticsInputs {
   capabilities: CapabilityReport;
@@ -19,6 +19,31 @@ export interface DiagnosticsInputs {
   encoders: FfmpegEncoderReport | null;
   secrets: DiagnosticsReport['secrets'];
   launch: LaunchCommandContext;
+  automation?: { enabled: boolean; listening: boolean; socketPath: string };
+}
+
+/**
+ * The `claude mcp add` command for the Capture Studio MCP server. It runs from the source tree
+ * for now (development builds); packaged builds will ship it later.
+ */
+export function buildMcpConnectCommand(
+  launch: LaunchCommandContext,
+  socketPath: string,
+): string | null {
+  if (launch.isPackaged) return null;
+  return [
+    'claude',
+    'mcp',
+    'add',
+    'capture-studio',
+    '-e',
+    `CS_AUTOMATION_SOCKET=${socketPath}`,
+    '--',
+    `${launch.appPath}/node_modules/.bin/tsx`,
+    `${launch.appPath}/src/mcp/server.ts`,
+  ]
+    .map(shellQuote)
+    .join(' ');
 }
 
 export function buildDiagnosticsReport(inputs: DiagnosticsInputs): DiagnosticsReport {
@@ -36,6 +61,14 @@ export function buildDiagnosticsReport(inputs: DiagnosticsInputs): DiagnosticsRe
     })),
     // Phase 1 ships only the CLI fallback (§9.8); portal registration is not offered anywhere yet.
     canRegisterGlobalShortcuts: false,
+    ...(inputs.automation
+      ? {
+          automation: {
+            ...inputs.automation,
+            connectCommand: buildMcpConnectCommand(inputs.launch, inputs.automation.socketPath),
+          },
+        }
+      : {}),
   };
 }
 
@@ -80,5 +113,15 @@ export function formatDiagnosticsText(report: DiagnosticsReport): string {
   }
   lines.push('', 'Shortcut commands (GNOME Settings → Keyboard → Custom Shortcuts)');
   for (const s of report.shortcuts) lines.push(`  ${s.label}: ${s.command}`);
+  if (report.automation) {
+    const a = report.automation;
+    lines.push(
+      '',
+      'Assistants (MCP)',
+      `  automation: ${a.enabled ? 'on' : 'off'}${a.enabled ? (a.listening ? ', listening' : ', not listening') : ''}`,
+      `  socket:     ${a.socketPath}`,
+    );
+    if (a.connectCommand) lines.push(`  connect:    ${a.connectCommand}`);
+  }
   return lines.join('\n') + '\n';
 }

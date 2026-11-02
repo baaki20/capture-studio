@@ -323,6 +323,37 @@ export function applyOp(doc: ProjectV1, op: TimelineOp, options: OpOptions = {})
   return result.ok ? ok(result.value.doc) : result;
 }
 
+/** A batch failure: the error of the operation at `index`. */
+export interface BatchOpError extends OpError {
+  index: number;
+}
+
+/**
+ * Applies operations in order as one change: all succeed or none takes effect, and the joined
+ * patches let a single undo step revert the whole batch. Operations that change nothing are
+ * allowed; a batch that changes nothing gives the input document and empty patch lists.
+ */
+export function applyOpsWithPatches(
+  doc: ProjectV1,
+  ops: readonly TimelineOp[],
+  options: OpOptions = {},
+): Result<PatchedResult, BatchOpError> {
+  let next = doc;
+  const patches: Patch[] = [];
+  let inversePatches: Patch[] = [];
+  for (const [index, op] of ops.entries()) {
+    const result = applyOpWithPatches(next, op, options);
+    if (!result.ok) {
+      const prefix = ops.length > 1 ? `operation ${String(index + 1)} (${op.type}): ` : '';
+      return err({ ...result.error, message: prefix + result.error.message, index });
+    }
+    next = result.value.doc;
+    patches.push(...result.value.patches);
+    inversePatches = [...result.value.inversePatches, ...inversePatches];
+  }
+  return ok({ doc: next, patches, inversePatches });
+}
+
 function opFn<T extends TimelineOpType>(type: T) {
   return (doc: ProjectV1, args: OpArgs<T>, options?: OpOptions): OpResult =>
     applyOp(doc, { ...args, type } as unknown as TimelineOp, options);

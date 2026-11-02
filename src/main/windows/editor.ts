@@ -48,6 +48,7 @@ export class EditorWindowHost {
   /** Set once every window was flushed for quitting; close handlers then let windows go. */
   private released = false;
   private readonly allClosedListeners = new Set<() => void>();
+  private readonly closedListeners = new Set<(projectId: string) => void>();
 
   constructor(private readonly options: EditorHostOptions) {}
 
@@ -65,6 +66,18 @@ export class EditorWindowHost {
   /** The open editor windows' project ids. */
   get openProjects(): string[] {
     return [...this.windows.keys()];
+  }
+
+  /** Called when a project's editor window has closed. */
+  onWindowClosed(listener: (projectId: string) => void): () => void {
+    this.closedListeners.add(listener);
+    return () => this.closedListeners.delete(listener);
+  }
+
+  /** The webContents of a project's open editor window, or null. */
+  contentsOf(projectId: string): BrowserWindow['webContents'] | null {
+    const window = this.windows.get(projectId);
+    return window && !window.isDestroyed() ? window.webContents : null;
   }
 
   /** Opens (or focuses) the editor for a project. */
@@ -91,7 +104,10 @@ export class EditorWindowHost {
     });
     window.on('closed', () => {
       unregister();
-      if (this.windows.get(projectId) === window) this.windows.delete(projectId);
+      if (this.windows.get(projectId) === window) {
+        this.windows.delete(projectId);
+        for (const listener of [...this.closedListeners]) listener(projectId);
+      }
       if (this.windows.size === 0) for (const listener of [...this.allClosedListeners]) listener();
     });
     this.options.logger.info(`editor: opened ${projectId}`);

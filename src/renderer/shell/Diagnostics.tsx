@@ -155,6 +155,42 @@ export function Diagnostics() {
         </tbody>
       </table>
 
+      {report.automation ? (
+        <>
+          <h3>Assistants (MCP)</h3>
+          <table className={styles.table} data-testid="automation">
+            <tbody>
+              <tr>
+                <th scope="row">Automation</th>
+                <td>
+                  {report.automation.enabled
+                    ? report.automation.listening
+                      ? 'On, listening'
+                      : 'On, not listening (see the log)'
+                    : 'Off (Settings → Assistants)'}
+                </td>
+              </tr>
+              <tr>
+                <th scope="row">Socket</th>
+                <td>
+                  <code className={styles.command}>{report.automation.socketPath}</code>
+                </td>
+              </tr>
+              {report.automation.connectCommand ? (
+                <tr>
+                  <th scope="row">Connect Claude Code</th>
+                  <td>
+                    <code className={styles.command} data-testid="automation-connect">
+                      {report.automation.connectCommand}
+                    </code>
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </>
+      ) : null}
+
       <h3>Capabilities</h3>
       <table className={styles.table} data-testid="capabilities">
         <thead>

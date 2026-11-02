@@ -151,6 +151,12 @@ export interface EditorPreloadApi extends PreloadBase {
     onDone(listener: Listener<EventPayload<'export.done'>>): Unsubscribe;
     onError(listener: Listener<EventPayload<'export.error'>>): Unsubscribe;
   };
+  /** Assistant requests from main (`renderer/editor/automation.ts`); optional for test doubles. */
+  readonly automation?: {
+    onRequest(listener: Listener<EventPayload<'automation.request'>>): Unsubscribe;
+    reply(reply: InvokeRequest<'automation.reply'>): Promise<void>;
+    ready(projectId: string): Promise<void>;
+  };
 }
 
 export type EngineCommandHandler<C extends EngineCommandChannel> = (

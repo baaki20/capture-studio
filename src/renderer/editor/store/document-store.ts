@@ -18,12 +18,16 @@
  * - Saving is done by `autosave.ts`, which calls `markSaving`, `markSaved`, `markSaveFailed` and
  *   `reloadFromDisk`. After a conflict reload, `notice.discardedDoc` holds the local version and
  *   `restoreDiscarded()` re-applies it as one undoable step (it is then saved normally).
+ * - `applyBatch(ops, { label })` performs several operations as one undo step, all or nothing
+ *   (assistant edits through the automation socket). It refuses with `busy` during a gesture.
  * - Read-only projects (newer format, R1.30) refuse every edit with `read-only`.
  */
 import { createStore, useStore, type StoreApi } from 'zustand';
 import type { InvokeRequest, InvokeResponse } from '../../../shared/ipc/contract';
 import {
   applyOpWithPatches,
+  applyOpsWithPatches,
+  type BatchOpError,
   type OpError,
   type OpOptions,
   type TimelineOp,
@@ -42,8 +46,12 @@ export type SaveStatus = 'saved' | 'pending' | 'saving' | 'error' | 'read-only';
 
 export type EditError = OpError | { code: 'read-only' | 'no-document'; message: string };
 
+/** Why `applyBatch` refused: an operation failed, or the user is mid-drag (`busy`). */
+export type BatchEditError = EditError | BatchOpError | { code: 'busy'; message: string };
+
 export interface EditorNotice {
-  kind: 'reloaded' | 'save-failed';
+  /** `assistant`: an edit arrived through the automation socket. */
+  kind: 'reloaded' | 'save-failed' | 'assistant';
   message: string;
   /** For `reloaded`: the local version that was replaced by the one on disk. */
   discardedDoc?: ProjectV1;
@@ -77,6 +85,12 @@ export interface DocumentState {
 export interface DocumentActions {
   load(open: ProjectOpenResult): void;
   apply(op: TimelineOp, options?: ApplyOptions): Result<ProjectV1, EditError>;
+  applyBatch(
+    ops: readonly TimelineOp[],
+    options: { label: string },
+  ): Result<ProjectV1, BatchEditError>;
+  /** Shows an `assistant` notice unless a more important one (reload, save failure) is up. */
+  showAssistantNotice(message: string): void;
   beginGesture(): void;
   endGesture(): void;
   undo(): boolean;
@@ -183,21 +197,26 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
       };
     };
 
-    const apply = (op: TimelineOp, applyOptions: ApplyOptions = {}) => {
+    /** The document when edits are allowed, else why not. */
+    const editable = (): Result<ProjectV1, EditError> => {
       const { doc, readOnly } = get();
-      if (!doc) {
-        const error: EditError = { code: 'no-document', message: 'no project is open' };
-        set({ lastError: error });
-        return err(error);
-      }
+      if (!doc) return err({ code: 'no-document', message: 'no project is open' });
       if (readOnly) {
-        const error: EditError = {
+        return err({
           code: 'read-only',
           message: 'this project was made by a newer version and opens read-only',
-        };
-        set({ lastError: error });
-        return err(error);
+        });
       }
+      return ok(doc);
+    };
+
+    const apply = (op: TimelineOp, applyOptions: ApplyOptions = {}) => {
+      const target = editable();
+      if (!target.ok) {
+        set({ lastError: target.error });
+        return target;
+      }
+      const doc = target.value;
       const result = applyOpWithPatches(doc, op, options.opOptions);
       if (!result.ok) {
         set({ lastError: result.error });
@@ -223,6 +242,32 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
       return ok(next);
     };
 
+    // Errors go back to the caller (the assistant), not to the status line.
+    const applyBatch = (
+      ops: readonly TimelineOp[],
+      batchOptions: { label: string },
+    ): Result<ProjectV1, BatchEditError> => {
+      const target = editable();
+      if (!target.ok) return target;
+      if (history.inGesture) {
+        return err({ code: 'busy', message: 'the user is dragging in the editor' });
+      }
+      const doc = target.value;
+      const result = applyOpsWithPatches(doc, ops, options.opOptions);
+      if (!result.ok) return result;
+      const { doc: next, patches, inversePatches } = result.value;
+      if (patches.length === 0) return ok(doc);
+      // A null coalesce key never merges, so the batch stays its own undo step.
+      history.record({ label: batchOptions.label, patches, inversePatches, coalesceKey: null });
+      history.seal();
+      set({
+        doc: next,
+        saveStatus: statusFor(next, get().savedDoc, false),
+        ...historyState(),
+      });
+      return ok(next);
+    };
+
     const step = (direction: 'undo' | 'redo'): boolean => {
       const { doc, readOnly, savedDoc } = get();
       if (!doc || readOnly) return false;
@@ -238,6 +283,12 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
         set({ ...opened(open), notice: null });
       },
       apply,
+      applyBatch,
+      showAssistantNotice: (message) => {
+        const current = get().notice;
+        if (current && current.kind !== 'assistant') return;
+        set({ notice: { kind: 'assistant', message } });
+      },
       beginGesture: () => {
         history.beginGesture();
       },
