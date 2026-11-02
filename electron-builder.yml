@@ -50,7 +50,7 @@ linux:
   category: AudioVideo;Video;Recorder;
   synopsis: Screen recorder and teaching-focused video editor
   description: Record the screen, camera and audio, then edit lessons on a multi-track timeline.
-  maintainer: Capture Studio contributors
+  maintainer: baaki20 <huduabdulbaakijunior20@gmail.com>
   vendor: Capture Studio contributors
   desktop:
     entry:
