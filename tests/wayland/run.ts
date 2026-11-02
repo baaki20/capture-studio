@@ -358,7 +358,11 @@ async function main(): Promise<void> {
     scenarios: results,
     totals: totals(results),
   };
-  const written = await writeReport(report);
+  const written = await writeReport(report, undefined, [
+    { text: devices.cameraLabel, as: 'camera' },
+    { text: devices.roomMicLabel, as: 'room mic' },
+    { text: devices.unplugMicLabel, as: 'USB headset' },
+  ]);
   human.close();
   console.log('\nSummary:');
   for (const r of results) console.log(`  ${r.id.padEnd(6)} ${r.status.toUpperCase()}`);

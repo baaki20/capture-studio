@@ -51,6 +51,10 @@ function run(cmd: string, args: string[]): string {
   }
 }
 
+/**
+ * What the report says about the run's environment. Reports are committed to a public
+ * repository, so nothing identifies the machine: no hostname, kernel, CPU, memory or user.
+ */
 export function machineInfo(): Record<string, string> {
   const electron = JSON.parse(
     execFileSync(process.execPath, ['-p', "JSON.stringify(require('electron/package.json'))"], {
@@ -59,10 +63,6 @@ export function machineInfo(): Record<string, string> {
     }),
   ) as { version: string };
   return {
-    host: os.hostname(),
-    kernel: os.release(),
-    cpus: `${String(os.cpus().length)} × ${os.cpus()[0]?.model ?? 'unknown'}`,
-    memory: `${(os.totalmem() / 1e9).toFixed(1)} GB`,
     session: process.env.XDG_SESSION_TYPE ?? 'unknown',
     desktop: process.env.XDG_CURRENT_DESKTOP ?? 'unknown',
     electron: electron.version,
@@ -132,17 +132,51 @@ async function formatted(text: string, file: string): Promise<string> {
 }
 
 /** Writes the JSON and Markdown reports; returns their paths. */
+/** A device or display name and the generic role written instead. */
+export interface Redaction {
+  text: string | null | undefined;
+  as: string;
+}
+
+/**
+ * Removes machine details from report text: the home folder and user name in paths, the
+ * hostname, and the given device names (a name's channel suffix such as "Mono" or "Analog
+ * Stereo" is dropped first, so the input and output names of one headset both match).
+ */
+export function redact(text: string, redactions: readonly Redaction[] = []): string {
+  let out = text;
+  const home = os.homedir();
+  const user = os.userInfo().username;
+  const replace = (find: string, by: string) => {
+    if (find.length >= 3) out = out.split(find).join(by);
+  };
+  const suffix = / (Mono|Analog Stereo|Digital Stereo[^)"|]*|Stereo)$/;
+  for (const r of redactions) {
+    const stem = (r.text ?? '').replace(suffix, '');
+    if (stem.length < 3) continue;
+    const escaped = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(`${escaped}(${suffix.source.slice(0, -1)})?`, 'g'), r.as);
+  }
+  replace(home, '~');
+  replace(`/run/user/${String(os.userInfo().uid)}`, '/run/user/<uid>');
+  replace(`/home/${user}`, '~');
+  replace(os.hostname(), 'test-machine');
+  return out;
+}
+
 export async function writeReport(
   report: RunReport,
   dir = path.join(ROOT, 'docs', 'verification'),
+  redactions: readonly Redaction[] = [],
 ) {
   await fs.mkdir(dir, { recursive: true });
   const stamp = report.startedAt.slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
   const base = path.join(dir, `wayland-${stamp}${report.mode === 'dry-run' ? '-dry-run' : ''}`);
   const json = `${base}.json`;
   const md = `${base}.md`;
-  await fs.writeFile(json, await formatted(`${JSON.stringify(report, null, 2)}\n`, json));
-  await fs.writeFile(md, await formatted(toMarkdown(report), md));
+  const clean = JSON.parse(redact(JSON.stringify(report), redactions)) as RunReport;
+  await fs.writeFile(json, await formatted(`${JSON.stringify(clean, null, 2)}\n`, json));
+  await fs.writeFile(md, await formatted(redact(toMarkdown(clean), redactions), md));
   return { json, md };
 }
 

@@ -56,8 +56,9 @@ export const w6: Scenario = {
           'outputs',
           displays
             .map(
-              (d) =>
-                `${d.label || String(d.id)} ${String(d.bounds.width)}×${String(d.bounds.height)} @${String(d.scaleFactor)}`,
+              // Generic names: monitor makes and models must not reach the report.
+              (d, i) =>
+                `display ${String(i + 1)}${d.primary ? ' (primary)' : ''} ${String(d.bounds.width)}×${String(d.bounds.height)} @${String(d.scaleFactor)}`,
             )
             .join('; '),
         ),
