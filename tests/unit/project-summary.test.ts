@@ -32,6 +32,7 @@ describe('summarizeProject', () => {
     expect(face?.clips[0]?.linkId).not.toBeNull();
     expect(face?.clips[0]?.linkId).toBe(voice?.clips[0]?.linkId);
     expect(voice).toMatchObject({ gainDb: 0, muted: false, solo: false, audible: true });
+    expect(face).toMatchObject({ sourceSize: { width: 1280, height: 720 } });
     expect(face?.clips[1]?.start.timecode).toMatch(/^\d\d:\d\d:\d\d:\d\d$/);
     expect(summary.components.map((c) => c.type).sort()).toEqual([
       'face-voice',

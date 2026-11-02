@@ -5,92 +5,21 @@
  * the editor (which opens for it), undone and redone, its pause found from the waveform cache and
  * cut, a frame captured, and the result exported and checked with ffprobe.
  */
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
 import { AUTOMATION_PROTOCOL_VERSION } from '../../src/shared/automation/protocol';
-import type { ProjectV1 } from '../../src/shared/project/schema';
 import { timelineDurationUs } from '../../src/shared/project/timeline-ops';
-import { createDefaultSettings } from '../../src/shared/settings/schema';
-import { recordedProject } from '../fixtures/editor-project';
-
-const ROOT = path.join(import.meta.dirname, '../..');
-const MAIN = path.join(ROOT, 'out/main/index.js');
-const FFMPEG_DIR = path.join(ROOT, 'resources/bin', `${process.platform}-${process.arch}`);
-const FFMPEG = path.join(FFMPEG_DIR, 'ffmpeg');
-const FFPROBE = path.join(FFMPEG_DIR, 'ffprobe');
-const S = 1_000_000;
-const SECONDS = 6;
-
-function ff(args: string[]): void {
-  execFileSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
-}
-
-function makeProject(projects: string): ProjectV1 {
-  const doc = recordedProject({
-    durationUs: SECONDS * S,
-    pauses: [],
-    system: false,
-    screenSize: { width: 1280, height: 720 },
-    cameraSize: { width: 640, height: 480 },
-    offsets: { screen: 0, camera: 0, microphone: 0 },
-  });
-  const media = path.join(projects, 'Automation.cstudio', 'media');
-  mkdirSync(media, { recursive: true });
-  const d = String(SECONDS);
-  ff([
-    '-f',
-    'lavfi',
-    '-i',
-    `testsrc2=size=1280x720:rate=30:duration=${d}`,
-    '-vf',
-    'hue=s=0',
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-g',
-    '30',
-    '-pix_fmt',
-    'yuv420p',
-    path.join(media, 'screen.mp4'),
-  ]);
-  ff([
-    '-f',
-    'lavfi',
-    '-i',
-    `color=c=0xFF00FF:s=640x480:r=30:d=${d}`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-pix_fmt',
-    'yuv420p',
-    path.join(media, 'camera.mp4'),
-  ]);
-  // A tone with silence from 2 s to 4 s.
-  ff([
-    '-f',
-    'lavfi',
-    '-i',
-    `sine=frequency=440:sample_rate=48000:duration=${d}`,
-    '-af',
-    "volume='if(between(t,2,4),0,0.8)':eval=frame",
-    '-c:a',
-    'libopus',
-    '-b:a',
-    '64k',
-    path.join(media, 'microphone.mp4'),
-  ]);
-  writeFileSync(
-    path.join(projects, 'Automation.cstudio', 'project.json'),
-    JSON.stringify(doc, null, 2),
-  );
-  return doc;
-}
+import {
+  S,
+  SECONDS,
+  launchOptions,
+  makeProject,
+  probeDurationSec,
+  writeAutomationSettings,
+} from './automation-fixture';
 
 /** A minimal client for the automation socket (the MCP server has its own). */
 class SocketClient {
@@ -153,44 +82,15 @@ type Reply =
   | { id: number | null; ok: true; result: unknown }
   | { id: number | null; ok: false; error: { code: string; message: string } };
 
-function probeDurationSec(file: string): number {
-  const out = execFileSync(FFPROBE, [
-    '-v',
-    'error',
-    '-show_entries',
-    'format=duration',
-    '-of',
-    'default=nw=1:nk=1',
-    file,
-  ]);
-  return Number(out.toString().trim());
-}
-
 test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
 
 test('an assistant lists, edits, undoes, finds pauses, captures and exports over the socket', async () => {
   test.setTimeout(180_000);
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-automation-'));
   const projects = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-automation-projects-'));
-  const settings = createDefaultSettings({
-    projectsDir: projects,
-    exportsDir: path.join(projects, 'Exports'),
-  });
-  settings.automation = { enabled: true };
-  writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
+  writeAutomationSettings(userData, projects);
   const doc = makeProject(projects);
-  const app = await electron.launch({
-    args: ['--ozone-platform=x11', '--disable-features=WebRTCPipeWireCapturer', MAIN],
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      CS_TEST: '1',
-      CS_USER_DATA_DIR: userData,
-      CS_FFMPEG_DIR: FFMPEG_DIR,
-      XDG_SESSION_TYPE: 'x11',
-      WAYLAND_DISPLAY: '',
-    },
-  });
+  const app = await electron.launch(launchOptions(userData));
   let client: SocketClient | null = null;
   try {
     await app.firstWindow();

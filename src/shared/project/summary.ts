@@ -7,7 +7,7 @@
 import { formatTimecode, usToSeconds, type Us } from '../time';
 import { isTrackAudible } from './render-plan';
 import type { Component, Media, ProjectV1, ScreenLayout, OverlayLayout } from './schema';
-import { clipDurationUs, clipEndUs, timelineDurationUs } from './timeline-ops';
+import { clipDurationUs, clipEndUs, timelineDurationUs, trackFrameSize } from './timeline-ops';
 
 export interface TimeSummary {
   seconds: number;
@@ -36,6 +36,8 @@ export interface VideoTrackSummary extends TrackSummaryBase {
   type: 'video';
   hidden: boolean;
   layout: ScreenLayout | OverlayLayout;
+  /** The picture size of the track's media, in the pixels `layout.crop` uses. */
+  sourceSize: { width: number; height: number };
 }
 
 export interface AudioTrackSummary extends TrackSummaryBase {
@@ -100,7 +102,13 @@ export function summarizeProject(doc: ProjectV1): ProjectSummary {
         })),
       };
       return track.type === 'video'
-        ? { ...base, type: 'video', hidden: track.hidden, layout: track.layout }
+        ? {
+            ...base,
+            type: 'video',
+            hidden: track.hidden,
+            layout: track.layout,
+            sourceSize: trackFrameSize(doc, track),
+          }
         : {
             ...base,
             type: 'audio',

@@ -26,7 +26,8 @@ function processFolder(names, message) {
 /**
  * Process-boundary zones (spec §1.2): renderers cannot reach Node, main or utility code; the
  * shared core cannot reach Node, Electron or any process folder; main does not import renderer
- * or utility code (it starts the utility by path via `?modulePath`).
+ * or utility code (it starts the utility by path via `?modulePath`); the MCP server (`src/mcp`)
+ * reaches the app only through its automation socket.
  */
 const boundaryZones = [
   {
@@ -118,6 +119,24 @@ const boundaryZones = [
       ],
     },
   },
+  {
+    // The MCP server is a separate Node program that talks to the app over its automation socket.
+    files: ['src/mcp/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            electronImports,
+            processFolder(
+              ['main', 'renderer', 'utility', 'preload'],
+              'The MCP server reaches the app only through the automation socket and src/shared.',
+            ),
+          ],
+        },
+      ],
+    },
+  },
 ];
 
 export default tseslint.config(
@@ -161,6 +180,7 @@ export default tseslint.config(
       'src/main/**',
       'src/preload/**',
       'src/utility/**',
+      'src/mcp/**',
       'scripts/**',
       'tests/**',
       '*.config.{js,ts}',
