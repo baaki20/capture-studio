@@ -3,7 +3,7 @@
 appId: org.capturestudio.CaptureStudio
 productName: Capture Studio
 executableName: capture-studio
-copyright: Copyright © 2026 Capture Studio contributors
+copyright: Copyright © 2026 baaki20 <huduabdulbaakijunior20@gmail.com>
 
 directories:
   buildResources: build
@@ -51,7 +51,7 @@ linux:
   synopsis: Screen recorder and teaching-focused video editor
   description: Record the screen, camera and audio, then edit lessons on a multi-track timeline.
   maintainer: baaki20 <huduabdulbaakijunior20@gmail.com>
-  vendor: Capture Studio contributors
+  vendor: baaki20
   desktop:
     entry:
       Name: Capture Studio
