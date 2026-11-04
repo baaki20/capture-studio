@@ -17,7 +17,15 @@ import type { PreviewCounterValues } from './editor/preview/playback-counters';
 interface EditorDebugApi {
   /** The current project document. */
   doc(): Project | null;
-  ui(): { playheadUs: number; playing: boolean; selection: string[]; snapping: boolean };
+  ui(): {
+    playheadUs: number;
+    playing: boolean;
+    selection: string[];
+    snapping: boolean;
+    /** Timeline zoom and scroll (to aim at the timeline canvas). */
+    view: { pxPerSec: number; scrollUs: number };
+    selectedKeyframe: { lane: 'layout' | 'camera'; trackId: string; tUs: number } | null;
+  };
   /** Renders the playhead (or `tUs`) and measures the preview picture. */
   probePreview(tUs?: number): Promise<{ meanLuma: number; nonBlack: number; exact: boolean }>;
   saveStatus(): string;

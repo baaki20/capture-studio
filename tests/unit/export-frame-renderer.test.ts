@@ -7,7 +7,11 @@ import { describe, expect, it } from 'vitest';
 import { frameTimeUs, pickTimeUs, type FrameSpec } from '../../src/shared/export/frame-render';
 import { sceneAt } from '../../src/shared/project/scene';
 import type { Project } from '../../src/shared/project/schema';
-import type { CompositeItemOf, Size } from '../../src/renderer/editor/preview/compositor-math';
+import type {
+  CompositeItemOf,
+  SceneBackground,
+  Size,
+} from '../../src/renderer/editor/preview/compositor-math';
 import type { DecoderPool } from '../../src/renderer/editor/preview/decoder-pool';
 import {
   ExportFrameRenderer,
@@ -73,12 +77,12 @@ class FakePool {
 }
 
 class FakeCompositor implements OffscreenCompositor<FakeFrame> {
-  readonly draws: { background: string; items: CompositeItem[] }[] = [];
+  readonly draws: { background: SceneBackground; items: CompositeItem[] }[] = [];
   size: Size | null = null;
   resize(size: Size): void {
     this.size = size;
   }
-  drawOffscreen(background: string, items: readonly CompositeItem[]): void {
+  drawOffscreen(background: SceneBackground, items: readonly CompositeItem[]): void {
     this.draws.push({ background, items: [...items] });
   }
   readYuv420(out: Size): Uint8Array {
@@ -129,7 +133,7 @@ describe('ExportFrameRenderer', () => {
     expect(written[0]?.frame.length).toBe(640 * 360 * 1.5);
     for (const [k, draw] of compositor.draws.entries()) {
       const scene = sceneAt(doc, frameTimeUs(k, 30));
-      expect(draw.background).toBe(doc.timeline.canvas.background.color);
+      expect(draw.background).toEqual(doc.timeline.canvas.background);
       expect(draw.items.map((i) => i.layer)).toEqual(scene.layers);
       // Each layer shows the frame picked nearest to its file time.
       for (const item of draw.items) {

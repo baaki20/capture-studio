@@ -2,8 +2,9 @@
  * The timeline (R1.31–R1.44): React track headers (with Face + Voice as one linked component
  * group) beside a canvas that draws the ruler, clips, waveforms, thumbnails, marks and playhead
  * (`draw.ts`). Pointer handling on the canvas: scrub on the ruler, select, move and trim clips
- * (one undo step per drag), select a face layout keyframe (jumping to it) and drag it along the
- * face row's keyframe lane (R2.1; snapped to frames, one undo step), Ctrl+wheel zoom, wheel
+ * (one undo step per drag), select a keyframe (jumping to it) and drag it along its lane (face
+ * layout keyframes on the face row, R2.1; zoom keyframes on the screen row, R2.9; snapped to
+ * frames, one undo step), Ctrl+wheel zoom, wheel
  * scroll. Hit testing and drawing share `geometry.ts`.
  */
 import {
@@ -28,17 +29,19 @@ import {
   fitView,
   hitTest,
   layoutRows,
+  moveKeyframeOp,
   revealTime,
   snapThresholdUs,
   xToTime,
   zoomAround,
+  type LaneKeyframe,
   type Row,
 } from './geometry';
 
 type Session =
   | { kind: 'scrub' }
   | { kind: 'clip'; drag: ClipDrag; startX: number; started: boolean }
-  | { kind: 'keyframe'; trackId: string; atUs: number; startX: number; started: boolean };
+  | { kind: 'keyframe'; key: LaneKeyframe; startX: number; started: boolean };
 
 const DRAG_START_PX = 3;
 
@@ -181,15 +184,10 @@ export function Timeline() {
       return;
     }
     if (hit.kind === 'keyframe') {
-      state.selectKeyframe({ trackId: hit.trackId, tUs: hit.keyUs });
+      const key = { lane: hit.lane, trackId: hit.trackId, tUs: hit.keyUs };
+      state.selectKeyframe(key);
       playback.seek(hit.keyUs);
-      session.current = {
-        kind: 'keyframe',
-        trackId: hit.trackId,
-        atUs: hit.keyUs,
-        startX: x,
-        started: false,
-      };
+      session.current = { kind: 'keyframe', key, startX: x, started: false };
       return;
     }
     if (hit.kind !== 'clip') {
@@ -235,17 +233,12 @@ export function Timeline() {
       }
       const fps = d.timeline.frameRate;
       const toUs = frameToUs(usToFrame(Math.max(0, xToTime(state.view, x)), fps), fps);
-      if (toUs === current.atUs) return;
-      const moved = docStore.getState().apply({
-        type: 'moveLayoutKeyframe',
-        trackId: current.trackId,
-        fromUs: current.atUs,
-        toUs,
-      });
+      if (toUs === current.key.tUs) return;
+      const moved = docStore.getState().apply(moveKeyframeOp(current.key, toUs));
       // Onto another keyframe: stay put until the pointer moves past it.
       if (!moved.ok) return;
-      current.atUs = toUs;
-      state.selectKeyframe({ trackId: current.trackId, tUs: toUs });
+      current.key = { ...current.key, tUs: toUs };
+      state.selectKeyframe(current.key);
       playback.seek(toUs);
       return;
     }

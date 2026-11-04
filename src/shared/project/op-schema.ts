@@ -7,7 +7,15 @@
  * every edit passes the same per-operation checks as a user's.
  */
 import { z } from 'zod';
-import { BorderSchema, EASINGS, FACE_MODES, NRectSchema, ShadowSchema, prefixedId } from './schema';
+import {
+  BeautifySchema,
+  BorderSchema,
+  EASINGS,
+  FACE_MODES,
+  NRectSchema,
+  ShadowSchema,
+  prefixedId,
+} from './schema';
 import type { TimelineOp } from './timeline-ops';
 
 /** A `TimelineOp` that automation may send. */
@@ -32,6 +40,13 @@ const LayoutPatchSchema = z.strictObject({
   shadow: ShadowSchema.nullable().optional().describe('null removes the shadow'),
 });
 const FaceMode = z.enum(FACE_MODES);
+/** A camera rect in canvas fractions; the operations clamp it inside the canvas. */
+const CameraRect = z.strictObject({
+  x: z.number(),
+  y: z.number(),
+  width: z.number(),
+  height: z.number(),
+});
 const Easing = z.enum(EASINGS);
 
 const NudgeTargetSchema = z.union([
@@ -98,6 +113,26 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
     startUs: NonNegativeUs,
     endUs: NonNegativeUs,
     mode: FaceMode,
+    easeUs: NonNegativeUs.optional(),
+  }),
+  z.strictObject({ type: z.literal('setBeautify'), beautify: BeautifySchema.nullable() }),
+  z.strictObject({
+    type: z.literal('setCameraKeyframe'),
+    tUs: NonNegativeUs,
+    rect: CameraRect.optional(),
+    easing: Easing.optional(),
+  }),
+  z.strictObject({ type: z.literal('removeCameraKeyframe'), tUs: NonNegativeUs }),
+  z.strictObject({
+    type: z.literal('moveCameraKeyframe'),
+    fromUs: NonNegativeUs,
+    toUs: NonNegativeUs,
+  }),
+  z.strictObject({
+    type: z.literal('setCameraZoom'),
+    startUs: NonNegativeUs,
+    endUs: NonNegativeUs,
+    rect: CameraRect,
     easeUs: NonNegativeUs.optional(),
   }),
   z.strictObject({ type: z.literal('nudge'), target: NudgeTargetSchema, syncAdjustUs: Us }),

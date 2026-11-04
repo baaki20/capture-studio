@@ -17,14 +17,14 @@
 import { frameTimeUs, pickTimeUs, type FrameSpec } from '../../shared/export/frame-render';
 import type { Media, Project } from '../../shared/project/schema';
 import { sceneAt, type SceneLayer } from '../../shared/project/scene';
-import { sceneBackgroundColor } from '../editor/preview/compositor-math';
+import type { SceneBackground } from '../editor/preview/compositor-math';
 import type { CompositeItemOf, Size } from '../editor/preview/compositor-math';
 import type { DecoderPool } from '../editor/preview/decoder-pool';
 import type { CacheableFrame } from '../editor/preview/frame-cache';
 
 export interface OffscreenCompositor<F> {
   resize(size: Size): void;
-  drawOffscreen(background: string, items: readonly CompositeItemOf<F>[]): void;
+  drawOffscreen(background: SceneBackground, items: readonly CompositeItemOf<F>[]): void;
   readYuv420(out: Size, into?: Uint8Array): Uint8Array;
 }
 
@@ -79,7 +79,7 @@ export class ExportFrameRenderer<F extends CacheableFrame> {
       if (signal?.aborted) throw new RenderError('cancelled');
       const scene = sceneAt(this.doc, frameTimeUs(k, spec.fps));
       const items = await this.settle(scene.layers, spec.fps, signal);
-      this.compositor.drawOffscreen(sceneBackgroundColor(scene), items);
+      this.compositor.drawOffscreen(scene.background, items);
       await sink.write(k, this.compositor.readYuv420(out));
     }
     return { frames: spec.frames, inexact: this.inexact };

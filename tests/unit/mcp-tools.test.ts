@@ -56,6 +56,7 @@ describe('Capture Studio MCP tools', () => {
         'nudge_sync',
         'redo',
         'remove_silences',
+        'set_background',
         'set_face_keyframe',
         'set_face_layout',
         'set_face_mode',
@@ -65,7 +66,9 @@ describe('Capture Studio MCP tools', () => {
         'split_at',
         'trim_clip',
         'trim_ends',
+        'set_zoom_keyframe',
         'undo',
+        'zoom_screen',
       ].sort(),
     );
     expect(client.getInstructions()).toMatch(/list_projects/);
@@ -198,6 +201,69 @@ describe('Capture Studio MCP tools', () => {
       mode: 'full',
     });
     expect(backwards).toMatchObject({ isError: true });
+  });
+
+  it('styles the background and zooms the screen (R2.9, R2.11)', async () => {
+    const { call, doc, fake } = await setup();
+    const styled = await call('set_background', {
+      project: doc.id,
+      gradient: { from: '#0D9488', to: '#1D4ED8', angle: 90 },
+      padding: 0.08,
+      shadow: null,
+    });
+    expect(styled.text).toMatch(/^Applied "Change background"/);
+    const zoomed = await call('zoom_screen', {
+      project: doc.id,
+      start: 4,
+      end: 8,
+      zoom: 2,
+      centerX: 0.25,
+      centerY: 0.25,
+      transitionSeconds: 0.5,
+    });
+    expect(zoomed.text).toMatch(/^Applied "Zoom 2× 4 s–8 s"/);
+    const keyed = await call('set_zoom_keyframe', { project: doc.id, at: 10, zoom: 3 });
+    expect(keyed.isError).toBe(false);
+    const timeline = fake.editor()!.getState().doc!.timeline;
+    expect(timeline.beautify).toEqual({
+      background: { type: 'gradient', from: '#0D9488', to: '#1D4ED8', angleDeg: 90 },
+      padding: 0.08,
+      cornerRadius: 0.02,
+    });
+    expect(timeline.camera?.map((k) => [k.tUs / S, k.rect.width])).toEqual([
+      [3.5, 1],
+      [4, 0.5],
+      [7.5, 0.5],
+      [8, 1],
+      [10, 1 / 3],
+    ]);
+    // Zoom 2 centred at (0.25, 0.25) touches the top-left corner.
+    expect(timeline.camera?.[1]?.rect).toEqual({ x: 0, y: 0, width: 0.5, height: 0.5 });
+    const summary = JSON.parse((await call('get_project', { project: doc.id })).text) as {
+      background?: unknown;
+      zoomKeyframes?: { zoom: number; at: { seconds: number } }[];
+    };
+    expect(summary.background).toEqual(timeline.beautify);
+    expect(summary.zoomKeyframes?.map((k) => [k.at.seconds, k.zoom])).toEqual([
+      [3.5, 1],
+      [4, 2],
+      [7.5, 2],
+      [8, 1],
+      [10, 3],
+    ]);
+    expect(
+      await call('set_zoom_keyframe', { project: doc.id, at: 10, remove: true }),
+    ).toMatchObject({ isError: false });
+    expect(await call('set_background', { project: doc.id, off: true })).toMatchObject({
+      isError: false,
+    });
+    expect(fake.editor()!.getState().doc!.timeline.beautify).toBeUndefined();
+    const both = await call('set_background', {
+      project: doc.id,
+      color: '#000000',
+      gradient: { from: '#000000', to: '#FFFFFF' },
+    });
+    expect(both).toMatchObject({ isError: true });
   });
 
   it('explains mistakes and refusals', async () => {

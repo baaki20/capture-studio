@@ -6,7 +6,7 @@
  *   worker, read back from its canvas) is compared with the same frame decoded from an export
  *   the app made with the frame-render path (hidden render window → frame port → FFmpeg):
  *   SSIM ≥ the fixture's minimum at canvas resolution;
- * - each colour-keyed region (the face) is within 2 px of the scene's rect in both pictures;
+ * - each colour-keyed region (the face) is within 2 px (1 px for the camera fixture, acceptance b) of the scene's rect in both pictures;
  * - for a Phase 1 fixture, the filter-graph export of the same project must match the
  *   frame-render export (SSIM ≥ 0.98), so switching paths (D4) changes nothing.
  *
@@ -285,8 +285,9 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
             MIN_PATH_SSIM,
           );
         }
-        expect(r.preview, `preview regions at ${at}`).toBeLessThanOrEqual(2);
-        expect(r.export, `export regions at ${at}`).toBeLessThanOrEqual(2);
+        const maxPx = fixture.maxRegionPx ?? 2;
+        expect(r.preview, `preview regions at ${at}`).toBeLessThanOrEqual(maxPx);
+        expect(r.export, `export regions at ${at}`).toBeLessThanOrEqual(maxPx);
       }
     }
   } finally {

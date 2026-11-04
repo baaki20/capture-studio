@@ -1,5 +1,5 @@
 /**
- * Geometry of the preview compositor (pure; unit-tested): the background colour, destination
+ * Geometry of the preview compositor (pure; unit-tested): the background gradient, destination
  * quads in clip space, texture coordinates of source rects (with mirror), and mask uniforms from
  * the render plan's layers.
  */
@@ -28,14 +28,42 @@ export interface CompositeItemOf<F> {
   mediaSize: Size;
 }
 
+/** What is drawn under every layer: a colour, or a beautify gradient. */
+export type SceneBackground = Scene['background'];
+
 /**
- * The colour cleared under every layer. A gradient background (beautify) is drawn by its own
- * pass from step 4; until then its first colour stands in.
+ * The axis of a linear gradient at `angleDeg` over a canvas, as CSS `linear-gradient` defines
+ * it: 0° runs bottom to top, 90° left to right, 180° top to bottom. `dir` is a unit vector in
+ * top-down pixels; the gradient line passes through the centre and is `length` px long, so the
+ * corners get exactly the end colours.
  */
-export function sceneBackgroundColor(scene: Pick<Scene, 'background'>): string {
-  const bg = scene.background;
-  return bg.type === 'color' ? bg.color : bg.from;
+export function gradientAxis(
+  angleDeg: number,
+  canvas: Size,
+): { dirX: number; dirY: number; length: number } {
+  const a = (angleDeg * Math.PI) / 180;
+  const dirX = Math.sin(a);
+  const dirY = -Math.cos(a);
+  return {
+    dirX,
+    dirY,
+    length: Math.max(1e-6, Math.abs(canvas.width * dirX) + Math.abs(canvas.height * dirY)),
+  };
 }
+
+/** 0–1 along the gradient at a pixel centre (`x`, `y` top-down), as `csGradientT` computes. */
+export function gradientT(angleDeg: number, canvas: Size, x: number, y: number): number {
+  const { dirX, dirY, length } = gradientAxis(angleDeg, canvas);
+  const t = ((x - canvas.width / 2) * dirX + (y - canvas.height / 2) * dirY) / length + 0.5;
+  return Math.min(1, Math.max(0, t));
+}
+
+/** GLSL of `gradientT` (p top-down at the pixel centre; dir and length from `gradientAxis`). */
+export const GRADIENT_GLSL = `
+float csGradientT(vec2 p, vec2 size, vec2 dir, float len) {
+  return clamp(dot(p - 0.5 * size, dir) / len + 0.5, 0.0, 1.0);
+}
+`;
 
 /** `#RRGGBB` or `#RRGGBBAA` as 0–1 RGBA (black when malformed). */
 export function parseHexColor(color: string): [number, number, number, number] {

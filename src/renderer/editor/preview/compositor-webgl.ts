@@ -2,7 +2,8 @@
  * WebGL2 compositor of the preview (§1.7, §4.3.8). It draws exactly what the render plan says
  * (`layersAt(t)` from `shared/project/render-plan.ts`), so preview and export agree (R1.48):
  *
- * - the canvas is cleared to the timeline background colour;
+ * - the canvas is cleared to the background colour, or filled with the beautify gradient (mixed
+ *   in sRGB like CSS, with a ±½-level ordered dither against banding);
  * - each layer, bottom to top, is a quad at its integer destination rect;
  * - its source rect (file pixels) becomes texture coordinates; mirror flips U;
  * - the mask (rectangle, rounded radius in px, circle) is the render plan's anti-aliased
@@ -25,16 +26,19 @@ import {
 } from '../../../shared/export/frame-render';
 import { MASK_COVERAGE_GLSL } from '../../../shared/project/render-plan';
 import {
+  GRADIENT_GLSL,
+  gradientAxis,
   maskUniforms,
   parseHexColor,
   quadUvs,
   quadVertices,
   shadowGeometry,
   type CompositeItemOf,
+  type SceneBackground,
   type Size,
 } from './compositor-math';
 
-export type { Size } from './compositor-math';
+export type { SceneBackground, Size } from './compositor-math';
 
 /** One layer to draw (see `compositor-math.ts`), with a picture WebGL can upload. */
 export type CompositeItem = CompositeItemOf<TexImageSource>;
@@ -81,6 +85,26 @@ void main() {
     color.rgb = mix(color.rgb, u_borderColor.rgb, (1.0 - inner) * u_borderColor.a);
   }
   outColor = vec4(color.rgb * coverage, coverage);
+}
+`;
+
+/** The beautify gradient over the whole canvas (drawn without blending). */
+const GRADIENT_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+uniform vec2 u_size;
+uniform vec2 u_dir;
+uniform float u_len;
+uniform vec4 u_from;
+uniform vec4 u_to;
+out vec4 outColor;
+${GRADIENT_GLSL}
+void main() {
+  vec2 p = vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y);
+  float t = csGradientT(p, u_size, u_dir, u_len);
+  // Interleaved gradient noise: a fixed per-pixel dither, the same in preview and export.
+  float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  vec3 color = mix(u_from.rgb, u_to.rgb, t) + (noise - 0.5) / 255.0;
+  outColor = vec4(color, 1.0);
 }
 `;
 
@@ -185,6 +209,7 @@ export class WebGlCompositor {
   private picture: Target | null = null;
   private yuv: Target | null = null;
   private yuvProgram: WebGLProgram | null = null;
+  private gradientProgram: WebGLProgram | null = null;
 
   constructor(private readonly canvas: OffscreenCanvas) {
     const gl = canvas.getContext('webgl2', {
@@ -224,13 +249,13 @@ export class WebGlCompositor {
   }
 
   /** Draws one frame: background, then the layers bottom to top. */
-  draw(background: string, items: readonly CompositeItem[]): void {
+  draw(background: SceneBackground, items: readonly CompositeItem[]): void {
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
     this.drawBound(background, items);
   }
 
   /** Draws one frame into the offscreen picture (export); read it with `readYuv420`. */
-  drawOffscreen(background: string, items: readonly CompositeItem[]): void {
+  drawOffscreen(background: SceneBackground, items: readonly CompositeItem[]): void {
     const { gl } = this;
     const picture = this.target('picture', this.size.width, this.size.height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, picture.framebuffer);
@@ -272,13 +297,16 @@ export class WebGlCompositor {
     );
   }
 
-  private drawBound(background: string, items: readonly CompositeItem[]): void {
+  private drawBound(background: SceneBackground, items: readonly CompositeItem[]): void {
     const { gl } = this;
     gl.viewport(0, 0, this.size.width, this.size.height);
-    const [r, g, b] = parseHexColor(background);
+    const [r, g, b] = parseHexColor(
+      background.type === 'color' ? background.color : background.from,
+    );
     gl.disable(gl.BLEND);
     gl.clearColor(r, g, b, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    if (background.type === 'gradient') this.drawGradient(background);
     gl.useProgram(this.program);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -325,6 +353,22 @@ export class WebGlCompositor {
     });
   }
 
+  private drawGradient(gradient: Extract<SceneBackground, { type: 'gradient' }>): void {
+    const { gl } = this;
+    this.gradientProgram ??= link(gl, VERTEX_SHADER, GRADIENT_FRAGMENT_SHADER);
+    const program = this.gradientProgram;
+    gl.useProgram(program);
+    this.bindAttribute(this.posBuffer, 'a_pos', FULLSCREEN_VERTICES, program);
+    const axis = gradientAxis(gradient.angleDeg, this.size);
+    const at = (name: string) => gl.getUniformLocation(program, name);
+    gl.uniform2f(at('u_size'), this.size.width, this.size.height);
+    gl.uniform2f(at('u_dir'), axis.dirX, axis.dirY);
+    gl.uniform1f(at('u_len'), axis.length);
+    gl.uniform4f(at('u_from'), ...parseHexColor(gradient.from));
+    gl.uniform4f(at('u_to'), ...parseHexColor(gradient.to));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
   /** Reads the frame just drawn (call in the same task as `draw`). */
   probe(): LumaProbe {
     const { gl } = this;
@@ -366,6 +410,7 @@ export class WebGlCompositor {
       gl.deleteTexture(target.texture);
     }
     if (this.yuvProgram) gl.deleteProgram(this.yuvProgram);
+    if (this.gradientProgram) gl.deleteProgram(this.gradientProgram);
     gl.deleteBuffer(this.posBuffer);
     gl.deleteBuffer(this.uvBuffer);
     gl.deleteProgram(this.program);

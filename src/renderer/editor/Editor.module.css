@@ -318,3 +318,21 @@ button[aria-pressed='true'] {
   text-decoration: underline;
   cursor: pointer;
 }
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.inspector button.swatch {
+  width: 28px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+}
+
+.inspector button.swatch[aria-pressed='true'] {
+  outline: 2px solid var(--editor-accent);
+  outline-offset: 1px;
+}

@@ -5,7 +5,7 @@
  * outside React; components read it with `useUi(store, selector)`.
  */
 import { createStore, useStore, type StoreApi } from 'zustand';
-import type { TimelineView } from './Timeline/geometry';
+import type { LaneKeyframe, TimelineView } from './Timeline/geometry';
 
 export interface UiState {
   playheadUs: number;
@@ -19,8 +19,8 @@ export interface UiState {
   snapping: boolean;
   /** The face overlay is selected in the preview (bounding box shown, R1.41). */
   overlaySelected: boolean;
-  /** The selected face layout keyframe in the timeline (R2.1); Delete removes it. */
-  selectedKeyframe: { trackId: string; tUs: number } | null;
+  /** The selected layout or camera keyframe in the timeline (R2.1, R2.9); Delete removes it. */
+  selectedKeyframe: LaneKeyframe | null;
   /** One-line status ("Nothing to split", errors). */
   status: string | null;
 }
@@ -33,7 +33,7 @@ export interface UiActions {
   setView(view: TimelineView): void;
   setSnapping(on: boolean): void;
   setOverlaySelected(on: boolean): void;
-  selectKeyframe(key: { trackId: string; tUs: number } | null): void;
+  selectKeyframe(key: LaneKeyframe | null): void;
   setStatus(status: string | null): void;
 }
 

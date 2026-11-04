@@ -1,8 +1,9 @@
 /**
- * The inspector (R1.40–R1.42, R2.1–R2.4): per-track gain, mute, solo, hide and lock; the face
+ * The inspector (R1.40–R1.42, R2.1–R2.4, R2.9, R2.11): per-track gain, mute, solo, hide and lock; the face
  * overlay (corner and size presets, size, shape, radius, mirror, crop, zoom); its border and
  * shadow; its layout over time (face mode for the In–Out range or from the playhead, and the
- * keyframe list); the screen crop; and the sync nudge of Face + Voice and System audio with the
+ * keyframe list); the screen crop; the background and zoom (R2.9, R2.11, in
+ * `ScreenStyleSections.tsx`); and the sync nudge of Face + Voice and System audio with the
  * recorded clock information. Every control maps to a timeline operation through
  * `inspector-ops.ts`; sliders group a whole drag into one undo step. Geometry shown and edited is
  * the keyframe in effect at the playhead.
@@ -37,13 +38,13 @@ import {
   GAIN_MIN_DB,
   GAIN_STEP_DB,
   trackFrameSize,
-  type TimelineOp,
 } from '../../../shared/project/timeline-ops';
-import { errorText } from '../commands';
 import { useEditor } from '../EditorContext';
 import styles from '../Editor.module.css';
 import { useDocumentStore } from '../store/document-store';
 import { useUi } from '../ui-store';
+import { useApply, useGesture } from './hooks';
+import { BackgroundSection, CameraSection } from './ScreenStyleSections';
 import {
   DEFAULT_BORDER,
   DEFAULT_SHADOW,
@@ -90,26 +91,6 @@ const SHAPES: { value: OverlayLayout['shape']; label: string }[] = [
   { value: 'circle', label: 'Circle' },
 ];
 
-/** Applies an operation and reports a refusal in the status line. */
-function useApply(): (op: TimelineOp | null) => void {
-  const { docStore, ui } = useEditor();
-  return (op) => {
-    if (!op) return;
-    const result = docStore.getState().apply(op);
-    ui.getState().setStatus(result.ok ? null : errorText(result.error));
-  };
-}
-
-/** Pointer handlers that make a slider drag one undo step (R1.43). */
-function useGesture() {
-  const { docStore } = useEditor();
-  return {
-    onPointerDown: () => docStore.getState().beginGesture(),
-    onPointerUp: () => docStore.getState().endGesture(),
-    onPointerCancel: () => docStore.getState().endGesture(),
-  };
-}
-
 export function InspectorPanel() {
   const { docStore } = useEditor();
   const doc = useDocumentStore(docStore, (s) => s.doc);
@@ -121,6 +102,8 @@ export function InspectorPanel() {
       <FaceStyleSection doc={doc} />
       <FaceTimeSection doc={doc} />
       <ScreenSection doc={doc} />
+      <BackgroundSection doc={doc} />
+      <CameraSection doc={doc} />
       <SyncSection doc={doc} />
     </aside>
   );

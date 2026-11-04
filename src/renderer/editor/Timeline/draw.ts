@@ -15,6 +15,8 @@ import {
   RULER_HEIGHT,
   keyframeLaneY,
   rowKeyframes,
+  rowLane,
+  type LaneKeyframe,
   rulerTicks,
   timeToX,
   type Row,
@@ -79,13 +81,13 @@ export interface DrawInput {
   linkedToSelection: ReadonlySet<string>;
   playheadUs: number;
   snapUs: number | null;
-  /** The selected face layout keyframe, if any. */
-  selectedKeyframe?: { trackId: string; tUs: number } | null;
+  /** The selected lane keyframe, if any. */
+  selectedKeyframe?: LaneKeyframe | null;
   assets: MediaAssets | null;
   palette?: TimelinePalette;
 }
 
-/** The face row's keyframe lane: a strip with a diamond per keyframe (the selected one filled). */
+/** A row's keyframe lane: a strip with a diamond per keyframe (the selected one filled). */
 function drawKeyframes(
   ctx: CanvasRenderingContext2D,
   input: DrawInput,
@@ -102,7 +104,9 @@ function drawKeyframes(
     const x = timeToX(input.view, tUs);
     if (x < -r || x > input.width + r) continue;
     const selected =
-      input.selectedKeyframe?.trackId === row.track.id && input.selectedKeyframe.tUs === tUs;
+      input.selectedKeyframe?.lane === rowLane(row) &&
+      input.selectedKeyframe.trackId === row.track.id &&
+      input.selectedKeyframe.tUs === tUs;
     ctx.beginPath();
     ctx.moveTo(x, y - r);
     ctx.lineTo(x + r, y);

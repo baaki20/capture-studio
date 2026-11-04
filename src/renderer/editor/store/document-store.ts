@@ -130,6 +130,11 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   removeLayoutKeyframe: 'Delete layout keyframe',
   moveLayoutKeyframe: 'Move layout keyframe',
   setFaceMode: 'Change face mode',
+  setBeautify: 'Change background',
+  setCameraKeyframe: 'Change zoom keyframe',
+  removeCameraKeyframe: 'Delete zoom keyframe',
+  moveCameraKeyframe: 'Move zoom keyframe',
+  setCameraZoom: 'Zoom range',
   nudge: 'Sync nudge',
   unlink: 'Unlink',
   relink: 'Link',
@@ -150,6 +155,10 @@ export function defaultCoalesceKey(op: TimelineOp): string | null {
       return `layout:${op.trackId}`;
     case 'setLayoutKeyframe':
       return `layout-key:${op.trackId}:${String(op.tUs)}`;
+    case 'setBeautify':
+      return 'beautify';
+    case 'setCameraKeyframe':
+      return `camera-key:${String(op.tUs)}`;
     case 'nudge':
       return `nudge:${JSON.stringify(op.target)}`;
     case 'setMarks':

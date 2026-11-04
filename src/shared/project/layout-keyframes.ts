@@ -13,7 +13,8 @@
  * `setFaceMode` is the per-segment layout: the mode applies on `[start, end)`, entered and left
  * with an eased change of `easeUs` (0 = a cut), and the layout returns to what it was at `end`.
  *
- * Cuts and ripple deletes move keyframes with the content (`keyframesThroughCut`).
+ * Cuts and ripple deletes move keyframes with the content (`keyframesThroughCut`). Removing,
+ * moving and cutting work on any timed keyframes; `camera-keyframes.ts` uses them too.
  */
 import type { Us } from '../time';
 import { keyframeSpan } from './easing';
@@ -50,7 +51,12 @@ export function faceStateAt(
   return key ? { mode: key.mode, layout: key.layout } : { mode: 'overlay', layout };
 }
 
-function sorted(keys: LayoutKeyframe[]): LayoutKeyframe[] {
+/** A keyframe of any kind: face layout, camera. */
+interface Timed {
+  tUs: Us;
+}
+
+function sorted<K extends Timed>(keys: K[]): K[] {
   return keys.sort((a, b) => a.tUs - b.tUs);
 }
 
@@ -97,10 +103,10 @@ export function upsertKeyframe(
 }
 
 /** Without the keyframe at `tUs`; null when none is there. Undefined when none are left. */
-export function removeKeyframe(
-  keys: readonly LayoutKeyframe[] | undefined,
+export function removeKeyframe<K extends Timed>(
+  keys: readonly K[] | undefined,
   tUs: Us,
-): LayoutKeyframe[] | undefined | null {
+): K[] | undefined | null {
   const list = keys ?? [];
   if (!list.some((k) => k.tUs === tUs)) return null;
   const rest = list.filter((k) => k.tUs !== tUs);
@@ -111,11 +117,11 @@ export function removeKeyframe(
  * The keyframe at `fromUs` moved to `toUs` (it may pass others). Null when there is none at
  * `fromUs`, or another one already sits at `toUs`.
  */
-export function moveKeyframe(
-  keys: readonly LayoutKeyframe[] | undefined,
+export function moveKeyframe<K extends Timed>(
+  keys: readonly K[] | undefined,
   fromUs: Us,
   toUs: Us,
-): LayoutKeyframe[] | null {
+): K[] | null {
   const list = [...(keys ?? [])];
   const index = list.findIndex((k) => k.tUs === fromUs);
   const key = list[index];
@@ -171,15 +177,15 @@ export function faceModeSegment(
  * inside are dropped, and if any were, the last of them moves to `a` so the face shows after the
  * cut what it showed at `b`. Undefined when none are left.
  */
-export function keyframesThroughCut(
-  keys: readonly LayoutKeyframe[] | undefined,
+export function keyframesThroughCut<K extends Timed>(
+  keys: readonly K[] | undefined,
   a: Us,
   b: Us,
-): LayoutKeyframe[] | undefined {
+): K[] | undefined {
   if (!keys || keys.length === 0) return undefined;
   const removed = b - a;
-  const out: LayoutKeyframe[] = [];
-  let lastInside: LayoutKeyframe | null = null;
+  const out: K[] = [];
+  let lastInside: K | null = null;
   for (const key of keys) {
     if (key.tUs < a) out.push(key);
     else if (key.tUs < b) lastInside = key;

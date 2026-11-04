@@ -11,6 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { frameTimeUs } from '../../../src/shared/export/frame-render';
+import { cameraRect } from '../../../src/shared/project/camera-keyframes';
 import type { RectF } from '../../../src/shared/project/scene';
 import { sceneAt } from '../../../src/shared/project/scene';
 import type { Project } from '../../../src/shared/project/schema';
@@ -25,7 +26,7 @@ export const FFPROBE = path.join(FFMPEG_DIR, 'ffprobe');
 
 export const FPS = 30;
 
-/** A colour-keyed region whose bounding box must match the scene's rect (within 2 px). */
+/** A colour-keyed region whose bounding box must match the scene's rect (within the fixture's `maxRegionPx`, 2 px by default). */
 export interface KeyedRegion {
   name: string;
   /** Whether an RGB pixel belongs to the region. */
@@ -43,6 +44,8 @@ export interface ParityFixture {
   /** Minimum SSIM between the preview and the export at each frame. */
   minSsim: number;
   regions: KeyedRegion[];
+  /** Largest region box distance from the scene, in px (default 2). */
+  maxRegionPx?: number;
   /**
    * A Phase 1 project: also export it with the filter graph, which must match the frame render
    * (switching paths changes nothing).
@@ -72,12 +75,33 @@ const H = 720;
 
 /** The camera's centre square (`centreSquare` media), in camera pixels. */
 const CAMERA_SQUARE = { x: 240, y: 180, width: 160, height: 120 };
-
 /**
- * The usual recording: a grey 1280×720 screen and a magenta 640×480 camera, BT.601 tagged. With
- * `centreSquare` the camera has a black `CAMERA_SQUARE`, which shows the face crop and zoom.
+ * The screen's white square on a flat mid-grey patch (`screenSquare` media), in screen pixels.
+ * Both are neutral, so the key reads luma, which yuv420 keeps at full resolution: a chroma key
+ * would blur the edge by a pixel in the export and hide what the 1 px check measures.
  */
-function writeMedia(root: string, seconds: number, centreSquare = false): void {
+const SCREEN_SQUARE = { x: 400, y: 200, width: 160, height: 96 };
+const SCREEN_PATCH_MARGIN = 40;
+
+interface MediaOptions {
+  /** A black `CAMERA_SQUARE` in the camera: shows the face crop and zoom. */
+  centreSquare?: boolean;
+  /** A white `SCREEN_SQUARE` on the screen: shows where the camera puts the screen. */
+  screenSquare?: boolean;
+}
+
+function grow(r: typeof SCREEN_SQUARE, by: number) {
+  return { x: r.x - by, y: r.y - by, width: r.width + 2 * by, height: r.height + 2 * by };
+}
+
+/** An FFmpeg `drawbox` filling `r`. */
+function box(r: typeof SCREEN_SQUARE, color: string): string {
+  return `drawbox=x=${String(r.x)}:y=${String(r.y)}:w=${String(r.width)}:h=${String(r.height)}:color=${color}:t=fill`;
+}
+
+/** The usual recording: a grey 1280×720 screen and a magenta 640×480 camera, BT.601 tagged. */
+function writeMedia(root: string, seconds: number, options: MediaOptions = {}): void {
+  const { centreSquare = false, screenSquare = false } = options;
   const media = path.join(root, 'media');
   mkdirSync(media, { recursive: true });
   const d = String(seconds);
@@ -88,7 +112,9 @@ function writeMedia(root: string, seconds: number, centreSquare = false): void {
     `testsrc2=size=${String(W)}x${String(H)}:rate=${String(FPS)}:duration=${d}`,
     // Grey, so only the face is magenta (its colour key).
     '-vf',
-    'hue=s=0',
+    screenSquare
+      ? `hue=s=0,${box(grow(SCREEN_SQUARE, SCREEN_PATCH_MARGIN), '0x808080')},${box(SCREEN_SQUARE, 'white')}`
+      : 'hue=s=0',
     '-c:v',
     'libx264',
     '-preset',
@@ -137,9 +163,9 @@ function recorded(seconds: number, serial: string, name: string): Project {
   return { ...doc, id: `prj_01JBQ4ZJ4X6V3K8N2M7P5R9T${serial}P`, name };
 }
 
-function save(projectsDir: string, doc: Project, seconds: number, centreSquare = false) {
+function save(projectsDir: string, doc: Project, seconds: number, media: MediaOptions = {}) {
   const root = path.join(projectsDir, `${doc.name}.cstudio`);
-  writeMedia(root, seconds, centreSquare);
+  writeMedia(root, seconds, media);
   writeFileSync(path.join(root, 'project.json'), JSON.stringify(doc, null, 2));
   return { root, doc };
 }
@@ -290,11 +316,115 @@ const faceStyle: ParityFixture = {
         { generateId: counterIds('S') },
       ),
     );
-    return save(projectsDir, doc, seconds, true);
+    return save(projectsDir, doc, seconds, { centreSquare: true });
   },
 };
 
-export const FIXTURES: readonly ParityFixture[] = [roundedFace, faceKeyframes, faceStyle];
+/** Brighter than halfway from the grey patch (128) to white: the square's edge at 50 %. */
+const white = (r: number, g: number, b: number) => r > 191 && g > 191 && b > 191;
+/** Grey screen pixels (the background gradient and its shadow are saturated). */
+const grey = (r: number, g: number, b: number) => Math.max(r, g, b) - Math.min(r, g, b) < 24;
+
+/** The screen layer at `tUs`. */
+function screenLayer(doc: Project, tUs: number) {
+  const screen = trackByName(doc, 'Screen').id;
+  return sceneAt(doc, tUs).layers.find((l) => l.trackId === screen) ?? null;
+}
+
+/** The screen's white square where the scene puts the screen (camera applied, acceptance b). */
+const SCREEN_SQUARE_REGION: KeyedRegion = {
+  name: 'screen square',
+  key: white,
+  rectAt: (doc, tUs) => {
+    const layer = screenLayer(doc, tUs);
+    if (!layer) return null;
+    const src = layer.sourceRect;
+    const dst = layer.destRect;
+    const sx = dst.width / src.width;
+    const sy = dst.height / src.height;
+    return {
+      x: dst.x + (SCREEN_SQUARE.x - src.x) * sx,
+      y: dst.y + (SCREEN_SQUARE.y - src.y) * sy,
+      width: SCREEN_SQUARE.width * sx,
+      height: SCREEN_SQUARE.height * sy,
+    };
+  },
+};
+/** The padded screen on the background, checked while the camera shows the whole frame. */
+const PADDED_SCREEN: KeyedRegion = {
+  name: 'padded screen',
+  key: grey,
+  rectAt: (doc, tUs) => {
+    const scene = sceneAt(doc, tUs);
+    const full = scene.camera.width === 1 && scene.camera.height === 1;
+    return full ? (screenLayer(doc, tUs)?.destRect ?? null) : null;
+  },
+};
+
+/**
+ * Phase 2: beautify (gradient background, padding, rounded corners, shadow) and a 2× camera zoom
+ * on the screen's square, eased in over 0.6 s and out over 0.6 s (R2.9, R2.11). The square must
+ * land within 1 px of the camera's pure function in preview and export (acceptance b).
+ */
+const beautifyCamera: ParityFixture = {
+  name: 'p2-beautify-camera',
+  // Before, easing in, zoomed, easing out, after.
+  frames: [10, 45, 51, 56, 70, 100, 118, 124, 130, 160],
+  minSsim: 0.98,
+  regions: [SCREEN_SQUARE_REGION, PADDED_SCREEN],
+  maxRegionPx: 1,
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    let doc = recorded(seconds, '4', 'Parity beautify camera');
+    const ids = { generateId: counterIds('B') };
+    doc = unwrap(
+      applyOp(doc, { type: 'setHidden', trackId: trackByName(doc, 'Face').id, hidden: true }, ids),
+    );
+    doc = unwrap(
+      applyOp(
+        doc,
+        {
+          type: 'setBeautify',
+          beautify: {
+            background: { type: 'gradient', from: '#1E3A8A', to: '#7C3AED', angleDeg: 135 },
+            padding: 0.08,
+            cornerRadius: 0.03,
+            shadow: { blur: 0.02, offsetX: 0, offsetY: 0.01, color: '#00000060' },
+          },
+        },
+        ids,
+      ),
+    );
+    // Centre the zoom on the square's position on the padded canvas.
+    const layer = screenLayer(doc, 0);
+    if (!layer) throw new Error('no screen layer');
+    const k = layer.destRect.width / layer.sourceRect.width;
+    const cx = (layer.destRect.x + (SCREEN_SQUARE.x + SCREEN_SQUARE.width / 2) * k) / W;
+    const cy = (layer.destRect.y + (SCREEN_SQUARE.y + SCREEN_SQUARE.height / 2) * k) / H;
+    doc = unwrap(
+      applyOp(
+        doc,
+        {
+          type: 'setCameraZoom',
+          startUs: 2_000_000,
+          endUs: 4_200_000,
+          rect: cameraRect(2, cx, cy),
+          easeUs: 600_000,
+        },
+        ids,
+      ),
+    );
+    return save(projectsDir, doc, seconds, { screenSquare: true });
+  },
+};
+
+export const FIXTURES: readonly ParityFixture[] = [
+  roundedFace,
+  faceKeyframes,
+  faceStyle,
+  beautifyCamera,
+];
 
 /** Timeline time of an output frame. */
 export function exportFrameTimeUs(n: number): number {

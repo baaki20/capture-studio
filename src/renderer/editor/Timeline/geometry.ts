@@ -8,7 +8,7 @@
  * System audio).
  */
 import type { Project, Track } from '../../../shared/project/schema';
-import { clipEndUs } from '../../../shared/project/timeline-ops';
+import { clipEndUs, type TimelineOp } from '../../../shared/project/timeline-ops';
 
 export interface TimelineView {
   /** Zoom: pixels per second of timeline. */
@@ -28,7 +28,10 @@ export const MAX_PX_PER_SEC = 1_500;
 export const EDGE_GRAB_PX = 6;
 /** Snap distance (R1.39). */
 export const SNAP_PX = 8;
-/** Face layout keyframes (R2.1): a strip at the bottom of the face row, and the grab distance. */
+/**
+ * Keyframe lanes: a strip at the bottom of a row, and the grab distance. The face row shows its
+ * layout keyframes (R2.1), the screen row the camera's zoom keyframes (R2.9).
+ */
 export const KEYFRAME_LANE_PX = 14;
 export const KEYFRAME_GRAB_PX = 6;
 
@@ -87,6 +90,17 @@ export interface Row {
   trackIndex: number;
   top: number;
   height: number;
+  /** Camera keyframe times, on the screen row only. */
+  cameraKeys?: readonly number[];
+}
+
+export type KeyframeLane = 'layout' | 'camera';
+
+/** A keyframe in a lane: the face track's layout keyframe, or a camera keyframe. */
+export interface LaneKeyframe {
+  lane: KeyframeLane;
+  trackId: string;
+  tUs: number;
 }
 
 export function rowHeight(track: Track): number {
@@ -95,9 +109,11 @@ export function rowHeight(track: Track): number {
 
 export function layoutRows(doc: Project): { rows: Row[]; height: number } {
   let top = RULER_HEIGHT + ROW_GAP;
-  const rows = doc.timeline.tracks.map((track, trackIndex) => {
+  const screen = doc.timeline.tracks.find((t) => t.type === 'video' && t.layout.kind === 'screen');
+  const cameraKeys = (doc.timeline.camera ?? []).map((k) => k.tUs);
+  const rows = doc.timeline.tracks.map((track, trackIndex): Row => {
     const height = rowHeight(track);
-    const row = { track, trackIndex, top, height };
+    const row = { track, trackIndex, top, height, ...(track === screen ? { cameraKeys } : {}) };
     top += height + ROW_GAP;
     return row;
   });
@@ -106,7 +122,7 @@ export function layoutRows(doc: Project): { rows: Row[]; height: number } {
 
 export type Hit =
   | { kind: 'ruler'; tUs: number }
-  | { kind: 'keyframe'; trackId: string; keyUs: number; tUs: number }
+  | { kind: 'keyframe'; lane: KeyframeLane; trackId: string; keyUs: number; tUs: number }
   | { kind: 'clip'; trackId: string; clipId: string; zone: 'body' | 'start' | 'end'; tUs: number }
   | { kind: 'track'; trackId: string; tUs: number }
   | { kind: 'none'; tUs: number };
@@ -118,7 +134,10 @@ export function hitTest(rows: readonly Row[], view: TimelineView, x: number, y: 
   const row = rows.find((r) => y >= r.top && y < r.top + r.height);
   if (!row) return { kind: 'none', tUs };
   const key = keyframeAt(row, view, x, y);
-  if (key !== null) return { kind: 'keyframe', trackId: row.track.id, keyUs: key, tUs };
+  const lane = rowLane(row);
+  if (key !== null && lane) {
+    return { kind: 'keyframe', lane, trackId: row.track.id, keyUs: key, tUs };
+  }
   let best: { clipId: string; zone: 'body' | 'start' | 'end'; distance: number } | null = null;
   for (const clip of row.track.clips) {
     const x0 = timeToX(view, clip.timelineStartUs);
@@ -148,11 +167,37 @@ export function hitTest(rows: readonly Row[], view: TimelineView, x: number, y: 
   return { kind: 'track', trackId: row.track.id, tUs };
 }
 
-/** Layout keyframe times of a row's track (face overlay tracks only). */
+/** Which keyframes a row's lane shows: the face's layout, the camera on the screen row. */
+export function rowLane(row: Row): KeyframeLane | null {
+  const track = row.track;
+  if (track.type !== 'video') return null;
+  if (track.layout.kind === 'overlay') return 'layout';
+  return row.cameraKeys ? 'camera' : null;
+}
+
+/** Keyframe times in a row's lane. */
 export function rowKeyframes(row: Row): readonly number[] {
   const track = row.track;
-  if (track.type !== 'video' || track.layout.kind !== 'overlay') return [];
-  return (track.layoutKeyframes ?? []).map((k) => k.tUs);
+  const lane = rowLane(row);
+  if (lane === 'camera') return row.cameraKeys ?? [];
+  if (lane === 'layout' && track.type === 'video') {
+    return (track.layoutKeyframes ?? []).map((k) => k.tUs);
+  }
+  return [];
+}
+
+/** The operation that moves a lane keyframe to `toUs`. */
+export function moveKeyframeOp(key: LaneKeyframe, toUs: number): TimelineOp {
+  return key.lane === 'camera'
+    ? { type: 'moveCameraKeyframe', fromUs: key.tUs, toUs }
+    : { type: 'moveLayoutKeyframe', trackId: key.trackId, fromUs: key.tUs, toUs };
+}
+
+/** The operation that deletes a lane keyframe. */
+export function removeKeyframeOp(key: LaneKeyframe): TimelineOp {
+  return key.lane === 'camera'
+    ? { type: 'removeCameraKeyframe', tUs: key.tUs }
+    : { type: 'removeLayoutKeyframe', trackId: key.trackId, tUs: key.tUs };
 }
 
 /** The y of the keyframe lane's centre line in a row. */

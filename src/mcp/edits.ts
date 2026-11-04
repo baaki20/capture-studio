@@ -13,6 +13,8 @@ import {
   applySizePreset,
   type FaceSizePreset,
 } from '../shared/project/face-layout';
+import { mergeBeautify } from '../shared/project/beautify';
+import { cameraAt, cameraRect, cameraView } from '../shared/project/camera-keyframes';
 import type { ExternalOp } from '../shared/project/op-schema';
 import {
   EASINGS,
@@ -153,6 +155,74 @@ export const SHAPES = {
     centerX: z.number().optional().describe('Overlay centre, fraction of canvas width'),
     centerY: z.number().optional().describe('Overlay centre, fraction of canvas height'),
   },
+  background: {
+    off: z.boolean().optional().describe('true: back to the plain canvas colour'),
+    color: z.string().optional().describe('A solid background, #RRGGBB'),
+    gradient: z
+      .object({
+        from: z.string().describe('#RRGGBB'),
+        to: z.string().describe('#RRGGBB'),
+        angle: z
+          .number()
+          .min(0)
+          .max(360)
+          .optional()
+          .describe('Degrees, as CSS: 0 bottom to top, 90 left to right; default 135'),
+      })
+      .optional(),
+    padding: z
+      .number()
+      .optional()
+      .describe('Space around the screen, fraction of the canvas short side (0–0.3), e.g. 0.06'),
+    cornerRadius: z
+      .number()
+      .optional()
+      .describe('Screen corner radius, fraction of the short side (0–0.2), e.g. 0.02'),
+    shadow: z
+      .object({
+        blur: z.number().describe('Fraction of the canvas short side (0–0.1), e.g. 0.03'),
+        offsetX: z.number().describe('Fraction of the short side (−0.1–0.1)'),
+        offsetY: z.number().describe('Fraction of the short side (−0.1–0.1), e.g. 0.012'),
+        color: z.string().describe('#RRGGBBAA, e.g. #00000066'),
+      })
+      .nullable()
+      .optional()
+      .describe('Screen drop shadow; null removes it'),
+  },
+  zoom: {
+    start: TimeInput,
+    end: TimeInput,
+    zoom: z.number().min(1).max(4).describe('Magnification, e.g. 2 shows a quarter of the frame'),
+    centerX: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Where to look, fraction of canvas width; default 0.5'),
+    centerY: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Where to look, fraction of canvas height; default 0.5'),
+    transitionSeconds: z
+      .number()
+      .min(0)
+      .max(2)
+      .optional()
+      .describe('Eased zoom in and out; default 0.6'),
+  },
+  zoomKeyframe: {
+    at: TimeInput,
+    remove: z.boolean().optional().describe('Remove the zoom keyframe at this time instead'),
+    zoom: z.number().min(1).max(4).optional(),
+    centerX: z.number().min(0).max(1).optional(),
+    centerY: z.number().min(0).max(1).optional(),
+    easing: z
+      .enum(EASINGS)
+      .optional()
+      .describe('How it changes to the next keyframe; hold keeps it, then cuts'),
+  },
   screenCrop: {
     track: TrackRef.optional().describe('Default: the screen track'),
     crop: z
@@ -195,6 +265,9 @@ export const EditStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('faceLayout'), ...SHAPES.faceLayout }),
   z.object({ kind: z.literal('faceMode'), ...SHAPES.faceMode }),
   z.object({ kind: z.literal('faceKeyframe'), ...SHAPES.faceKeyframe }),
+  z.object({ kind: z.literal('background'), ...SHAPES.background }),
+  z.object({ kind: z.literal('zoom'), ...SHAPES.zoom }),
+  z.object({ kind: z.literal('zoomKeyframe'), ...SHAPES.zoomKeyframe }),
   z.object({ kind: z.literal('screenCrop'), ...SHAPES.screenCrop }),
   z.object({ kind: z.literal('syncNudge'), ...SHAPES.syncNudge }),
   z.object({ kind: z.literal('marks'), ...SHAPES.marks }),
@@ -406,6 +479,68 @@ export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
           ...(step.mode ? { mode: step.mode } : {}),
           ...(step.easing ? { easing: step.easing } : {}),
           ...(Object.keys(layout).length > 0 ? { layout } : {}),
+        },
+      ];
+    }
+    case 'background': {
+      if (step.off) return [{ type: 'setBeautify', beautify: null }];
+      if (step.color !== undefined && step.gradient !== undefined) {
+        throw new ToolInputError('Give a colour or a gradient, not both.');
+      }
+      const background =
+        step.color !== undefined
+          ? { type: 'color' as const, color: step.color }
+          : step.gradient
+            ? {
+                type: 'gradient' as const,
+                from: step.gradient.from,
+                to: step.gradient.to,
+                angleDeg: step.gradient.angle ?? 135,
+              }
+            : undefined;
+      const beautify = mergeBeautify(doc.timeline.beautify, {
+        ...(background ? { background } : {}),
+        ...(step.padding !== undefined ? { padding: step.padding } : {}),
+        ...(step.cornerRadius !== undefined ? { cornerRadius: step.cornerRadius } : {}),
+        ...(step.shadow !== undefined ? { shadow: step.shadow } : {}),
+      });
+      return [{ type: 'setBeautify', beautify }];
+    }
+    case 'zoom': {
+      const startUs = time(step.start);
+      const endUs = time(step.end);
+      if (endUs <= startUs) throw new ToolInputError('The zoom must end after it starts.');
+      return [
+        {
+          type: 'setCameraZoom',
+          startUs,
+          endUs,
+          rect: cameraRect(step.zoom, step.centerX ?? 0.5, step.centerY ?? 0.5),
+          easeUs: Math.round((step.transitionSeconds ?? 0.6) * 1e6),
+        },
+      ];
+    }
+    case 'zoomKeyframe': {
+      const tUs = time(step.at);
+      if (step.remove) return [{ type: 'removeCameraKeyframe', tUs }];
+      const keys = doc.timeline.camera;
+      const there = keys?.find((k) => k.tUs === tUs);
+      const view = cameraView(there?.rect ?? cameraAt(keys, tUs));
+      const moves = [step.zoom, step.centerX, step.centerY].some((v) => v !== undefined);
+      return [
+        {
+          type: 'setCameraKeyframe',
+          tUs,
+          ...(moves
+            ? {
+                rect: cameraRect(
+                  step.zoom ?? view.zoom,
+                  step.centerX ?? view.centerX,
+                  step.centerY ?? view.centerY,
+                ),
+              }
+            : {}),
+          ...(step.easing ? { easing: step.easing } : {}),
         },
       ];
     }

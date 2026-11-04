@@ -6,7 +6,7 @@
 import { findClip, timelineDurationUs, type TimelineOp } from '../../shared/project/timeline-ops';
 import type { EditorCommand } from './keyboard';
 import type { DocumentStore, EditError } from './store/document-store';
-import { clampScroll, fitView, timeToX, zoomAround } from './Timeline/geometry';
+import { clampScroll, fitView, removeKeyframeOp, timeToX, zoomAround } from './Timeline/geometry';
 import type { UiStore } from './ui-store';
 
 export interface TransportControls {
@@ -129,9 +129,7 @@ export function runCommand(command: EditorCommand, ctx: CommandContext): void {
     case 'ripple-delete': {
       const key = ui.selectedKeyframe;
       if (key && selection.length === 0) {
-        if (
-          apply(ctx, { type: 'removeLayoutKeyframe', trackId: key.trackId, tUs: key.tUs }, command)
-        ) {
+        if (apply(ctx, removeKeyframeOp(key), command)) {
           ui.selectKeyframe(null);
         }
         return;

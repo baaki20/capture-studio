@@ -200,7 +200,7 @@ describe('Delete with a selected keyframe', () => {
     const ctx: CommandContext = { docStore, ui, transport, timelineWidth: () => 800 };
     const id = faceTrack(doc)!.id;
     const clips = docStore.getState().doc!.timeline.tracks.map((t) => t.clips.length);
-    ui.getState().selectKeyframe({ trackId: id, tUs: 5 * S });
+    ui.getState().selectKeyframe({ lane: 'layout', trackId: id, tUs: 5 * S });
     runCommand('delete', ctx);
     const after = docStore.getState().doc!;
     expect(faceTrack(after)!.layoutKeyframes?.some((k) => k.tUs === 5 * S)).toBe(false);
@@ -214,7 +214,7 @@ describe('Delete with a selected keyframe', () => {
   it('selecting clips clears the keyframe selection, and the other way round', () => {
     const ui = createUiStore();
     ui.getState().select(['clp_a']);
-    ui.getState().selectKeyframe({ trackId: 'trk_f', tUs: 0 });
+    ui.getState().selectKeyframe({ lane: 'layout', trackId: 'trk_f', tUs: 0 });
     expect(ui.getState().selection).toEqual([]);
     ui.getState().select(['clp_a']);
     expect(ui.getState().selectedKeyframe).toBeNull();

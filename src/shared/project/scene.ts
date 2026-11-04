@@ -20,6 +20,7 @@
  * Transitions and speed are resolved by the render plan's time mapping and by later steps.
  */
 import type { Us } from '../time';
+import { cameraAt } from './camera-keyframes';
 import { interpolate, keyframeSpan, lerp, lerpRect } from './easing';
 import {
   overlayDestRect,
@@ -91,9 +92,7 @@ export const FULL_FRAME: FRect = { x: 0, y: 0, width: 1, height: 1 };
 
 /** The camera rect at `tUs` (canvas fractions); the full frame without camera keyframes. */
 export function cameraRectAt(doc: Project, tUs: Us): FRect {
-  const keys = doc.timeline.camera;
-  if (!keys || keys.length === 0) return FULL_FRAME;
-  return interpolate(keys, tUs, (k) => k.rect, lerpRect) ?? FULL_FRAME;
+  return cameraAt(doc.timeline.camera, tUs);
 }
 
 /** Where a canvas rect lands on the output frame under camera rect `camera`. */

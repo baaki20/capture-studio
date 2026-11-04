@@ -71,8 +71,9 @@ export function App() {
     window.csEditorDebug = {
       doc: () => created.docStore.getState().doc,
       ui: () => {
-        const { playheadUs, playing, selection, snapping } = created.ui.getState();
-        return { playheadUs, playing, selection, snapping };
+        const { playheadUs, playing, selection, snapping, view, selectedKeyframe } =
+          created.ui.getState();
+        return { playheadUs, playing, selection, snapping, view, selectedKeyframe };
       },
       probePreview: async (tUs) => {
         const client = created.preview.current;

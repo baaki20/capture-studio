@@ -291,6 +291,30 @@ export function registerTools(server: McpServer, app: AppApi): void {
   stepTool(
     server,
     app,
+    'set_background',
+    'background',
+    'Styles the screen for the whole video: a colour or gradient background around it, padding, rounded corners and a drop shadow (fractions of the canvas short side). Starts from a default style when the background is plain; off: true goes back to the plain canvas.',
+    (a) => (a.off ? 'Plain background' : 'Change background'),
+  );
+  stepTool(
+    server,
+    app,
+    'zoom_screen',
+    'zoom',
+    'Zooms the picture (screen and annotations, not the face overlay) into part of the frame from start to end, e.g. to show a detail: zoom 2 shows a quarter of the frame centred on centerX/centerY (fractions). Eased in and out; afterwards the camera returns to what it showed.',
+    (a) => `Zoom ${String(a.zoom)}× ${show(a.start)}–${show(a.end)}`,
+  );
+  stepTool(
+    server,
+    app,
+    'set_zoom_keyframe',
+    'zoomKeyframe',
+    'Sets or removes a camera zoom keyframe at a time: zoom (1–4), centre (fractions) and the easing to the next keyframe. get_project lists the keyframes.',
+    (a) => (a.remove ? `Remove zoom keyframe at ${show(a.at)}` : `Zoom keyframe at ${show(a.at)}`),
+  );
+  stepTool(
+    server,
+    app,
     'set_screen_crop',
     'screenCrop',
     'Crops the screen recording to a rectangle in its own pixels, or removes the crop (null).',

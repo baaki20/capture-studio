@@ -55,6 +55,12 @@ import {
 } from './clip-time';
 import { mediaEditBounds } from './media-time';
 import {
+  CAMERA_EASE_MAX_US,
+  cameraZoomRange,
+  clampCameraRect,
+  upsertCameraKeyframe,
+} from './camera-keyframes';
+import {
   FACE_EASE_MAX_US,
   faceModeSegment,
   faceStateAt,
@@ -65,10 +71,13 @@ import {
 } from './layout-keyframes';
 import type {
   AudioTrack,
+  Beautify,
   Border,
+  CameraKeyframe,
   Clip,
   Easing,
   FaceMode,
+  FRect,
   LayoutKeyframe,
   Media,
   OverlayLayout,
@@ -165,6 +174,11 @@ export type TimelineOp =
       mode: FaceMode;
       easeUs?: Us;
     }
+  | { type: 'setBeautify'; beautify: Beautify | null }
+  | { type: 'setCameraKeyframe'; tUs: Us; rect?: FRect; easing?: Easing }
+  | { type: 'removeCameraKeyframe'; tUs: Us }
+  | { type: 'moveCameraKeyframe'; fromUs: Us; toUs: Us }
+  | { type: 'setCameraZoom'; startUs: Us; endUs: Us; rect: FRect; easeUs?: Us }
   | { type: 'nudge'; target: NudgeTarget; syncAdjustUs: Us }
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
@@ -449,6 +463,21 @@ export const removeLayoutKeyframe = opFn('removeLayoutKeyframe');
 export const moveLayoutKeyframe = opFn('moveLayoutKeyframe');
 /** The face in one mode on a time range, eased in and out (per-segment layout, R2.2). */
 export const setFaceMode = opFn('setFaceMode');
+/**
+ * Sets the screen's background, padding, rounded corners and shadow (R2.11), or removes them
+ * (null: the plain canvas colour again). Sizes are clamped to the schema's ranges.
+ */
+export const setBeautify = opFn('setBeautify');
+/**
+ * Sets the camera keyframe at a time (R2.9): its rect (clamped inside the canvas) and easing. A
+ * new keyframe starts from the rect shown there; see `camera-keyframes.ts`.
+ */
+export const setCameraKeyframe = opFn('setCameraKeyframe');
+export const removeCameraKeyframe = opFn('removeCameraKeyframe');
+/** Moves a camera keyframe to another time (not onto another keyframe). */
+export const moveCameraKeyframe = opFn('moveCameraKeyframe');
+/** The camera on one rect over a time range, eased in and out (a zoomed range). */
+export const setCameraZoom = opFn('setCameraZoom');
 /** Sets `syncAdjustUs` of a component's (or explicit) media; clip positions do not change. */
 export const nudge = opFn('nudge');
 export const unlink = opFn('unlink');
@@ -505,6 +534,15 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
     case 'moveLayoutKeyframe':
     case 'setFaceMode':
       layoutKeyframeDraft(draft, op);
+      return;
+    case 'setBeautify':
+      beautifyDraft(draft, op.beautify);
+      return;
+    case 'setCameraKeyframe':
+    case 'removeCameraKeyframe':
+    case 'moveCameraKeyframe':
+    case 'setCameraZoom':
+      cameraDraft(draft, op);
       return;
     case 'nudge':
       nudgeDraft(draft, op);
@@ -871,6 +909,12 @@ function cutDraft(draft: Project, a: Us, b: Us, ctx: Ctx): void {
       setKeyframes(track, keyframesThroughCut(plain(track.layoutKeyframes), a, b));
     }
   }
+  // The camera follows the screen, so it moves with the content unless every video track is
+  // locked (then the picture under it does not move either).
+  const screenMoves = tracks.some((t) => t.type === 'video' && !t.locked);
+  if (draft.timeline.camera && screenMoves) {
+    setCamera(draft, keyframesThroughCut(plain(draft.timeline.camera), a, b));
+  }
 
   const marks = draft.timeline.marks;
   const inUs = marks.inUs === null ? null : mapTimeThroughCut(marks.inUs, a, b);
@@ -1039,6 +1083,107 @@ function layoutKeyframeDraft(
       }
       const ease = Math.min(easeUs, Math.floor((op.endUs - op.startUs) / 2));
       setKeyframes(track, faceModeSegment(keys, layout, op.startUs, op.endUs, op.mode, ease));
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Beautify and camera
+
+const clampTo = (v: number, lo: number, hi: number, name: string) => {
+  if (!Number.isFinite(v)) fail('invalid-value', `${name} must be a number`);
+  return Math.min(hi, Math.max(lo, v));
+};
+
+function beautifyDraft(draft: Project, beautify: Beautify | null): void {
+  if (beautify === null) {
+    if (!draft.timeline.beautify) fail('nothing-to-do', 'the background is already plain');
+    delete draft.timeline.beautify;
+    return;
+  }
+  const background =
+    beautify.background.type === 'gradient'
+      ? {
+          ...beautify.background,
+          angleDeg: clampTo(beautify.background.angleDeg, 0, 360, 'the gradient angle'),
+        }
+      : beautify.background;
+  const next: Beautify = {
+    background,
+    padding: clampTo(beautify.padding, 0, 0.3, 'padding'),
+    cornerRadius: clampTo(beautify.cornerRadius, 0, 0.2, 'the corner radius'),
+  };
+  if (beautify.shadow) {
+    const s = beautify.shadow;
+    next.shadow = {
+      blur: clampTo(s.blur, 0, 0.1, 'the shadow blur'),
+      offsetX: clampTo(s.offsetX, -0.1, 0.1, 'the shadow offset'),
+      offsetY: clampTo(s.offsetY, -0.1, 0.1, 'the shadow offset'),
+      color: s.color,
+    };
+  }
+  draft.timeline.beautify = next;
+}
+
+/** Stores camera keyframes, dropping the field when there are none. */
+function setCamera(draft: Project, keys: CameraKeyframe[] | undefined): void {
+  if (keys && keys.length > 0) draft.timeline.camera = keys;
+  else delete draft.timeline.camera;
+}
+
+function cameraRectOf(rect: FRect): FRect {
+  return clampCameraRect(rect) ?? fail('invalid-value', 'the camera rect must be a rectangle');
+}
+
+function cameraDraft(
+  draft: Project,
+  op: OpOf<'setCameraKeyframe' | 'removeCameraKeyframe' | 'moveCameraKeyframe' | 'setCameraZoom'>,
+): void {
+  const keys = draft.timeline.camera ? plain(draft.timeline.camera) : undefined;
+  switch (op.type) {
+    case 'setCameraKeyframe': {
+      requireTime(op.tUs, 'the keyframe time');
+      setCamera(
+        draft,
+        upsertCameraKeyframe(keys, op.tUs, {
+          ...(op.rect ? { rect: cameraRectOf(op.rect) } : {}),
+          ...(op.easing ? { easing: op.easing } : {}),
+        }),
+      );
+      return;
+    }
+    case 'removeCameraKeyframe': {
+      const next = removeKeyframe(keys, op.tUs);
+      if (next === null) fail('nothing-to-do', `no camera keyframe at ${String(op.tUs)} µs`);
+      setCamera(draft, next);
+      return;
+    }
+    case 'moveCameraKeyframe': {
+      requireTime(op.toUs, 'the keyframe time');
+      const next = moveKeyframe(keys, op.fromUs, op.toUs);
+      if (next === null) {
+        const there = keys?.some((k) => k.tUs === op.fromUs);
+        fail(
+          there ? 'overlap' : 'nothing-to-do',
+          there
+            ? `another camera keyframe is at ${String(op.toUs)} µs`
+            : `no camera keyframe at ${String(op.fromUs)} µs`,
+        );
+      }
+      setCamera(draft, next);
+      return;
+    }
+    case 'setCameraZoom': {
+      requireTime(op.startUs, 'the start');
+      requireTime(op.endUs, 'the end');
+      if (op.endUs <= op.startUs) fail('invalid-value', 'the zoom range needs start < end');
+      const easeUs = op.easeUs ?? 0;
+      if (!isTime(easeUs) || easeUs > CAMERA_EASE_MAX_US) {
+        fail('invalid-value', `the change takes 0–${String(CAMERA_EASE_MAX_US / 1e6)} s`);
+      }
+      const ease = Math.min(easeUs, Math.floor((op.endUs - op.startUs) / 2));
+      setCamera(draft, cameraZoomRange(keys, op.startUs, op.endUs, cameraRectOf(op.rect), ease));
       return;
     }
   }

@@ -6,7 +6,9 @@
  */
 import { formatTimecode, usToSeconds, type Us } from '../time';
 import { isTrackAudible } from './render-plan';
+import { cameraView } from './camera-keyframes';
 import type {
+  Beautify,
   Component,
   Easing,
   FaceMode,
@@ -83,6 +85,16 @@ export interface ProjectSummary {
   /** Video tracks render bottom to top in this order. */
   tracks: TrackSummary[];
   components: ComponentSummary[];
+  /** Background, padding, corners and shadow around the screen; absent when plain. */
+  background?: Beautify;
+  /** Camera zoom keyframes (zoom 1 = the full frame, centre in canvas fractions). */
+  zoomKeyframes?: {
+    at: TimeSummary;
+    zoom: number;
+    centerX: number;
+    centerY: number;
+    easing: Easing;
+  }[];
 }
 
 export function timeSummary(us: Us, frameRate: number): TimeSummary {
@@ -153,5 +165,21 @@ export function summarizeProject(doc: Project): ProjectSummary {
           : [];
       }),
     })),
+    ...(doc.timeline.beautify ? { background: doc.timeline.beautify } : {}),
+    ...(doc.timeline.camera
+      ? {
+          zoomKeyframes: doc.timeline.camera.map((k) => {
+            const view = cameraView(k.rect);
+            const round = (x: number) => Math.round(x * 1000) / 1000;
+            return {
+              at: time(k.tUs),
+              zoom: round(view.zoom),
+              centerX: round(view.centerX),
+              centerY: round(view.centerY),
+              easing: k.easing,
+            };
+          }),
+        }
+      : {}),
   };
 }

@@ -196,6 +196,11 @@ const OP_KINDS = [
   'keyframe-remove',
   'keyframe-move',
   'face-mode',
+  'beautify',
+  'camera-key',
+  'camera-key-remove',
+  'camera-key-move',
+  'camera-zoom',
   'nudge',
   'unlink',
   'relink',
@@ -245,6 +250,15 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
   const modes = ['overlay', 'full', 'side-by-side', 'hidden'] as const;
   const easings = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'hold'] as const;
   const pick = <T>(list: readonly T[], f: number): T => list[Math.floor(f * list.length)] as T;
+  const cameraKeys = doc.timeline.camera ?? [];
+  const cameraTime = (f: number) => cameraKeys[Math.floor(f * cameraKeys.length)]?.tUs ?? time(f);
+  // Camera rects partly outside the canvas or too small (the operations clamp them).
+  const cameraRect = (f: number, g: number) => ({
+    x: f * 1.2 - 0.1,
+    y: g,
+    width: 0.1 + g * 0.95,
+    height: 0.1 + f * 0.95,
+  });
   switch (t.kind) {
     case 'split-selected':
       return { type: 'split', atUs: time(t.b), clipIds: [clipId], includeLinked: t.flag };
@@ -330,6 +344,44 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
         startUs: x,
         endUs: y === x ? x + 1 : y,
         mode: pick(modes, t.b),
+        easeUs: t.flag ? 0 : Math.round(t.c * 2_500_000),
+      };
+    }
+    case 'beautify':
+      return t.c < 0.2
+        ? { type: 'setBeautify', beautify: null }
+        : {
+            type: 'setBeautify',
+            beautify: {
+              background: t.flag
+                ? { type: 'color', color: '#203040' }
+                : { type: 'gradient', from: '#4F46E5', to: '#DB2777', angleDeg: t.b * 360 },
+              padding: t.b * 0.3,
+              cornerRadius: t.c * 0.2,
+              ...(t.b < 0.5
+                ? { shadow: { blur: t.c * 0.1, offsetX: 0, offsetY: 0.01, color: '#00000066' } }
+                : {}),
+            },
+          };
+    case 'camera-key':
+      return {
+        type: 'setCameraKeyframe',
+        tUs: t.flag ? cameraTime(t.a) : time(t.a),
+        ...(t.c < 0.7 ? { rect: cameraRect(t.b, t.c) } : {}),
+        ...(t.b < 0.5 ? { easing: pick(easings, t.c) } : {}),
+      };
+    case 'camera-key-remove':
+      return { type: 'removeCameraKeyframe', tUs: cameraTime(t.b) };
+    case 'camera-key-move':
+      return { type: 'moveCameraKeyframe', fromUs: cameraTime(t.b), toUs: time(t.c) };
+    case 'camera-zoom': {
+      const x = time(Math.min(t.b, t.c));
+      const y = time(Math.max(t.b, t.c));
+      return {
+        type: 'setCameraZoom',
+        startUs: x,
+        endUs: y === x ? x + 1 : y,
+        rect: cameraRect(t.a, t.b),
         easeUs: t.flag ? 0 : Math.round(t.c * 2_500_000),
       };
     }

@@ -12,8 +12,13 @@
 import type { VideoLayer } from '../../../shared/project/render-plan';
 import { sceneAt } from '../../../shared/project/scene';
 import type { Media, Project } from '../../../shared/project/schema';
-import { sceneBackgroundColor } from './compositor-math';
-import type { CompositeItem, LumaProbe, PixelCapture, Size } from './compositor-webgl';
+import type {
+  CompositeItem,
+  LumaProbe,
+  PixelCapture,
+  SceneBackground,
+  Size,
+} from './compositor-webgl';
 import type { DecoderPool } from './decoder-pool';
 import type { CacheableFrame } from './frame-cache';
 import type { PreviewStats } from './protocol';
@@ -22,7 +27,7 @@ export const PREROLL_US = 1_000_000;
 
 export interface CompositorLike {
   resize(size: Size): void;
-  draw(background: string, items: readonly CompositeItem[]): void;
+  draw(background: SceneBackground, items: readonly CompositeItem[]): void;
   probe(): LumaProbe;
   /** Reads the frame just drawn (parity test); optional for test doubles. */
   capture?(): PixelCapture;
@@ -86,7 +91,7 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
         }
       }
     }
-    this.compositor.draw(sceneBackgroundColor(scene), items);
+    this.compositor.draw(scene.background, items);
     if (!exact) this.inexact += 1;
     return exact;
   }
