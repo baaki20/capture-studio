@@ -1,30 +1,35 @@
 /**
  * How a clip maps timeline time to its media's reference clock (§1.7), with the v2 speed and
- * freeze-frame fields.
- *
- * A clip covers `[timelineStartUs, timelineStartUs + length)` where `length` is `durationUs`
- * when set and the source length (`sourceEndUs − sourceStartUs`) otherwise. Its speed is
- * `source length / length`, so the source range is stretched over the timeline span:
+ * freeze-frame fields:
  *
  *   refUs = sourceStartUs + (tUs − timelineStartUs) × speed      (normal clip)
  *   refUs = sourceStartUs                                          (freeze frame)
  *
- * The timeline length is stored rather than the speed so that timeline positions stay exact
- * integers through splits and cuts: only the source side is rounded, by at most 1 µs.
- * With neither field set this is the Phase 1 mapping exactly.
+ * A clip with `speed` or `freeze` stores its timeline length (`durationUs`) as well as the exact
+ * speed. Timeline positions therefore stay exact integers through splits, trims and cuts, and
+ * every new source time is derived from the exact speed, so rounding never accumulates: the
+ * source length stays within 2 µs of `durationUs × speed` (an invariant). Without either field a
+ * clip is a Phase 1 clip and its timeline length is its source length.
  *
- * `clipHead` and `clipTail` are the two halves of a clip cut at a timeline time; every edit that
- * cuts a clip (split, cut range) goes through them.
+ * `clipHead` and `clipTail` are the two halves of a clip cut at a timeline time; `clipWithStart`
+ * and `clipWithEnd` trim. Every edit that changes a clip's extent goes through them.
  */
 import type { Us } from '../time';
 import type { Clip } from './schema';
 
-type ClipTiming = Pick<Clip, 'sourceStartUs' | 'sourceEndUs' | 'durationUs' | 'freeze'>;
+type ClipTiming = Pick<Clip, 'sourceStartUs' | 'sourceEndUs' | 'speed' | 'durationUs' | 'freeze'>;
 type PlacedClip = ClipTiming & Pick<Clip, 'timelineStartUs'>;
 
 /** Speed range (§5 P2). */
 export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 4;
+/** How far a sped-up clip's source length may stray from `durationUs × speed` (rounding). */
+export const SPEED_SLACK_US = 2;
+
+/** True when the clip's timeline length is stored (`durationUs`) rather than derived. */
+function hasStoredLength(clip: ClipTiming): boolean {
+  return clip.speed !== undefined || clip.freeze === true;
+}
 
 /** Source (reference-clock) length of the clip. */
 export function clipSourceDurationUs(clip: Pick<Clip, 'sourceStartUs' | 'sourceEndUs'>): Us {
@@ -33,22 +38,20 @@ export function clipSourceDurationUs(clip: Pick<Clip, 'sourceStartUs' | 'sourceE
 
 /** Length of the clip on the timeline. */
 export function clipTimelineDurationUs(clip: ClipTiming): Us {
-  return clip.durationUs ?? clipSourceDurationUs(clip);
+  if (hasStoredLength(clip) && clip.durationUs !== undefined) return clip.durationUs;
+  return clipSourceDurationUs(clip);
 }
 
 /** Playback speed: 1 for a plain clip, 0 for a freeze frame. */
-export function clipSpeed(clip: ClipTiming): number {
+export function clipSpeed(clip: Pick<Clip, 'speed' | 'freeze'>): number {
   if (clip.freeze) return 0;
-  if (clip.durationUs === undefined) return 1;
-  return clipSourceDurationUs(clip) / clip.durationUs;
+  return clip.speed ?? 1;
 }
 
 /** Exact (unrounded) reference time shown at timeline time `tUs`. */
 export function clipRefAtExact(clip: PlacedClip, tUs: Us): number {
   if (clip.freeze) return clip.sourceStartUs;
-  const offset = tUs - clip.timelineStartUs;
-  if (clip.durationUs === undefined) return clip.sourceStartUs + offset;
-  return clip.sourceStartUs + (offset * clipSourceDurationUs(clip)) / clip.durationUs;
+  return clip.sourceStartUs + (tUs - clip.timelineStartUs) * (clip.speed ?? 1);
 }
 
 /** Reference time shown at timeline time `tUs`, in integer µs. */
@@ -63,15 +66,30 @@ export function clipRefAt(clip: PlacedClip, tUs: Us): Us {
 export function clipTimeAtRef(clip: PlacedClip, refUs: Us): Us {
   if (clip.freeze) return clip.timelineStartUs;
   const offset = refUs - clip.sourceStartUs;
-  if (clip.durationUs === undefined) return clip.timelineStartUs + offset;
-  return clip.timelineStartUs + Math.round((offset * clip.durationUs) / clipSourceDurationUs(clip));
+  if (clip.speed === undefined) return clip.timelineStartUs + offset;
+  return clip.timelineStartUs + Math.round(offset / clip.speed);
 }
 
-/** `durationUs` for a new timeline length: dropped when it equals the source length. */
-function withLength<T extends Clip>(clip: T, lengthUs: Us): T {
-  const { durationUs: _old, ...rest } = clip;
-  const keep = (clip.freeze ?? false) || clipSourceDurationUs(clip) !== lengthUs;
-  return (keep ? { ...rest, durationUs: lengthUs } : rest) as T;
+/** Source length for a timeline length at the clip's speed (freeze: unchanged). */
+function sourceLengthFor(clip: ClipTiming, lengthUs: Us): Us {
+  if (clip.freeze) return clipSourceDurationUs(clip);
+  return clip.speed === undefined ? lengthUs : Math.round(lengthUs * clip.speed);
+}
+
+function withStoredLength(clip: Clip, lengthUs: Us): Clip {
+  return hasStoredLength(clip) ? { ...clip, durationUs: lengthUs } : clip;
+}
+
+/**
+ * A clip whose start moved (tail or trimmed start): for a sped-up clip the source end is derived
+ * again from the new start, so the rounding error stays within 1.5 µs instead of adding up over
+ * edits. It never moves past the old source end, which keeps it inside the media.
+ */
+function withNewStart(clip: Clip, timelineStartUs: Us, sourceStartUs: Us, lengthUs: Us): Clip {
+  const moved = { ...clip, timelineStartUs, sourceStartUs };
+  if (clip.speed === undefined || clip.freeze) return withStoredLength(moved, lengthUs);
+  const sourceEndUs = Math.min(clip.sourceEndUs, sourceStartUs + sourceLengthFor(clip, lengthUs));
+  return { ...moved, sourceEndUs, durationUs: lengthUs };
 }
 
 /**
@@ -81,10 +99,11 @@ function withLength<T extends Clip>(clip: T, lengthUs: Us): T {
 export function clipHead(clip: Clip, tUs: Us): Clip {
   const length = tUs - clip.timelineStartUs;
   const { fadeOutUs: _fade, ...rest } = clip;
-  if (clip.freeze) return withLength(rest, length);
-  const sourceEndUs =
-    clip.durationUs === undefined ? clip.sourceStartUs + length : clipRefAt(clip, tUs);
-  return withLength({ ...rest, sourceEndUs }, length);
+  if (clip.freeze) return withStoredLength(rest, length);
+  return withStoredLength(
+    { ...rest, sourceEndUs: clip.sourceStartUs + sourceLengthFor(clip, length) },
+    length,
+  );
 }
 
 /**
@@ -92,14 +111,13 @@ export function clipHead(clip: Clip, tUs: Us): Clip {
  * clip's ID and link (callers assign new ones where needed) and loses its transition and fade-in.
  */
 export function clipTail(clip: Clip, tUs: Us): Clip {
-  const length = clip.timelineStartUs + clipTimelineDurationUs(clip) - tUs;
+  const offset = tUs - clip.timelineStartUs;
+  const length = clipTimelineDurationUs(clip) - offset;
   const { transitionIn: _transition, fadeInUs: _fade, ...rest } = clip;
-  if (clip.freeze) return withLength({ ...rest, timelineStartUs: tUs }, length);
-  const sourceStartUs =
-    clip.durationUs === undefined
-      ? clip.sourceStartUs + (tUs - clip.timelineStartUs)
-      : clipRefAt(clip, tUs);
-  return withLength({ ...rest, timelineStartUs: tUs, sourceStartUs }, length);
+  const sourceStartUs = clip.freeze
+    ? clip.sourceStartUs
+    : clip.sourceStartUs + sourceLengthFor(clip, offset);
+  return withNewStart(rest, tUs, sourceStartUs, length);
 }
 
 /**
@@ -109,38 +127,34 @@ export function clipTail(clip: Clip, tUs: Us): Clip {
 export function clipMaxEndUs(clip: PlacedClip, refEndUs: Us): Us {
   if (clip.freeze) return Number.POSITIVE_INFINITY;
   const room = refEndUs - clip.sourceStartUs;
-  if (clip.durationUs === undefined) return clip.timelineStartUs + room;
-  return clip.timelineStartUs + Math.floor((room * clip.durationUs) / clipSourceDurationUs(clip));
+  if (clip.speed === undefined) return clip.timelineStartUs + room;
+  return clip.timelineStartUs + Math.floor(room / clip.speed);
 }
 
 /** Earliest timeline start the clip can be trimmed out to without its source passing `refStartUs`. */
 export function clipMinStartUs(clip: PlacedClip, refStartUs: Us): Us {
   if (clip.freeze) return Number.NEGATIVE_INFINITY;
   const room = clip.sourceStartUs - refStartUs;
-  if (clip.durationUs === undefined) return clip.timelineStartUs - room;
-  return clip.timelineStartUs - Math.floor((room * clip.durationUs) / clipSourceDurationUs(clip));
+  if (clip.speed === undefined) return clip.timelineStartUs - room;
+  return clip.timelineStartUs - Math.floor(room / clip.speed);
 }
 
 /** The clip with its end moved to timeline time `endUs`, at the same speed. */
 export function clipWithEnd(clip: Clip, endUs: Us): Clip {
   const length = endUs - clip.timelineStartUs;
-  if (clip.freeze) return withLength(clip, length);
-  if (clip.durationUs === undefined) return { ...clip, sourceEndUs: clip.sourceStartUs + length };
-  const sourceLength = Math.round((length * clipSourceDurationUs(clip)) / clip.durationUs);
-  return withLength({ ...clip, sourceEndUs: clip.sourceStartUs + sourceLength }, length);
+  if (clip.freeze) return withStoredLength(clip, length);
+  return withStoredLength(
+    { ...clip, sourceEndUs: clip.sourceStartUs + sourceLengthFor(clip, length) },
+    length,
+  );
 }
 
 /** The clip with its start moved to timeline time `startUs`, at the same speed. */
 export function clipWithStart(clip: Clip, startUs: Us): Clip {
   const end = clip.timelineStartUs + clipTimelineDurationUs(clip);
-  if (clip.freeze) return withLength({ ...clip, timelineStartUs: startUs }, end - startUs);
   const delta = startUs - clip.timelineStartUs;
-  if (clip.durationUs === undefined) {
-    return { ...clip, timelineStartUs: startUs, sourceStartUs: clip.sourceStartUs + delta };
-  }
-  const sourceDelta = Math.round((delta * clipSourceDurationUs(clip)) / clip.durationUs);
-  return withLength(
-    { ...clip, timelineStartUs: startUs, sourceStartUs: clip.sourceStartUs + sourceDelta },
-    end - startUs,
-  );
+  const sourceStartUs = clip.freeze
+    ? clip.sourceStartUs
+    : clip.sourceStartUs + (clip.speed === undefined ? delta : Math.round(delta * clip.speed));
+  return withNewStart(clip, startUs, sourceStartUs, end - startUs);
 }

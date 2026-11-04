@@ -650,8 +650,14 @@
                           ],
                           "description": "Clips sharing a linkId edit together"
                         },
+                        "speed": {
+                          "description": "v2: playback speed, 1 when absent; audio keeps its pitch. Needs durationUs",
+                          "type": "number",
+                          "minimum": 0.25,
+                          "maximum": 4
+                        },
                         "durationUs": {
-                          "description": "v2: length on the timeline when it differs from the source length. Speed is (sourceEndUs − sourceStartUs) / durationUs, in 0.25–4; audio keeps its pitch",
+                          "description": "v2: length on the timeline, for a clip with speed or freeze. With speed, the source length equals durationUs × speed to within 2 µs of rounding",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 9007199254740991
@@ -1213,8 +1219,14 @@
                           ],
                           "description": "Clips sharing a linkId edit together"
                         },
+                        "speed": {
+                          "description": "v2: playback speed, 1 when absent; audio keeps its pitch. Needs durationUs",
+                          "type": "number",
+                          "minimum": 0.25,
+                          "maximum": 4
+                        },
                         "durationUs": {
-                          "description": "v2: length on the timeline when it differs from the source length. Speed is (sourceEndUs − sourceStartUs) / durationUs, in 0.25–4; audio keeps its pitch",
+                          "description": "v2: length on the timeline, for a clip with speed or freeze. With speed, the source length equals durationUs × speed to within 2 µs of rounding",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 9007199254740991

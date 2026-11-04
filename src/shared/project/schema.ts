@@ -173,13 +173,19 @@ export const ClipSchema = z.object({
   sourceStartUs: Us.describe("In the media's reference clock (session clock for recordings)"),
   sourceEndUs: Us.describe("In the media's reference clock (session clock for recordings)"),
   linkId: prefixedId('lnk').nullable().describe('Clips sharing a linkId edit together'),
+  speed: z
+    .number()
+    .min(0.25)
+    .max(4)
+    .optional()
+    .describe('v2: playback speed, 1 when absent; audio keeps its pitch. Needs durationUs'),
   durationUs: z
     .int()
     .positive()
     .optional()
     .describe(
-      'v2: length on the timeline when it differs from the source length. Speed is ' +
-        '(sourceEndUs − sourceStartUs) / durationUs, in 0.25–4; audio keeps its pitch',
+      'v2: length on the timeline, for a clip with speed or freeze. With speed, the source ' +
+        'length equals durationUs × speed to within 2 µs of rounding',
     ),
   freeze: z
     .boolean()

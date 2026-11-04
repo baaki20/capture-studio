@@ -896,7 +896,8 @@ function relinkDraft(draft: Project, clipIds: readonly string[], ctx: Ctx): void
     }
     if (
       clipSourceDurationUs(clip) !== clipSourceDurationUs(first) ||
-      (clip.freeze ?? false) !== (first.freeze ?? false)
+      (clip.freeze ?? false) !== (first.freeze ?? false) ||
+      (clip.speed ?? 1) !== (first.speed ?? 1)
     ) {
       fail('cannot-link', 'linked clips must play at the same speed');
     }

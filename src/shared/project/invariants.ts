@@ -10,7 +10,8 @@
  * every edit operation addresses clips and tracks by ID.
  *
  * Format 2 adds (all checked only when the fields are present):
- * - clip speed (`source length / durationUs`) in 0.25–4; a freeze frame needs `durationUs`;
+ * - a clip with `speed` or `freeze` has `durationUs`, and with `speed` its source length is
+ *   `durationUs × speed` to within 2 µs (the schema keeps the speed in 0.25–4);
  * - a transition is no longer than its clip;
  * - linked clips also share their source length and freeze flag, so they stay in sync;
  * - keyframe lists (face layout, volume, camera, object boxes) and markers are sorted by time
@@ -20,7 +21,7 @@
  * - a camera rect lies inside the canvas; ducking names another audio track.
  */
 import { frameDurationUs } from '../time';
-import { SPEED_MAX, SPEED_MIN, clipSourceDurationUs, clipTimelineDurationUs } from './clip-time';
+import { SPEED_SLACK_US, clipSourceDurationUs, clipTimelineDurationUs } from './clip-time';
 import { mediaEditBounds } from './media-time';
 import type { Media, Project } from './schema';
 
@@ -70,6 +71,7 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
       durationUs: number;
       sourceUs: number;
       freeze: boolean;
+      speed: number;
     }[]
   >();
 
@@ -171,25 +173,20 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
         }
       }
 
-      // v2: speed range, freeze length, transition length.
-      if (clip.freeze && clip.durationUs === undefined) {
+      // v2: a sped-up or frozen clip stores its timeline length; a sped-up clip's source length
+      // matches it to within the rounding of edits.
+      if ((clip.freeze || clip.speed !== undefined) && clip.durationUs === undefined) {
         violations.push({
           code: 'clip-speed',
-          message: `freeze frame ${clip.id} has no durationUs`,
+          message: `clip ${clip.id} has speed or freeze but no durationUs`,
           path,
         });
-      } else if (!clip.freeze && clip.durationUs !== undefined && sourceUs > 0) {
-        const speed = sourceUs / clip.durationUs;
-        // Edits round the source side to whole µs, so a short clip at a limit may land a
-        // couple of µs outside it; allow that much.
-        const slackUs = 2;
-        if (
-          sourceUs < SPEED_MIN * clip.durationUs - slackUs ||
-          sourceUs > SPEED_MAX * clip.durationUs + slackUs
-        ) {
+      } else if (!clip.freeze && clip.speed !== undefined && clip.durationUs !== undefined) {
+        const expected = clip.durationUs * clip.speed;
+        if (Math.abs(sourceUs - expected) > SPEED_SLACK_US) {
           violations.push({
             code: 'clip-speed',
-            message: `clip ${clip.id} has speed ${speed.toFixed(3)}, outside ${String(SPEED_MIN)}–${String(SPEED_MAX)}`,
+            message: `clip ${clip.id} plays ${String(sourceUs)} µs of source in ${String(clip.durationUs)} µs, not at speed ${String(clip.speed)}`,
             path,
           });
         }
@@ -211,6 +208,7 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
           durationUs,
           sourceUs,
           freeze: clip.freeze ?? false,
+          speed: clip.speed ?? 1,
         });
         links.set(clip.linkId, group);
       }
@@ -230,7 +228,11 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
           message: `linked clips in ${linkId} differ in start or duration`,
           path,
         });
-      } else if (member.sourceUs !== first.sourceUs || member.freeze !== first.freeze) {
+      } else if (
+        member.sourceUs !== first.sourceUs ||
+        member.freeze !== first.freeze ||
+        member.speed !== first.speed
+      ) {
         violations.push({
           code: 'link-mismatch',
           message: `linked clips in ${linkId} differ in speed or freeze`,

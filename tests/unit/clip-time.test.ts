@@ -71,6 +71,7 @@ function withSpeed(doc: Project, speedOf: (index: number) => number): Project {
         const length = Math.round((c.sourceEndUs - c.sourceStartUs) / speed);
         // Leave clips that would become shorter than a frame at normal speed.
         if (speed !== 1 && length >= frameDurationUs(draft.timeline.frameRate)) {
+          c.speed = speed;
           c.durationUs = length;
         }
         cursor = c.timelineStartUs + clipTimelineDurationUs(c);
@@ -88,12 +89,13 @@ describe('clip timing', () => {
     expect(clipTimeAtRef(c, 102 * S)).toBe(12 * S);
   });
 
-  it('stretches the source over durationUs', () => {
-    const fast = clip({ durationUs: 5 * S });
+  it('plays the source at its speed over durationUs', () => {
+    const fast = clip({ speed: 2, durationUs: 5 * S });
     expect(clipSpeed(fast)).toBe(2);
+    expect(clipTimelineDurationUs(fast)).toBe(5 * S);
     expect(clipRefAt(fast, 12 * S)).toBe(104 * S);
     expect(clipTimeAtRef(fast, 104 * S)).toBe(12 * S);
-    const slow = clip({ durationUs: 40 * S });
+    const slow = clip({ speed: 0.25, durationUs: 40 * S });
     expect(clipSpeed(slow)).toBe(0.25);
     expect(clipRefAt(slow, 14 * S)).toBe(101 * S);
   });
@@ -108,7 +110,7 @@ describe('clip timing', () => {
   });
 
   it('cuts into a head and a tail that meet exactly on the timeline', () => {
-    const c = clip({ durationUs: 7 * S, fadeInUs: 1, fadeOutUs: 2 });
+    const c = clip({ speed: 10 / 7, durationUs: 7 * S, fadeInUs: 1, fadeOutUs: 2 });
     const t = 13 * S + 1;
     const head = clipHead(c, t);
     const tail = clipTail(c, t);
@@ -122,13 +124,29 @@ describe('clip timing', () => {
     expect(tail.fadeOutUs).toBe(2);
   });
 
-  it('drops durationUs when a piece plays at normal speed', () => {
+  it('keeps Phase 1 clips free of v2 fields', () => {
     expect(clipHead(clip(), 12 * S)).not.toHaveProperty('durationUs');
+    expect(clipTail(clip(), 12 * S)).not.toHaveProperty('durationUs');
     expect(clipWithEnd(clip(), 15 * S)).toEqual(clip({ sourceEndUs: 105 * S }));
+    expect(clipWithStart(clip(), 12 * S)).toEqual(
+      clip({ timelineStartUs: 12 * S, sourceStartUs: 102 * S }),
+    );
+  });
+
+  it('does not let rounding add up over many edits', () => {
+    let c = clip({ speed: 0.3, durationUs: Math.round((10 * S) / 0.3) });
+    for (let i = 0; i < 500; i++) {
+      const start = c.timelineStartUs;
+      c = clipWithStart(c, start + 7_777 + (i % 13));
+      c = clipWithEnd(c, c.timelineStartUs + clipTimelineDurationUs(c) - 3_333);
+      c = clipWithStart(c, c.timelineStartUs - 5_555);
+      const error = c.sourceEndUs - c.sourceStartUs - c.durationUs! * 0.3;
+      expect(Math.abs(error)).toBeLessThanOrEqual(2);
+    }
   });
 
   it('trims at the same speed and stops at the media bounds', () => {
-    const c = clip({ durationUs: 20 * S }); // speed 0.5
+    const c = clip({ speed: 0.5, durationUs: 20 * S });
     expect(clipMaxEndUs(c, 112 * S)).toBe(34 * S);
     expect(clipMinStartUs(c, 99 * S)).toBe(8 * S);
     const longer = clipWithEnd(c, 34 * S);
@@ -149,6 +167,7 @@ describe('edit operations on v2 clips', () => {
       const voice = draft.timeline.tracks.find((t) => t.name === 'Voice')!;
       for (const track of [face, voice]) {
         const first = track.clips[0]!;
+        first.speed = 2;
         first.durationUs = (first.sourceEndUs - first.sourceStartUs) / 2;
       }
     });
@@ -307,11 +326,19 @@ describe('v2 invariants', () => {
 
   it.each([
     [
-      'speed above 4×',
+      'source length that does not match the speed',
       'clip-speed',
       (d: Project) => {
         const c = d.timeline.tracks[0]!.clips[0]!;
-        c.durationUs = Math.floor((c.sourceEndUs - c.sourceStartUs) / 5);
+        c.speed = 2;
+        c.durationUs = c.sourceEndUs - c.sourceStartUs;
+      },
+    ],
+    [
+      'speed without a length',
+      'clip-speed',
+      (d: Project) => {
+        d.timeline.tracks[0]!.clips[0]!.speed = 2;
       },
     ],
     [
@@ -334,8 +361,9 @@ describe('v2 invariants', () => {
       (d: Project) => {
         const face = d.timeline.tracks.find((t) => t.name === 'Face')!.clips[0]!;
         const voice = d.timeline.tracks.find((t) => t.name === 'Voice')!.clips[0]!;
-        voice.sourceEndUs -= S;
+        voice.speed = 2;
         voice.durationUs = face.sourceEndUs - face.sourceStartUs;
+        voice.sourceEndUs = voice.sourceStartUs + 2 * voice.durationUs;
       },
     ],
     [
