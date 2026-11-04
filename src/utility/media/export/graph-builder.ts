@@ -190,8 +190,13 @@ export interface MaskSpec {
 }
 
 export interface ExportGraph {
-  /** Arguments after the runner's global options; the filter script path is already in them. */
+  /** Arguments after the runner's global options; the filter script paths are already in them. */
   args: string[];
+  /** The video graph, for `filterScriptPath`. */
+  videoScriptText: string;
+  /** The audio graph, for `audioScriptPath`. */
+  audioScriptText: string;
+  /** Both graphs, video first (what the golden files record). */
   filterScriptText: string;
   inputs: ExportInput[];
   masks: MaskSpec[];
@@ -210,8 +215,13 @@ export interface BuildExportGraphOptions {
   projectRoot: string;
   settings: ExportSettings;
   outputPath: string;
-  /** Where the job writes the filter script. */
+  /**
+   * Where the job writes the video filter graph, and the audio one. They are separate graphs: in
+   * one graph FFmpeg n9.0.2 deadlocked in about 8 % of exports with a masked face on two cores
+   * (every thread waiting, nothing written), and in 0 of 100 with the graphs split.
+   */
   filterScriptPath: string;
+  audioScriptPath: string;
   /** Where the job writes mask PNGs (`mask-<n>.png`). */
   maskDir: string;
   /** Probed colour properties of video media; missing entries are taken as BT.709. */
@@ -761,7 +771,8 @@ export function buildExportGraph(
     'setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv',
   );
   if (settings.encoder === 'h264_vaapi') tail.push('format=nv12', 'hwupload');
-  lines.push(`[${base}]${tail.join(',')}[vout];`);
+  lines.push(`[${base}]${tail.join(',')}[vout]`);
+  const videoLines = lines.splice(0);
 
   // Audio.
   const audioSources = new Map<string, string[]>();
@@ -810,6 +821,8 @@ export function buildExportGraph(
   args.push(
     '-/filter_complex',
     options.filterScriptPath,
+    '-/filter_complex',
+    options.audioScriptPath,
     '-map',
     '[vout]',
     '-map',
@@ -840,9 +853,13 @@ export function buildExportGraph(
     options.outputPath,
   );
 
+  const videoScriptText = `${videoLines.join('\n')}\n`;
+  const audioScriptText = `${lines.join('\n')}\n`;
   return ok({
     args,
-    filterScriptText: `${lines.join('\n')}\n`,
+    videoScriptText,
+    audioScriptText,
+    filterScriptText: videoScriptText + audioScriptText,
     inputs,
     masks,
     expectedDurationUs: durationUs,

@@ -13,7 +13,9 @@
   -i
   /tmp/cs-export/mask-0.png
   -/filter_complex
-  /tmp/cs-export/graph.txt
+  /tmp/cs-export/video.txt
+  -/filter_complex
+  /tmp/cs-export/audio.txt
   -map
   [vout]
   -map
@@ -70,7 +72,7 @@ color=c=black@0:s=512x512:r=30:d=0.033333,setsar=1,format=yuva420p[p4];
 color=c=0x3080C0:s=2560x1080:r=30:d=0.033333,format=yuv420p,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,setsar=1,loop=loop=-1:size=1,trim=end_frame=1800[b13];
 [b13][t3]overlay=x=320:y=0:eof_action=pass:format=yuv420[b14];
 [b14][tm12]overlay=x=2005:y=568:eof_action=pass:format=yuv420[b15];
-[b15]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[b15]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]
 [2:a:0]atrim=start=0.027200:end=59.986102,asetpts=PTS-STARTPTS,asetrate=47999.121616,aresample=48000,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a18];
 [3:a:0]atrim=start=0.000000:end=59.990100,asetpts=PTS-STARTPTS,asetrate=48000.240001,aresample=48000,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a19];
 [a18][a19]amix=inputs=2:normalize=0:dropout_transition=0,alimiter=limit=0.98:level=0:latency=1,aresample=48000,apad[aout]

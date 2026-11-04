@@ -13,7 +13,9 @@
   -i
   /tmp/cs-export/mask-0.png
   -/filter_complex
-  /tmp/cs-export/graph.txt
+  /tmp/cs-export/video.txt
+  -/filter_complex
+  /tmp/cs-export/audio.txt
   -map
   [vout]
   -map
@@ -68,7 +70,7 @@ color=c=black@0:s=384x384:r=60:d=0.033333,setsar=1,format=yuva420p[p4];
 [al9][mk10]blend=all_mode=multiply:shortest=1[am11];
 [ta7][am11]alphamerge[tm12];
 [t3][tm12]overlay=x=1504:y=664:eof_action=pass:format=yuv420[b13];
-[b13]scale=1280:720:flags=bicubic,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[b13]scale=1280:720:flags=bicubic,format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]
 [2:a:0]atrim=start=0.027200:end=59.986102,asetpts=PTS-STARTPTS,asetrate=47999.121616,aresample=48000,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a16];
 [3:a:0]atrim=start=0.000000:end=59.990100,asetpts=PTS-STARTPTS,asetrate=48000.240001,aresample=48000,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a17];
 [a16][a17]amix=inputs=2:normalize=0:dropout_transition=0,alimiter=limit=0.98:level=0:latency=1,aresample=48000,apad[aout]

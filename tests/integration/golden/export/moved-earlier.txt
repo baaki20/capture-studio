@@ -33,7 +33,9 @@
   -i
   /tmp/cs-export/mask-0.png
   -/filter_complex
-  /tmp/cs-export/graph.txt
+  /tmp/cs-export/video.txt
+  -/filter_complex
+  /tmp/cs-export/audio.txt
   -map
   [vout]
   -map
@@ -94,7 +96,7 @@ color=c=black@0:s=384x384:r=30:d=0.033333,setsar=1,format=yuva420p[p10];
 [al17][mk18]blend=all_mode=multiply:shortest=1[am19];
 [ta15][am19]alphamerge[tm20];
 [t9][tm20]overlay=x=1504:y=664:eof_action=pass:format=yuv420[b21];
-[b21]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[b21]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]
 [2:a:0]asplit=2[s22][s23];
 [6:a:0]asetpts=PTS+18.000000/TB[s24];
 [3:a:0]asplit=2[s25][s26];

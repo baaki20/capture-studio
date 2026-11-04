@@ -74,6 +74,7 @@ async function exportPeakMb(doc: ProjectV1, name: string): Promise<number> {
     null,
   );
   const script = path.join(work, `${name}.txt`);
+  const audioScript = path.join(work, `${name}-audio.txt`);
   const graph = unwrap(
     buildExportGraph({
       doc,
@@ -81,10 +82,12 @@ async function exportPeakMb(doc: ProjectV1, name: string): Promise<number> {
       settings,
       outputPath: path.join(work, `${name}.mp4`),
       filterScriptPath: script,
+      audioScriptPath: audioScript,
       maskDir: work,
     }),
   );
-  await fs.writeFile(script, graph.filterScriptText);
+  await fs.writeFile(script, graph.videoScriptText);
+  await fs.writeFile(audioScript, graph.audioScriptText);
   const child = spawn(ffmpeg.ffmpeg, ['-hide_banner', '-nostats', ...graph.args], {
     stdio: ['ignore', 'ignore', 'pipe'],
   });

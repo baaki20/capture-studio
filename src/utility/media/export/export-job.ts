@@ -178,7 +178,8 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
         projectRoot: root,
         settings,
         outputPath: temp,
-        filterScriptPath: path.join(work, 'graph.txt'),
+        filterScriptPath: path.join(work, 'video.txt'),
+        audioScriptPath: path.join(work, 'audio.txt'),
         maskDir: work,
         ...(mediaColor ? { mediaColor } : {}),
       });
@@ -201,7 +202,8 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
           `Media is missing: ${missing.join(', ')}. Relink it or remove its clips before exporting.`,
         );
       }
-      await fs.writeFile(path.join(work, 'graph.txt'), graph.filterScriptText);
+      await fs.writeFile(path.join(work, 'video.txt'), graph.videoScriptText);
+      await fs.writeFile(path.join(work, 'audio.txt'), graph.audioScriptText);
       await Promise.all(graph.masks.map((m) => writeMaskPng(m.path, m.mask, m.width, m.height)));
       logger.info(
         `export: ${String(settings.width)}x${String(settings.height)}@${String(settings.fps)} ${settings.encoder} ${settings.quality} → ${output}`,

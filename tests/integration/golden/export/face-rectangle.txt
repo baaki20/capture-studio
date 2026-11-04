@@ -11,7 +11,9 @@
   -i
   /projects/Lesson.cstudio/media/system-audio.mp4
   -/filter_complex
-  /tmp/cs-export/graph.txt
+  /tmp/cs-export/video.txt
+  -/filter_complex
+  /tmp/cs-export/audio.txt
   -map
   [vout]
   -map
@@ -60,7 +62,7 @@ color=c=black@0:s=384x216:r=30:d=0.033333,setsar=1,format=yuva420p[p4];
 [v1]trim=start=0.000000:end=59.960000,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=1799,crop=1280:720:0:0,scale=384:216,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuva420p[p5];
 [p4][p5]concat=n=2:v=1:a=0[t6];
 [t3][t6]overlay=x=1504:y=748:eof_action=pass:format=yuv420[b7];
-[b7]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[b7]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]
 [2:a:0]atrim=start=0.027200:end=59.986102,asetpts=PTS-STARTPTS,asetrate=47999.121616,aresample=48000,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a10];
 [3:a:0]atrim=start=0.000000:end=59.990100,asetpts=PTS-STARTPTS,asetrate=48000.240001,aresample=48000,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a11];
 [a10][a11]amix=inputs=2:normalize=0:dropout_transition=0,alimiter=limit=0.98:level=0:latency=1,aresample=48000,apad[aout]

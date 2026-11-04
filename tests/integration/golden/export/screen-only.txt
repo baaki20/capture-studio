@@ -5,7 +5,9 @@
   -i
   /projects/Lesson.cstudio/media/screen.mp4
   -/filter_complex
-  /tmp/cs-export/graph.txt
+  /tmp/cs-export/video.txt
+  -/filter_complex
+  /tmp/cs-export/audio.txt
   -map
   [vout]
   -map
@@ -49,5 +51,5 @@
 [0:v:0]fps=30:start_time=0[v0];
 [v0]trim=start=0.000000:end=59.997800,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=-1,trim=end_frame=1800,crop=1920:1080:0:0,scale=1920:1080,setsar=1,colorspace=all=bt709:iall=bt601-6-525:irange=tv:range=tv:fast=1,format=yuv420p[p1];
 [p1]null[t2];
-[t2]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
+[t2]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]
 anullsrc=r=48000:cl=stereo[aout]
