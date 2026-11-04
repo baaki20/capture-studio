@@ -75,10 +75,10 @@ color=c=black@0:s=384x384:r=30:d=0.033333,setsar=1,format=yuva420p[p9];
 [b20]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout];
 [2:a:0]asplit=3[s21][s22][s23];
 [3:a:0]asplit=3[s24][s25][s26];
-[s21]atrim=start=0.027200:end=19.986834,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a27];
-[s22]atrim=start=19.986834:end=29.986651,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=960000S:all=1[a28];
-[s23]atrim=start=29.986651:end=59.986102,asetpts=PTS-STARTPTS,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1440000S:all=1[a29];
-[s24]atrim=start=0.000000:end=19.990200,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a30];
-[s25]atrim=start=19.990200:end=29.990250,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=960000S:all=1[a31];
-[s26]atrim=start=29.990250:end=59.990100,asetpts=PTS-STARTPTS,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=1440000S:all=1[a32];
+[s21]atrim=start=0.027200:end=19.986834,asetpts=PTS-STARTPTS,asetrate=47999.121616,aresample=48000,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1920S:all=1[a27];
+[s22]atrim=start=19.986834:end=29.986651,asetpts=PTS-STARTPTS,asetrate=47999.121616,aresample=48000,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=960000S:all=1[a28];
+[s23]atrim=start=29.986651:end=59.986102,asetpts=PTS-STARTPTS,asetrate=47999.121616,aresample=48000,pan=stereo|c0=c0|c1=c0,volume=0dB,adelay=delays=1440000S:all=1[a29];
+[s24]atrim=start=0.000000:end=19.990200,asetpts=PTS-STARTPTS,asetrate=48000.240001,aresample=48000,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=475S:all=1[a30];
+[s25]atrim=start=19.990200:end=29.990250,asetpts=PTS-STARTPTS,asetrate=48000.240001,aresample=48000,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=960000S:all=1[a31];
+[s26]atrim=start=29.990250:end=59.990100,asetpts=PTS-STARTPTS,asetrate=48000.240001,aresample=48000,aformat=channel_layouts=stereo,volume=0dB,adelay=delays=1440000S:all=1[a32];
 [a27][a28][a29][a30][a31][a32]amix=inputs=6:normalize=0:dropout_transition=0,alimiter=limit=0.98:level=0:latency=1,aresample=48000,apad[aout]

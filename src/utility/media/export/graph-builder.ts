@@ -31,7 +31,7 @@
  * Mask PNGs are read as one picture and repeated with the `loop` filter instead of the
  * `-loop 1` image demuxer of §4.3.9 step 1: with the demuxer looping, FFmpeg n9.0.2 hung in about
  * 1–2 % of runs (stress test of the masked-overlay graph); with the in-graph loop, 0 of 864.
- * 5. Audio per clip: `atrim → asetpts → (asetrate + aresample when |ratio − 1| ≥ 20 ppm) →
+ * 5. Audio per clip: `atrim → asetpts → (asetrate + aresample when |ratio − 1| ≥ 1 ppm) →
  *    stereo → volume → adelay`, then `amix normalize=0`, `alimiter`, `aresample`, `apad`. The
  *    output length is set with `-t D`.
  * 6. Encoding: libx264 (preset and CRF from the quality), or a verified hardware encoder with
@@ -79,8 +79,12 @@ export function isExportVideoEncoder(name: string): name is ExportVideoEncoder {
   return (EXPORT_VIDEO_ENCODERS as readonly string[]).includes(name);
 }
 
-/** Clock ratios closer to 1 than this are treated as exactly 1 (no resampling). */
-export const RATIO_TOLERANCE = 20e-6;
+/**
+ * Clock ratios closer to 1 than this are treated as exactly 1 (no resampling). The drift fit
+ * already stores exactly 1 for drift it does not correct, so this only absorbs rounding; it must
+ * stay well under the fit's own floor (an 18 ppm correction is 65 ms over an hour).
+ */
+export const RATIO_TOLERANCE = 1e-6;
 
 /** VA-API render node used when the probe verified `h264_vaapi`. */
 export const VAAPI_DEVICE = '/dev/dri/renderD128';

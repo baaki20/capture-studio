@@ -206,18 +206,28 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
       logger.info(
         `export: ${String(settings.width)}x${String(settings.height)}@${String(settings.fps)} ${settings.encoder} ${settings.quality} → ${output}`,
       );
-      // Watchdog: FFmpeg reports progress every 0.5 s; silence this long means it is stuck.
+      // Watchdog: no advance for this long means FFmpeg is stuck. Only an advance counts: FFmpeg's
+      // main thread keeps writing progress blocks on schedule while its decode, filter or encode
+      // threads are deadlocked, with the same `out_time` and `frame` each time.
       const stall = new AbortController();
       const stallMs = options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS;
       let stallTimer = setTimeout(() => stall.abort(), stallMs);
+      let reachedUs = -1;
+      let reachedFrame = -1;
       try {
         const result = await runFfmpeg({
           ffmpegPath: options.ffmpegPath,
           args: graph.args,
           durationUs: graph.expectedDurationUs,
           onProgress: (p) => {
-            clearTimeout(stallTimer);
-            stallTimer = setTimeout(() => stall.abort(), stallMs);
+            const advanced =
+              p.done || (p.outTimeUs ?? -1) > reachedUs || (p.frame ?? -1) > reachedFrame;
+            reachedUs = Math.max(reachedUs, p.outTimeUs ?? -1);
+            reachedFrame = Math.max(reachedFrame, p.frame ?? -1);
+            if (advanced) {
+              clearTimeout(stallTimer);
+              stallTimer = setTimeout(() => stall.abort(), stallMs);
+            }
             options.onProgress?.(p.fraction);
           },
           signal: options.signal ? AbortSignal.any([options.signal, stall.signal]) : stall.signal,

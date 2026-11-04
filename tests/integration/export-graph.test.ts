@@ -344,15 +344,18 @@ describe('export graph rules (§4.3.9)', () => {
     expect(a.join(' ')).toContain('-profile:v high -pix_fmt yuv420p');
   });
 
-  it('resamples audio only when the clock ratio is at least 20 ppm off', () => {
-    const g = graph(recordedProject());
-    // Fixture ratios: mic 1.0000183 (18.3 ppm), system 0.999995 (5 ppm).
-    expect(g.filterScriptText).not.toContain('asetrate');
+  it('resamples audio whose clock ratio is off by 1 ppm or more', () => {
+    // Fixture ratios: mic 1.0000183 (18.3 ppm), system 0.999995 (5 ppm): both corrected.
+    const text = graph(recordedProject()).filterScriptText;
+    expect(text).toContain('asetrate=47999.121616,aresample=48000');
+    expect(text).toContain('asetrate=48000.240001,aresample=48000');
+    const exact = recordedProject();
+    for (const m of exact.media) if (m.kind === 'audio') m.clockRatio = 1 + 5e-7;
+    expect(graph(exact).filterScriptText).not.toContain('asetrate');
     const drifting = recordedProject();
     const media = drifting.media.find((m) => m.role === 'microphone');
     if (media) media.clockRatio = 1.00005;
-    const d = graph(drifting);
-    expect(d.filterScriptText).toContain('asetrate=47997.60012,aresample=48000');
+    expect(graph(drifting).filterScriptText).toContain('asetrate=47997.60012,aresample=48000');
   });
 
   it('mixes without normalisation and limits the peak', () => {

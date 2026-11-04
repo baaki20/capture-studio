@@ -23,8 +23,10 @@
  *   recording, which rests on the lowest-latency points just before each step, so the steps carry
  *   the drift; late stalls never reach it, and a few early points (a flush at stop, a quantum
  *   change in the audio graph) are ignored up to the quantile;
- * - is applied only when the deviation is at least 20 ppm **and** at least 3 standard errors of
- *   the slope, so short noisy recordings keep `clockRatio = 1` instead of being overcorrected;
+ * - is applied only when the deviation is at least 3 standard errors of the slope, so short noisy
+ *   recordings keep `clockRatio = 1` instead of being overcorrected, **and** either at least
+ *   20 ppm or enough to move the track 10 ms over the recording. A fixed ppm floor alone let the
+ *   60-minute soak's mic (18.0 ± 0.1 ppm) drift 52 ms uncorrected;
  * - rejects implausible ratios (beyond 1000 ppm), which indicate a discontinuity, not drift.
  *
  * S2 also says audio drift correction stays mandatory, so a long recording with real drift is
@@ -62,8 +64,10 @@ export type SyncCheckpointFile = z.output<typeof SyncCheckpointFileSchema>;
 export type Checkpoint = readonly [sessionUs: Us, cumulativeSamples: number];
 
 export interface DriftOptions {
-  /** Deviations smaller than this are ignored (§1.5). */
+  /** Deviations smaller than this are ignored (§1.5)… */
   minPpm: number;
+  /** …unless they move the track at least this far over the recording's span. */
+  minDriftUs: Us;
   /** Deviations larger than this are treated as a fault, not drift. */
   maxPpm: number;
   /** The deviation must be at least this many standard errors of the slope. */
@@ -88,6 +92,7 @@ export interface DriftOptions {
 
 export const DEFAULT_DRIFT_OPTIONS: DriftOptions = {
   minPpm: 20,
+  minDriftUs: 10_000,
   maxPpm: 1000,
   minSignificance: 3,
   minPoints: 5,
@@ -381,7 +386,9 @@ export function fitClockRatio(
 
   const deviation = Math.abs(line.slope - 1);
   if (deviation * 1e6 > options.maxPpm) return neutral('implausible', line, used);
-  if (deviation * 1e6 < options.minPpm) return neutral('below-threshold', line, used);
+  if (deviation * 1e6 < options.minPpm && deviation * spanUs < options.minDriftUs) {
+    return neutral('below-threshold', line, used);
+  }
   if (deviation < options.minSignificance * line.slopeStdErr) {
     return neutral('not-significant', line, used);
   }
