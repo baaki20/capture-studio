@@ -5,6 +5,11 @@
 import { describe, expect, it } from 'vitest';
 import { chunkLatenessS, START_SLACK_S } from '../../src/renderer/editor/audio/schedule-math';
 import { PlaybackCounters } from '../../src/renderer/editor/preview/playback-counters';
+import {
+  DISPLAY_FRAME_MS,
+  MAX_LEAD_MS,
+  RenderLatency,
+} from '../../src/renderer/editor/preview/render-latency';
 
 const S = 1_000_000;
 
@@ -21,6 +26,28 @@ describe('PlaybackCounters', () => {
     expect(c.snapshot()).toEqual({ requested: 3, superseded: 1, drawn: 2, inexact: 1, late: 2 });
     c.reset();
     expect(c.snapshot().late).toBe(0);
+  });
+});
+
+describe('RenderLatency (preview render-ahead, R1.24)', () => {
+  it('is zero until a frame is timed, then the median plus one display frame', () => {
+    const l = new RenderLatency();
+    expect(l.leadUs()).toBe(0);
+    for (const ms of [30, 35, 40, 500, 32]) l.sample(ms); // one stall
+    expect(l.leadUs()).toBe(Math.round((35 + DISPLAY_FRAME_MS) * 1000));
+  });
+
+  it('follows recent frames, ignores bad samples and is capped', () => {
+    const l = new RenderLatency();
+    for (let i = 0; i < 40; i++) l.sample(10);
+    for (let i = 0; i < 31; i++) l.sample(60);
+    l.sample(-1);
+    l.sample(Number.NaN);
+    expect(l.leadUs()).toBe(Math.round((60 + DISPLAY_FRAME_MS) * 1000));
+    for (let i = 0; i < 31; i++) l.sample(2_000);
+    expect(l.leadUs()).toBe(MAX_LEAD_MS * 1000);
+    l.reset();
+    expect(l.leadUs()).toBe(0);
   });
 });
 

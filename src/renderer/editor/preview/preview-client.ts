@@ -3,11 +3,13 @@
  * the canvas to it as an `OffscreenCanvas`, forwards the document and render requests.
  *
  * Render requests are coalesced: while the worker is drawing, only the newest request waits, so
- * a slow frame never builds a queue (late frames are dropped, not shown late).
+ * a slow frame never builds a queue (late frames are dropped, not shown late). Playing requests
+ * are timed until drawn; `leadUs` is how far ahead `Playback` renders (`render-latency.ts`).
  */
 import type { ProjectV1 } from '../../../shared/project/schema';
 import type { LumaProbe, PixelCapture } from './compositor-webgl';
 import { PlaybackCounters, type PreviewCounterValues } from './playback-counters';
+import { RenderLatency } from './render-latency';
 import type { PreviewEvent, PreviewRequest, PreviewStats } from './protocol';
 
 export interface RenderedInfo {
@@ -20,7 +22,10 @@ export class PreviewClient {
   readonly canvas: HTMLCanvasElement;
   private readonly worker: Worker;
   private inFlight = false;
-  private pending: { tUs: number; playing: boolean } | null = null;
+  /** When the playing request being drawn was made (null for a paused one). */
+  private inFlightPlayingAt: number | null = null;
+  private pending: { tUs: number; playing: boolean; at: number } | null = null;
+  private readonly latency = new RenderLatency();
   private nextProbe = 1;
   private readonly probes = new Map<number, (result: LumaProbe & { exact: boolean }) => void>();
   private readonly captures = new Map<
@@ -53,15 +58,21 @@ export class PreviewClient {
     this.post({ type: 'doc', doc, mediaUrls });
   }
 
-  render(tUs: number, playing: boolean): void {
+  render(tUs: number, playing: boolean, at = performance.now()): void {
     if (this.inFlight) {
       this.playbackCounters.request(playing, this.pending?.playing === true);
-      this.pending = { tUs, playing };
+      this.pending = { tUs, playing, at };
       return;
     }
     this.playbackCounters.request(playing, false);
     this.inFlight = true;
+    this.inFlightPlayingAt = playing ? at : null;
     this.post({ type: 'render', tUs, playing });
+  }
+
+  /** How far ahead of the heard time to render while playing, in µs. */
+  leadUs(): number {
+    return this.latency.leadUs();
   }
 
   /** Renders `tUs` and reports the picture's mean luma (e2e "not black" check). */
@@ -118,11 +129,15 @@ export class PreviewClient {
     switch (event.type) {
       case 'rendered': {
         this.inFlight = false;
+        if (event.playing && this.inFlightPlayingAt !== null) {
+          this.latency.sample(performance.now() - this.inFlightPlayingAt);
+        }
+        this.inFlightPlayingAt = null;
         this.playbackCounters.drawn(event.playing, event.exact);
         for (const l of this.listeners) l(event);
         const next = this.pending;
         this.pending = null;
-        if (next) this.render(next.tUs, next.playing);
+        if (next) this.render(next.tUs, next.playing, next.at);
         return;
       }
       case 'probe':
@@ -138,6 +153,7 @@ export class PreviewClient {
         return;
       case 'error':
         this.inFlight = false;
+        this.inFlightPlayingAt = null;
         for (const l of this.errorListeners) l(event.message);
         return;
       case 'ready':

@@ -2,7 +2,8 @@
  * Transport (R1.34): play/pause, J/K/L shuttle, seeking, frame steps, Home/End.
  *
  * The clock is the audio scheduler (`audio/scheduler.ts`): the playhead follows the timeline
- * time being heard, and each animation frame asks the preview to draw it. Reverse shuttle runs
+ * time being heard, and each animation frame asks the preview to draw it, ahead by the preview's
+ * own delay to the screen (`leadUs`, R1.24), so picture and sound match. Reverse shuttle runs
  * the same clock without audio. While paused, every playhead change (scrub, step, seek) renders
  * that frame once.
  */
@@ -21,6 +22,8 @@ export interface PlaybackClock {
 
 export interface PreviewSink {
   render(tUs: number, playing: boolean): void;
+  /** How long a playing frame takes to reach the screen, in µs (rendered that far ahead). */
+  leadUs?(): number;
 }
 
 export interface PlaybackDeps {
@@ -156,7 +159,8 @@ export class Playback {
     }
     const t = this.clamp(heard);
     ui.setPlayhead(t);
-    this.deps.preview?.render(t, true);
+    const lead = this.deps.preview?.leadUs?.() ?? 0;
+    this.deps.preview?.render(this.clamp(t + lead * ui.rate), true);
     this.schedule();
   }
 
