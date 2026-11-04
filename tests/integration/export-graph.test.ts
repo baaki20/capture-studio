@@ -57,7 +57,8 @@ function graph(
       projectRoot: '/projects/Lesson.cstudio',
       settings,
       outputPath: '/exports/.Lesson.mp4.0000.part',
-      filterScriptPath: '/tmp/cs-export/graph.txt',
+      filterScriptPath: '/tmp/cs-export/video.txt',
+      audioScriptPath: '/tmp/cs-export/audio.txt',
       maskDir: '/tmp/cs-export',
       mediaColor,
     }),
@@ -270,11 +271,17 @@ describe('export graph rules (§4.3.9)', () => {
     expect(mediaRuns([use(0, 10, 0), use(10, 20, 9.95)])).toEqual([0, 0]);
   });
 
-  it('passes the graph as a script with -/filter_complex (§9.7)', () => {
+  it('passes the video and audio graphs as separate scripts with -/filter_complex (§9.7)', () => {
     const g = graph(recordedProject());
     expect(g.args).not.toContain('-filter_complex_script');
     expect(g.args).not.toContain('-filter_complex');
-    expect(g.args[g.args.indexOf('-/filter_complex') + 1]).toBe('/tmp/cs-export/graph.txt');
+    const scripts = g.args.flatMap((a, i) => (a === '-/filter_complex' ? [g.args[i + 1]] : []));
+    expect(scripts).toEqual(['/tmp/cs-export/video.txt', '/tmp/cs-export/audio.txt']);
+    // Each graph is complete on its own: the video one ends at [vout], the audio one at [aout].
+    expect(g.videoScriptText).toMatch(/\[vout\]\n$/);
+    expect(g.videoScriptText).not.toMatch(/:a:0\]|\[aout\]/);
+    expect(g.audioScriptText).toMatch(/\[aout\]\n$/);
+    expect(g.audioScriptText).not.toMatch(/:v:0\]|\[vout\]/);
   });
 
   it('gives every track exactly the timeline frame count', () => {
@@ -344,15 +351,18 @@ describe('export graph rules (§4.3.9)', () => {
     expect(a.join(' ')).toContain('-profile:v high -pix_fmt yuv420p');
   });
 
-  it('resamples audio only when the clock ratio is at least 20 ppm off', () => {
-    const g = graph(recordedProject());
-    // Fixture ratios: mic 1.0000183 (18.3 ppm), system 0.999995 (5 ppm).
-    expect(g.filterScriptText).not.toContain('asetrate');
+  it('resamples audio whose clock ratio is off by 1 ppm or more', () => {
+    // Fixture ratios: mic 1.0000183 (18.3 ppm), system 0.999995 (5 ppm): both corrected.
+    const text = graph(recordedProject()).filterScriptText;
+    expect(text).toContain('asetrate=47999.121616,aresample=48000');
+    expect(text).toContain('asetrate=48000.240001,aresample=48000');
+    const exact = recordedProject();
+    for (const m of exact.media) if (m.kind === 'audio') m.clockRatio = 1 + 5e-7;
+    expect(graph(exact).filterScriptText).not.toContain('asetrate');
     const drifting = recordedProject();
     const media = drifting.media.find((m) => m.role === 'microphone');
     if (media) media.clockRatio = 1.00005;
-    const d = graph(drifting);
-    expect(d.filterScriptText).toContain('asetrate=47997.60012,aresample=48000');
+    expect(graph(drifting).filterScriptText).toContain('asetrate=47997.60012,aresample=48000');
   });
 
   it('mixes without normalisation and limits the peak', () => {
@@ -399,6 +409,7 @@ describe('export graph rules (§4.3.9)', () => {
       settings: resolveExportSettings(doc, STANDARD, null),
       outputPath: '/o.mp4',
       filterScriptPath: '/g.txt',
+      audioScriptPath: '/a.txt',
       maskDir: '/m',
     });
     expect(result.ok).toBe(false);
@@ -415,6 +426,7 @@ describe('export graph rules (§4.3.9)', () => {
       settings: resolveExportSettings(empty, STANDARD, null),
       outputPath: '/o.mp4',
       filterScriptPath: '/g.txt',
+      audioScriptPath: '/a.txt',
       maskDir: '/m',
     });
     expect(none.ok).toBe(false);

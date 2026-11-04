@@ -37,6 +37,10 @@ export class PreviewHub implements PreviewSink {
   render(tUs: number, playing: boolean): void {
     this.client?.render(tUs, playing);
   }
+
+  leadUs(): number {
+    return this.client?.leadUs() ?? 0;
+  }
 }
 
 export interface EditorServices {

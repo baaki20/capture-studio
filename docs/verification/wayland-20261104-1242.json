@@ -1,0 +1,249 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-04T12:42:07.500Z",
+  "finishedAt": "2026-11-04T14:20:24.930Z",
+  "machine": {
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v24.22.1",
+    "git": "438b1f4 (phase1-editor, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "soak",
+      "title": "60-minute soak: dropped frames, memory, drift, preview, export",
+      "requirements": ["R1.22", "R1.23", "R1.24", "R1.33", "R1.20"],
+      "humanActions": [
+        "1 portal click (region drag and Enter are automated)",
+        "leave the machine alone for the run"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "411 ms",
+          "detail": "includes starting the second instance (613 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "17.6 s"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "screen dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 10.0 min"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "camera dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 10.0 min"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "main-process event-loop delay, worst minute",
+          "status": "info",
+          "value": "30.5 ms",
+          "detail": "a proxy only: controls-window input latency (< 100 ms) is not measured automatically"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "memory growth after 5.0 min",
+          "status": "pass",
+          "value": "102 MB",
+          "limit": "< 300 MB",
+          "detail": "61 samples; 1626 → peak 1727 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "main working set",
+          "status": "info",
+          "value": "318 → 326 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "Network Service working set",
+          "status": "info",
+          "value": "77 → 77 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "Capture Studio Media working set",
+          "status": "info",
+          "value": "121 → 150 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "shell working set",
+          "status": "info",
+          "value": "129 → 128 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "Audio Service working set",
+          "status": "info",
+          "value": "75 → 75 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "controls working set",
+          "status": "info",
+          "value": "125 → 128 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "engine working set",
+          "status": "info",
+          "value": "465 → 515 MB"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "Video Capture working set",
+          "status": "info",
+          "value": "84 → 84 MB"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "soak start (first 2 min): screen flashes found",
+          "status": "info",
+          "value": "1800"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "soak start (first 2 min): screen ↔ system audio",
+          "status": "pass",
+          "value": "-1.7 ms",
+          "limit": "≤ 40 ms",
+          "detail": "1800 pairs, p10 -35.6 ms, p90 21.4 ms, trend 1.7 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "soak start (first 2 min): screen ↔ mic",
+          "status": "pass",
+          "value": "-22.6 ms",
+          "limit": "≤ 40 ms",
+          "detail": "1800 pairs, p10 -91.6 ms, p90 -19.1 ms, trend -21.6 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "soak at 30 min: screen flashes found",
+          "status": "info",
+          "value": "1800"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "soak at 30 min: screen ↔ system audio",
+          "status": "pass",
+          "value": "-12.3 ms",
+          "limit": "≤ 60 ms",
+          "detail": "1800 pairs, p10 -35.6 ms, p90 21.4 ms, trend 1.7 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "soak at 30 min: screen ↔ mic",
+          "status": "pass",
+          "value": "-49.4 ms",
+          "limit": "≤ 60 ms",
+          "detail": "1800 pairs, p10 -91.6 ms, p90 -19.1 ms, trend -21.6 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "camera: residual drift",
+          "status": "info",
+          "value": "-3.8 ppm",
+          "detail": "first -8.7 ms, last -21.6 ms"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "microphone: residual drift",
+          "status": "info",
+          "value": "-21.6 ppm",
+          "detail": "first -29.9 ms, last -82.4 ms"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "system-audio: residual drift",
+          "status": "info",
+          "value": "1.7 ppm",
+          "detail": "first -1.5 ms, last -1.6 ms"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "the project opens in the editor",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.33",
+          "name": "preview late frames < 1 %",
+          "status": "pass",
+          "value": "0.79 %",
+          "limit": "< 1 %",
+          "detail": "14 of 1772 (superseded 1, stand-in 13)"
+        },
+        {
+          "requirement": "R1.33",
+          "name": "preview audio underruns",
+          "status": "pass",
+          "value": "0",
+          "limit": "0",
+          "detail": "126 chunks, 0 ms late in total"
+        },
+        {
+          "requirement": "R1.23",
+          "name": "export at Draft",
+          "status": "info",
+          "value": "1136 s"
+        },
+        {
+          "requirement": "R1.46",
+          "name": "export duration = timeline ± 1 frame",
+          "status": "pass",
+          "value": "3600.547 s",
+          "limit": "3600.547 s"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261104-124207/projects/Lesson 2026-11-04 12-47.cstudio"
+      ],
+      "startedAt": "2026-11-04T12:46:58.652Z",
+      "durationS": 5606.277
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 0,
+    "error": 0,
+    "not-testable": 0,
+    "info": 0
+  }
+}

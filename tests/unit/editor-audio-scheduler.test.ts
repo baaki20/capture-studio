@@ -162,7 +162,7 @@ describe('gains and rescheduling', () => {
 });
 
 describe('Playback (transport)', () => {
-  function setup() {
+  function setup(leadUs?: number) {
     const docStore = createDocumentStore();
     docStore
       .getState()
@@ -186,7 +186,10 @@ describe('Playback (transport)', () => {
       docStore,
       ui,
       clock,
-      preview: { render: (t, playing) => renders.push([t, playing]) },
+      preview: {
+        render: (t, playing) => renders.push([t, playing]),
+        ...(leadUs === undefined ? {} : { leadUs: () => leadUs }),
+      },
       requestFrame: (cb) => frames.push(cb),
       cancelFrame: () => undefined,
     });
@@ -209,6 +212,20 @@ describe('Playback (transport)', () => {
     const end = timelineDurationUs(docStore.getState().doc!);
     advance(end + 1);
     expect(ui.getState()).toMatchObject({ playing: false, playheadUs: end });
+  });
+
+  it('renders ahead of the heard time by the preview lead; the playhead stays on the heard time', () => {
+    const { ui, playback, renders, advance } = setup(50_000);
+    ui.getState().setPlayhead(5 * S);
+    playback.play(1);
+    advance(6 * S);
+    expect(ui.getState().playheadUs).toBe(6 * S);
+    expect(renders.at(-1)).toEqual([6 * S + 50_000, true]);
+    playback.shuttle(-1);
+    advance(4 * S);
+    expect(renders.at(-1)).toEqual([4 * S - 2 * 50_000, true]);
+    playback.pause();
+    expect(renders.at(-1)).toEqual([4 * S, false]);
   });
 
   it('shuttles at ±2×, pauses with K, steps frames and renders paused seeks', () => {

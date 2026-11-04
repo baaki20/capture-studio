@@ -477,6 +477,35 @@ describe('export job file handling (R1.47)', () => {
     expect(await fs.readdir(dir)).toEqual([]);
   });
 
+  it('fails an FFmpeg that keeps reporting without advancing (watchdog)', async () => {
+    // A deadlocked FFmpeg 7+ still writes progress blocks on schedule, all at the same position.
+    const dir = path.join(work, 'frozen');
+    await fs.mkdir(dir, { recursive: true });
+    const fake = path.join(work, 'frozen-ffmpeg.sh');
+    await fs.writeFile(
+      fake,
+      '#!/bin/sh\nwhile :; do printf "frame=12\\nout_time_us=400000\\nprogress=continue\\n"; sleep 0.05; done\n',
+      { mode: 0o755 },
+    );
+    const error = await runExportJob({
+      ffmpegPath: fake,
+      ffprobePath: ffmpeg.ffprobe,
+      root: project,
+      doc: syntheticProject(6),
+      options: OPTIONS,
+      hardwareEncoder: null,
+      output: path.join(dir, 'frozen.mp4'),
+      overwrite: false,
+      stallTimeoutMs: 500,
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(error).toMatchObject({ code: 'failed' });
+    expect((error as Error).message).toMatch(/stopped responding/);
+    expect(await fs.readdir(dir)).toEqual([]);
+  });
+
   it('leaves no temp file when the process exits mid-export (app quit)', async () => {
     const dir = path.join(work, 'quit');
     await fs.mkdir(dir, { recursive: true });

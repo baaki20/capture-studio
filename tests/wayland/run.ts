@@ -144,12 +144,16 @@ async function requireSpeakerOutput(human: Human, devices: Devices): Promise<voi
   }
 }
 
-/** Chooses the camera, the room mic and the unpluggable mic (remembered between real runs). */
+/**
+ * Chooses the camera, the room mic and the unpluggable mic (remembered between real runs). The
+ * unpluggable mic is asked for only when W4 runs; otherwise the remembered one is kept.
+ */
 async function chooseDevices(
   human: Human,
   app: AppSession,
   file: string,
   mode: Mode,
+  askUnplug: boolean,
 ): Promise<Devices> {
   const all = await app.evalIn<MediaDevice[]>('shell', ENUMERATE);
   const real = (d: MediaDevice) => !['default', 'communications'].includes(d.deviceId);
@@ -195,12 +199,23 @@ async function chooseDevices(
     false,
   );
   // The room mic stays connected through the whole run, so it cannot be the one W4 unplugs.
-  let unplug: MediaDevice | null;
-  for (;;) {
+  const roomIndex = room ? mics.indexOf(room) : -1;
+  let unplug: MediaDevice | null = null;
+  if (!askUnplug) {
+    const kept = mics[byLabel(mics, saved?.unplugMicLabel)] ?? null;
+    unplug = kept === room ? null : kept;
+  }
+  // Offer another mic first, or (none) when the room mic is the only one.
+  let unplugDefault = prefer(mics, saved?.unplugMicLabel, mode === 'real' ? /usb|headset/i : /$^/);
+  if (unplugDefault === roomIndex) {
+    const other = mics.findIndex((_, i) => i !== roomIndex);
+    unplugDefault = other >= 0 ? other : mics.length;
+  }
+  while (askUnplug) {
     unplug = await pick(
       'Microphone you will unplug in W4 (the USB headset)',
       mics,
-      prefer(mics, saved?.unplugMicLabel, mode === 'real' ? /usb|headset/i : /$^/),
+      unplugDefault,
       true,
     );
     if (unplug?.deviceId !== room?.deviceId || !unplug) break;
@@ -286,7 +301,13 @@ async function main(): Promise<void> {
   const setup = await launch();
   let devices: Devices;
   try {
-    devices = await chooseDevices(human, setup, path.join(base, 'devices.json'), mode);
+    devices = await chooseDevices(
+      human,
+      setup,
+      path.join(base, 'devices.json'),
+      mode,
+      scenarios.some((s) => s.id === 'W4'),
+    );
   } finally {
     await setup.quit();
   }

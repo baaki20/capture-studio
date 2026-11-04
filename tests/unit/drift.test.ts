@@ -142,11 +142,22 @@ describe('drift fit', () => {
     expect(Math.abs(fit.ppm + 250)).toBeLessThan(5);
   });
 
-  it('ignores deviations under 20 ppm', () => {
-    const fit = fitClockRatio(checkpoints({ seconds: 1800, ratio: 1.00001, jitterUs: 0 }), RATE);
+  it('ignores deviations under 20 ppm that move the track less than 10 ms', () => {
+    // 10 ppm over 10 minutes: 6 ms.
+    const fit = fitClockRatio(checkpoints({ seconds: 600, ratio: 1.00001, jitterUs: 0 }), RATE);
     expect(fit.decision).toBe('below-threshold');
     expect(fit.clockRatio).toBe(1);
     expect(fit.ppm).toBeCloseTo(10, 3);
+  });
+
+  it('applies a deviation under 20 ppm that adds up over a long recording (the soak mic)', () => {
+    // The 60-minute soak's mic: 18 ppm, 65 ms over the hour, with jittery arrivals.
+    const fit = fitClockRatio(
+      checkpoints({ seconds: 3600, ratio: 1.000018, jitterUs: 12_000, seed: 7 }),
+      RATE,
+    );
+    expect(fit.decision).toBe('applied');
+    expect(Math.abs(fit.ppm - 18)).toBeLessThan(1);
   });
 
   it('applies 30 ppm on clean data exactly', () => {
