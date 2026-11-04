@@ -8,12 +8,14 @@ import type { InvokeResponse } from '../../shared/ipc/contract';
 import { ipcErrorMessage } from '../../shared/ipc/errors';
 import { formatTimecode } from '../../shared/time';
 import { timelineDurationUs } from '../../shared/project/timeline-ops';
+import { connectEditorAutomation, createAutomationHandler } from './automation';
 import { runCommand, type CommandContext } from './commands';
 import { EditorContext, useEditor } from './EditorContext';
 import styles from './Editor.module.css';
 import { InspectorPanel } from './InspectorPanel/InspectorPanel';
 import { commandForKey, isTextEntryTarget, type EditorCommand } from './keyboard';
 import { PreviewPane } from './preview/PreviewPane';
+import { encodePng } from './preview/png';
 import { createEditorServices, type EditorServices } from './services';
 import type { ProjectV1 } from '../../shared/project/schema';
 import { useDocumentStore } from './store/document-store';
@@ -36,6 +38,7 @@ export function App() {
     const api = window.csEditor;
     const created = createEditorServices(api, projectId);
     let cancelled = false;
+    let disconnectAutomation: (() => void) | null = null;
     api.project.open(projectId).then(
       (open) => {
         if (cancelled) return;
@@ -43,6 +46,22 @@ export function App() {
         setOffline(open.offline ?? {});
         document.title = `${open.doc.name} – Capture Studio`;
         setServices(created);
+        if (api.automation) {
+          // Assistant edits (automation socket) go through this window's store and history.
+          const handler = createAutomationHandler({
+            docStore: created.docStore,
+            autosave: created.autosave,
+            capture: async (atUs, maxWidth) => {
+              const picture = await created.preview.current?.capture(atUs);
+              return picture ? encodePng(picture, maxWidth) : null;
+            },
+          });
+          const off = connectEditorAutomation(api.automation, projectId, handler);
+          disconnectAutomation = () => {
+            off();
+            handler.dispose();
+          };
+        }
       },
       (e: unknown) => {
         if (!cancelled) setError(ipcErrorMessage(e));
@@ -93,6 +112,7 @@ export function App() {
     };
     return () => {
       cancelled = true;
+      disconnectAutomation?.();
       created.dispose();
       setServices(null);
     };

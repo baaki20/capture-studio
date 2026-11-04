@@ -1,5 +1,5 @@
 {
-  "//": "Node-side code: main, preload, utility processes, scripts, tests and build configs. The renderer and the pure shared core have their own tsconfig.json next to their sources.",
+  "//": "Node-side code: main, preload, utility processes, the MCP server, scripts, tests and build configs. The renderer and the pure shared core have their own tsconfig.json next to their sources.",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2024"],
@@ -9,6 +9,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/utility/**/*",
+    "src/mcp/**/*",
     "src/shared/**/*",
     "scripts/**/*",
     "tests/**/*",

@@ -34,6 +34,7 @@ npm run dev
 | `npm run gen:icons`     | regenerates the app icons in `build/` from `scripts/icon-art.ts`     |
 | `npm run package:linux` | AppImage and deb in `dist/`                                          |
 | `npm run smoke:linux`   | checks the packages in `dist/` and launches each once (no install)   |
+| `npm run mcp`           | the MCP server for AI assistants (stdio; see below)                  |
 
 Environment switches:
 
@@ -42,6 +43,28 @@ Environment switches:
   development builds only.
 - `CS_FFMPEG_DIR=<dir>` uses FFmpeg binaries from another folder; development builds only.
 - `CS_TEST=1` is the end-to-end test mode; development builds only.
+
+## Assistants (MCP)
+
+AI assistants such as Claude Code can edit and export projects in the running app with natural
+language ("cut the first 3 seconds and remove the long pauses, then export 720p").
+
+1. In the app, turn on **Settings → Assistants → Allow assistants to edit and export projects**.
+   This opens a socket at `<userData>/automation/automation.sock` (private to your user; off by
+   default).
+2. Connect the MCP server (`src/mcp/server.ts`, run with `tsx`). In this repository `.mcp.json`
+   registers it for Claude Code; elsewhere, use the command under **Settings → Diagnostics →
+   Assistants (MCP)**. Set `CS_AUTOMATION_SOCKET` when the app uses another profile
+   (`CS_USER_DATA_DIR`).
+
+Edits run in the project's editor window (it opens when needed): they show at once, each request
+is one undo step labelled "Assistant: …", and autosave saves them. Reads and dry runs never open a
+window. Exports go to the exports folder. The tools: `list_projects`, `get_project`, `cut_range`,
+`trim_ends`, `split_at`, `delete_clips`, `trim_clip`, `move_clip`, `set_track`, `set_face_layout`,
+`set_screen_crop`, `nudge_sync`, `set_marks`, `apply_edits` (several as one step),
+`find_silences`, `remove_silences`, `undo`, `redo`, `get_frame`, `export_project`,
+`export_status`, `cancel_export`. Zooms, captions, transcripts, text and speed changes are not
+editor features yet, so assistants cannot do them either.
 
 ## Packaging (Linux)
 
@@ -62,6 +85,7 @@ ffprobe in `resources/bin/linux-x64/` with their licence, build info and source 
 - `src/renderer` — UI windows and their workers (no Node)
 - `src/utility/media` — the media utility process (FFmpeg runner, probe)
 - `src/shared` — pure TypeScript shared by every process (time, IDs, project schema, naming)
+- `src/mcp` — the MCP server for assistants; reaches the app only through its automation socket
 - `scripts` — FFmpeg fetcher and manifest, JSON Schema and icon generators, package smoke test
 - `build` — packaging resources (app icons)
 - `tests` — `unit`, `integration` (real FFmpeg), `e2e` (Playwright)

@@ -56,11 +56,14 @@ describe('IPC contract (§4.3.11)', () => {
       'recovery.recover',
       'recovery.discard',
       'diag.copyReport',
+      'automation.reply',
+      'automation.ready',
     ]) {
       expect(isInvokeChannel(channel), channel).toBe(true);
     }
     expect(Object.keys(EVENT_CHANNELS).sort()).toEqual(
       [
+        'automation.request',
         'caps.changed',
         'export.done',
         'export.error',

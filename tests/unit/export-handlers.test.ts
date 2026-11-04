@@ -276,6 +276,46 @@ describe('export handlers', () => {
     expect(deps.openPath).toHaveBeenCalledWith('/videos/CS/Exports/Lesson test.mp4');
   });
 
+  it('tells job listeners what the editor hears (automation)', async () => {
+    const { doc, call, jobs, service } = setup();
+    const seen: unknown[] = [];
+    const off = service.onJobEvent((event) => seen.push(event));
+    const { jobId } = await call<{ jobId: string }>('export.start', {
+      projectId: doc.id,
+      options: OPTIONS,
+    });
+    jobs[0]?.options.onProgress?.(0.5);
+    jobs[0]?.result.resolve({
+      output: '/videos/CS/Exports/Lesson test.mp4',
+      encoder: 'libx264',
+      fallback: null,
+      durationUs: 1,
+      sizeBytes: 1,
+      elapsedMs: 1,
+    });
+    await flush();
+    expect(seen).toEqual([
+      { type: 'progress', jobId, fraction: 0.5, etaSec: null },
+      {
+        type: 'done',
+        jobId,
+        outputPath: '/videos/CS/Exports/Lesson test.mp4',
+        encoder: 'libx264',
+        notice: null,
+      },
+    ]);
+    off();
+    const second = await call<{ jobId: string }>('export.start', {
+      projectId: doc.id,
+      options: OPTIONS,
+      overwrite: true,
+    });
+    jobs[1]?.result.reject(new Error('boom'));
+    await flush();
+    expect(seen).toHaveLength(2);
+    expect(second.jobId).not.toBe(jobId);
+  });
+
   it('cancels through the job signal and reports a cancelled error', async () => {
     const { doc, call, jobs, events } = setup();
     const { jobId } = await call<{ jobId: string }>('export.start', {

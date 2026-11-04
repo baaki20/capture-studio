@@ -45,6 +45,32 @@ describe('Diagnostics report (R1.1, R1.4)', async () => {
     expect(report.canRegisterGlobalShortcuts).toBe(false);
   });
 
+  it('shows the automation socket and, in development, how to connect Claude Code', () => {
+    const inputs = {
+      capabilities,
+      versions: report.versions,
+      paths: report.paths,
+      ffmpegError: null,
+      encoders: null,
+      secrets: report.secrets,
+      automation: { enabled: true, listening: true, socketPath: '/u/automation/automation.sock' },
+    };
+    const dev = buildDiagnosticsReport({
+      ...inputs,
+      launch: { isPackaged: false, execPath: '/e/electron', appPath: '/home/a/My Code/cs' },
+    });
+    expect(DiagnosticsReportSchema.parse(dev)).toEqual(dev);
+    expect(dev.automation?.connectCommand).toBe(
+      "claude mcp add capture-studio -e CS_AUTOMATION_SOCKET=/u/automation/automation.sock -- '/home/a/My Code/cs/node_modules/.bin/tsx' '/home/a/My Code/cs/src/mcp/server.ts'",
+    );
+    expect(formatDiagnosticsText(dev)).toContain('automation: on, listening');
+    const packaged = buildDiagnosticsReport({
+      ...inputs,
+      launch: { isPackaged: true, execPath: '/usr/bin/capture-studio', appPath: '/x' },
+    });
+    expect(packaged.automation?.connectCommand).toBeNull();
+  });
+
   it('formats a copyable text report with every capability, path and command', () => {
     const text = formatDiagnosticsText(report);
     for (const key of CAPABILITY_KEYS) expect(text).toContain(`  ${key}: `);

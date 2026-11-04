@@ -198,6 +198,84 @@ describe('document store', () => {
   });
 });
 
+describe('document store batches (assistant edits)', () => {
+  it('records a batch as one undo step with its label, all or nothing', () => {
+    const store = loadedStore();
+    const initial = store.getState().doc!;
+    const voice = trackByName(initial, 'Voice').id;
+    const ok = store.getState().applyBatch(
+      [
+        { type: 'cutRange', inUs: 0, outUs: 2 * S },
+        { type: 'setGain', trackId: voice, gainDb: -6 },
+      ],
+      { label: 'Assistant: tidy up' },
+    );
+    expect(ok.ok).toBe(true);
+    expect(store.getState()).toMatchObject({
+      undoLabel: 'Assistant: tidy up',
+      saveStatus: 'pending',
+      lastError: null,
+    });
+    expect(audioGain(store.getState().doc, 'Voice')).toBe(-6);
+    expect(store.getState().undo()).toBe(true);
+    expect(store.getState().doc).toEqual(initial);
+    expect(store.getState().canUndo).toBe(false);
+
+    const failed = store.getState().applyBatch(
+      [
+        { type: 'setGain', trackId: voice, gainDb: -6 },
+        { type: 'setHidden', trackId: voice, hidden: true },
+      ],
+      { label: 'Assistant: bad' },
+    );
+    expect(!failed.ok && failed.error).toMatchObject({ code: 'wrong-track-type', index: 1 });
+    expect(store.getState().doc).toEqual(initial);
+    // Assistant failures are returned, not shown in the status line.
+    expect(store.getState().lastError).toBeNull();
+  });
+
+  it('never merges with the user’s edits on either side', () => {
+    let t = 0;
+    const store = loadedStore(recordedProject(), () => t);
+    const voice = trackByName(store.getState().doc!, 'Voice').id;
+    store.getState().apply({ type: 'setGain', trackId: voice, gainDb: -1 });
+    store.getState().applyBatch([{ type: 'setGain', trackId: voice, gainDb: -2 }], {
+      label: 'Assistant',
+    });
+    t += 10;
+    store.getState().apply({ type: 'setGain', trackId: voice, gainDb: -3 });
+    store.getState().undo();
+    expect(audioGain(store.getState().doc, 'Voice')).toBe(-2);
+    store.getState().undo();
+    expect(audioGain(store.getState().doc, 'Voice')).toBe(-1);
+  });
+
+  it('refuses during a gesture and on read-only projects', () => {
+    const store = loadedStore();
+    store.getState().beginGesture();
+    const busy = store.getState().applyBatch([{ type: 'split', atUs: 10 * S }], { label: 'x' });
+    expect(!busy.ok && busy.error.code).toBe('busy');
+    store.getState().endGesture();
+    expect(store.getState().applyBatch([{ type: 'split', atUs: 10 * S }], { label: 'x' }).ok).toBe(
+      true,
+    );
+
+    const readOnly = createDocumentStore();
+    readOnly.getState().load(openResult(recordedProject(), 0, true));
+    const refused = readOnly.getState().applyBatch([{ type: 'split', atUs: S }], { label: 'x' });
+    expect(!refused.ok && refused.error.code).toBe('read-only');
+  });
+
+  it('shows assistant notices without hiding a reload notice', () => {
+    const store = loadedStore();
+    store.getState().showAssistantNotice('Assistant: cut');
+    expect(store.getState().notice).toEqual({ kind: 'assistant', message: 'Assistant: cut' });
+    store.getState().markSaveFailed('disk full');
+    store.getState().showAssistantNotice('Assistant: again');
+    expect(store.getState().notice?.kind).toBe('save-failed');
+  });
+});
+
 describe('autosave', () => {
   beforeEach(() => {
     vi.useFakeTimers();

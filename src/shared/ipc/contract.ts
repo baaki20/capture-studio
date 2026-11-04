@@ -12,8 +12,9 @@
 import { z } from 'zod';
 import { CapabilityReportSchema, FfmpegEncoderReportSchema } from '../capabilities/types';
 import { NRectSchema, ProjectV1Schema } from '../project/schema';
-import { SettingsV1Schema } from '../settings/schema';
+import { AutomationSettingsSchema, SettingsV1Schema } from '../settings/schema';
 import { CLI_ACTIONS } from './actions';
+import { EditorAutomationReplySchema, EditorAutomationRequestSchema } from './editor-automation';
 
 export const WINDOW_KINDS = ['shell', 'controls', 'picker', 'editor', 'engine'] as const;
 export type WindowKind = (typeof WINDOW_KINDS)[number];
@@ -58,6 +59,8 @@ export const SettingsPatchSchema = z.strictObject({
   disk: S.disk.partial().strict().optional(),
   theme: S.theme.optional(),
   language: S.language.optional(),
+  /** Only the shell (Settings) may change this; main refuses it from other windows. */
+  automation: AutomationSettingsSchema.partial().strict().optional(),
 });
 export type SettingsPatchPayload = z.infer<typeof SettingsPatchSchema>;
 
@@ -282,6 +285,16 @@ export const DiagnosticsReportSchema = z.object({
   shortcuts: z.array(ShortcutCommandSchema),
   /** False where global shortcuts are known not to work (§9.8): the button is hidden. */
   canRegisterGlobalShortcuts: z.boolean(),
+  /** The automation socket for assistants (added later; optional for compatibility). */
+  automation: z
+    .object({
+      enabled: z.boolean(),
+      listening: z.boolean(),
+      socketPath: z.string(),
+      /** How to register the MCP server with Claude Code; null where it is not available. */
+      connectCommand: z.string().nullable(),
+    })
+    .optional(),
 });
 export type DiagnosticsReport = z.infer<typeof DiagnosticsReportSchema>;
 
@@ -381,6 +394,11 @@ export const INVOKE_CHANNELS = {
   'export.reveal': invoke(z.strictObject({ jobId: Id }), z.undefined(), EDITOR),
   'export.open': invoke(z.strictObject({ jobId: Id }), z.undefined(), EDITOR),
 
+  /** The editor's answer to an `automation.request` (`editor-automation.ts`). */
+  'automation.reply': invoke(EditorAutomationReplySchema, z.undefined(), EDITOR),
+  /** The editor has loaded its project and accepts `automation.request`s. */
+  'automation.ready': invoke(z.strictObject({ projectId: Id }), z.undefined(), EDITOR),
+
   'recovery.list': invoke(NoPayload, z.array(RecoveryCandidateSchema), SHELL),
   'recovery.recover': invoke(z.strictObject({ id: Id }), z.object({ projectId: Id }), SHELL),
   'recovery.discard': invoke(
@@ -447,6 +465,8 @@ export const EVENT_CHANNELS = {
   /** A project's background peaks and thumbnails are done (R1.44). */
   'media.cachesReady': { payload: z.object({ projectId: Id }), windows: ['shell', 'editor'] },
   'caps.changed': { payload: CapabilityReportSchema, windows: UI },
+  /** An assistant edit, undo, snapshot or frame capture for this editor (`editor-automation.ts`). */
+  'automation.request': { payload: EditorAutomationRequestSchema, windows: ['editor'] },
 } as const satisfies Record<string, { payload: z.ZodType; windows: readonly WindowKind[] }>;
 
 export type EventChannel = keyof typeof EVENT_CHANNELS;

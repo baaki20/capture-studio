@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "capture-studio": {
+      "command": "node_modules/.bin/tsx",
+      "args": ["src/mcp/server.ts"]
+    }
+  }
+}

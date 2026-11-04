@@ -110,7 +110,26 @@ export class EditorMedia {
 
   /** `media.peaks` / `media.thumbs`. */
   async asset(kind: AssetKind, projectId: string, mediaId: string): Promise<AssetResult> {
-    const unavailable: AssetResult = { status: 'unavailable', url: null };
+    const { status, url } = await this.locate(kind, projectId, mediaId);
+    return { status, url };
+  }
+
+  /** Like `asset`, with the cache file's absolute path instead of its URL (main-side readers). */
+  async assetFile(
+    kind: AssetKind,
+    projectId: string,
+    mediaId: string,
+  ): Promise<{ status: AssetResult['status']; path: string | null }> {
+    const { status, path: file } = await this.locate(kind, projectId, mediaId);
+    return { status, path: file };
+  }
+
+  private async locate(
+    kind: AssetKind,
+    projectId: string,
+    mediaId: string,
+  ): Promise<AssetResult & { path: string | null }> {
+    const unavailable = { status: 'unavailable', url: null, path: null } as const;
     const root = await this.options.findRoot(projectId);
     if (!root) return unavailable;
     const loaded = await this.options.store.read(root);
@@ -121,16 +140,18 @@ export class EditorMedia {
     const relative = assetRelativePath(kind, mediaId);
     const projectKey = loaded.doc.id;
     // A background job may be writing the file right now: wait for it to finish.
-    if (this.caches.isPending(projectKey, mediaId, kind)) return { status: 'pending', url: null };
-    if (await isFile(path.join(root, ...relative.split('/')))) {
-      return { status: 'ready', url: mediaUrl(loaded.doc.id, relative) };
+    const pending = { status: 'pending', url: null, path: null } as const;
+    if (this.caches.isPending(projectKey, mediaId, kind)) return pending;
+    const file = path.join(root, ...relative.split('/'));
+    if (await isFile(file)) {
+      return { status: 'ready', url: mediaUrl(loaded.doc.id, relative), path: file };
     }
     if (this.caches.hasFailed(projectKey, mediaId, kind)) return unavailable;
     if (!(await isFile(path.join(root, ...media.path.split('/'))))) return unavailable;
 
     // The editor asks for what it shows first: ahead of the background pass.
     void this.caches.ensure({ projectId: projectKey, root, media }, 0);
-    return { status: 'pending', url: null };
+    return pending;
   }
 
   /** `project.relink`: replaces an offline media file with one the user picks. */

@@ -48,6 +48,11 @@ describe('process-boundary lint zones', { timeout: 30_000 }, () => {
       'src/utility/media/x.ts',
       "import { log } from '../../main/logging';\nexport const a = log;\n",
     ],
+    ['src/mcp/x.ts', "import { app } from 'electron';\nexport const a = app;\n"],
+    [
+      'src/mcp/x.ts',
+      "import { ProjectStore } from '../main/projects/project-store';\nexport const a = ProjectStore;\n",
+    ],
   ])('%s: rejects %j', async (file, code) => {
     expect(await boundaryErrors(file, code)).not.toEqual([]);
   });
@@ -60,6 +65,10 @@ describe('process-boundary lint zones', { timeout: 30_000 }, () => {
     ['src/main/x.ts', "import p from '../utility/media/index?modulePath';\nexport const a = p;\n"],
     ['src/main/x.ts', "import path from 'node:path';\nexport const a = path;\n"],
     ['src/utility/media/x.ts', "import { ok } from '../../shared/result';\nexport const a = ok;\n"],
+    [
+      'src/mcp/x.ts',
+      "import net from 'node:net';\nimport { ok } from '../shared/result';\nexport const a = [net, ok];\n",
+    ],
   ])('%s: allows %j', async (file, code) => {
     expect(await boundaryErrors(file, code)).toEqual([]);
   });

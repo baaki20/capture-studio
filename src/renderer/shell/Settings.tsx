@@ -238,6 +238,26 @@ export function Settings() {
           </span>
         </Field>
       </fieldset>
+
+      <fieldset className={styles.group}>
+        <legend>Assistants</legend>
+        <Field
+          label="Automation"
+          hint="Lets AI assistants on this computer (such as Claude Code through the Capture Studio MCP server) open, edit and export your projects. Their edits appear in the editor and can be undone. Diagnostics shows how to connect one."
+        >
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              data-testid="automation-enabled"
+              checked={settings.automation.enabled}
+              onChange={(e) =>
+                save(api.settings.patch({ automation: { enabled: e.target.checked } }))
+              }
+            />
+            Allow assistants to edit and export projects
+          </label>
+        </Field>
+      </fieldset>
     </section>
   );
 }

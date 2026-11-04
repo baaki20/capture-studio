@@ -178,7 +178,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** What happens to a running export, for main-side listeners (the automation socket). */
+export type ExportJobEvent =
+  | { type: 'progress'; jobId: string; fraction: number | null; etaSec: number | null }
+  | { type: 'done'; jobId: string; outputPath: string; encoder: string; notice: string | null }
+  | { type: 'error'; jobId: string; message: string; cancelled: boolean };
+
 export class ExportService {
+  private readonly jobListeners = new Set<(event: ExportJobEvent) => void>();
   private readonly chosen = new Map<string, ChosenTarget>();
   private readonly running = new Map<string, RunningExport>();
   /** Finished exports, for reveal/open (jobId → output path). */
@@ -358,6 +365,22 @@ export class ExportService {
     this.running.get(jobId)?.controller.abort();
   }
 
+  /** Progress, completion and failure of every export, besides the editor events. */
+  onJobEvent(listener: (event: ExportJobEvent) => void): () => void {
+    this.jobListeners.add(listener);
+    return () => this.jobListeners.delete(listener);
+  }
+
+  private emit(event: ExportJobEvent): void {
+    for (const listener of [...this.jobListeners]) {
+      try {
+        listener(event);
+      } catch (error) {
+        this.deps.logger.warn('export: job listener failed', error);
+      }
+    }
+  }
+
   private async run(
     jobId: string,
     controller: AbortController,
@@ -374,11 +397,9 @@ export class ExportService {
           // A hardware fallback restarts from 0: restart the ETA clock too.
           if (fraction !== null && fraction + 0.05 < last) startedAt = this.now();
           if (fraction !== null) last = fraction;
-          router.broadcast('export.progress', {
-            jobId,
-            fraction,
-            etaSec: estimateEtaSec(fraction, this.now() - startedAt),
-          });
+          const etaSec = estimateEtaSec(fraction, this.now() - startedAt);
+          router.broadcast('export.progress', { jobId, fraction, etaSec });
+          this.emit({ type: 'progress', jobId, fraction, etaSec });
         },
       });
       succeeded = true;
@@ -396,15 +417,20 @@ export class ExportService {
         encoder: result.encoder,
         notice,
       });
+      this.emit({
+        type: 'done',
+        jobId,
+        outputPath: result.output,
+        encoder: result.encoder,
+        notice,
+      });
     } catch (error) {
       const cancelled =
         controller.signal.aborted || (error as { cancelled?: unknown }).cancelled === true;
       if (!cancelled) logger.error(`export ${jobId} failed`, error);
-      router.broadcast('export.error', {
-        jobId,
-        message: cancelled ? 'Export cancelled.' : errorMessage(error),
-        cancelled,
-      });
+      const message = cancelled ? 'Export cancelled.' : errorMessage(error);
+      router.broadcast('export.error', { jobId, message, cancelled });
+      this.emit({ type: 'error', jobId, message, cancelled });
     } finally {
       // The utility deletes its temp output itself unless it died first (crash, kill). Still
       // listed as running meanwhile, so a new export to the same file cannot start and lose its

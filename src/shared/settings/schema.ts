@@ -20,6 +20,12 @@ export const DEFAULT_DISK_STOP_BYTES = 500_000_000;
 /** Imported project folders remembered outside the projects folder. */
 export const MAX_IMPORTED_PROJECTS = 1000;
 
+/**
+ * Assistants (MCP) driving the app through the automation socket (added later). Off until the
+ * user turns it on; main listens on the socket only while `enabled` is true.
+ */
+export const AutomationSettingsSchema = z.object({ enabled: z.boolean() });
+
 export const SettingsV1Schema = z.object({
   schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
   projectsDir: z.string().min(1),
@@ -66,6 +72,7 @@ export const SettingsV1Schema = z.object({
   library: z
     .object({ importedRoots: z.array(z.string().min(1)).max(MAX_IMPORTED_PROJECTS) })
     .default({ importedRoots: [] }),
+  automation: AutomationSettingsSchema.default({ enabled: false }),
 });
 
 export type Settings = z.infer<typeof SettingsV1Schema>;
@@ -103,6 +110,7 @@ export function createDefaultSettings(paths: SettingsPathDefaults): Settings {
     theme: 'system',
     language: 'en',
     library: { importedRoots: [] },
+    automation: { enabled: false },
   };
 }
 
