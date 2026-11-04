@@ -1,12 +1,17 @@
 /**
- * `project.json` schema v1 (§4.4.1). Zod is the source of truth; the JSON Schema in
- * `docs/schemas/project-1.schema.json` is generated from it by `scripts/gen-schema.ts`.
+ * `project.json` schema (§4.4.1). Zod is the source of truth; the JSON Schema in
+ * `docs/schemas/project-<version>.schema.json` is generated from it by `scripts/gen-schema.ts`.
+ *
+ * Format 2 (Phase 2, the teaching editor) only adds optional fields, marked "v2" below. An absent
+ * field means the Phase 1 behaviour, so migrating a v1 file changes nothing but the version. The
+ * version still goes up because a Phase 1 build would silently drop these fields on save; with
+ * the bump it opens a v2 project read-only instead (R1.30).
  */
 import { z } from 'zod';
 import { checkProjectInvariants } from './invariants';
 
 export const PROJECT_FORMAT = 'capture-studio.project';
-export const PROJECT_FORMAT_VERSION = 1;
+export const PROJECT_FORMAT_VERSION = 2;
 /** Folder-bundle extension (§1.6). Kept in one place so a rename is a one-line change. */
 export const PROJECT_EXTENSION = '.cstudio';
 export const PROJECT_FILE_NAME = 'project.json';
@@ -37,6 +42,35 @@ const RelativePosixPath = z.string().regex(
 const HexColor = z
   .string()
   .regex(/^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$/, 'must be #RRGGBB or #RRGGBBAA');
+
+/** A fraction in 0–1. */
+const Fraction = z.number().min(0).max(1);
+
+/** v2: how a keyframed value moves from one keyframe to the next (`easing.ts`). */
+export const EASINGS = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'hold'] as const;
+const EasingSchema = z.enum(EASINGS).describe('Curve from this keyframe to the next');
+
+/** v2: a rectangle in fractions of the canvas, inside it. A zero side is allowed (arrows). */
+export const FRectSchema = z.object({
+  x: Fraction,
+  y: Fraction,
+  width: Fraction,
+  height: Fraction,
+});
+
+/** v2: a drop shadow. Sizes are fractions of the canvas's short side. */
+export const ShadowSchema = z.object({
+  blur: z.number().min(0).max(0.1),
+  offsetX: z.number().min(-0.1).max(0.1),
+  offsetY: z.number().min(-0.1).max(0.1),
+  color: HexColor,
+});
+
+/** v2: a border. The width is a fraction of the canvas's short side. */
+export const BorderSchema = z.object({
+  width: z.number().min(0).max(0.05),
+  color: HexColor,
+});
 
 /** Integer rectangle in source pixels. */
 export const NRectSchema = z.object({
@@ -139,6 +173,30 @@ export const ClipSchema = z.object({
   sourceStartUs: Us.describe("In the media's reference clock (session clock for recordings)"),
   sourceEndUs: Us.describe("In the media's reference clock (session clock for recordings)"),
   linkId: prefixedId('lnk').nullable().describe('Clips sharing a linkId edit together'),
+  durationUs: z
+    .int()
+    .positive()
+    .optional()
+    .describe(
+      'v2: length on the timeline when it differs from the source length. Speed is ' +
+        '(sourceEndUs − sourceStartUs) / durationUs, in 0.25–4; audio keeps its pitch',
+    ),
+  freeze: z
+    .boolean()
+    .optional()
+    .describe('v2: hold the picture at sourceStartUs for durationUs; silent'),
+  gainDb: z.number().min(-60).max(12).optional().describe('v2: clip gain on top of the track gain'),
+  fadeInUs: NonNegativeUs.optional().describe('v2: audio fade-in length'),
+  fadeOutUs: NonNegativeUs.optional().describe('v2: audio fade-out length'),
+  transitionIn: z
+    .object({
+      kind: z.enum(['fade-color', 'dissolve', 'slide']),
+      durationUs: z.int().positive(),
+      color: HexColor.optional().describe('fade-color only; black when absent'),
+      direction: z.enum(['left', 'right', 'up', 'down']).optional().describe('slide only'),
+    })
+    .optional()
+    .describe('v2: transition from the previous clip on the track (or from nothing)'),
 });
 
 export const ScreenLayoutSchema = z.object({
@@ -158,6 +216,20 @@ export const OverlayLayoutSchema = z.object({
   crop: NRectSchema.nullable().describe(
     'null = full frame (rectangle/rounded) or centred square (circle)',
   ),
+  zoom: z.number().min(1).max(4).optional().describe('v2: zoom inside the shape, 1 when absent'),
+  border: BorderSchema.optional().describe('v2'),
+  shadow: ShadowSchema.optional().describe('v2'),
+});
+
+/** v2: where the face goes. `side-by-side` puts the screen left and the face right. */
+export const FACE_MODES = ['overlay', 'full', 'side-by-side', 'hidden'] as const;
+
+/** v2: the face layout at one time; between keyframes the geometry eases (`scene.ts`). */
+export const LayoutKeyframeSchema = z.object({
+  tUs: NonNegativeUs.describe('Timeline time'),
+  mode: z.enum(FACE_MODES),
+  layout: OverlayLayoutSchema.describe('Overlay geometry and style (all modes use the style)'),
+  easing: EasingSchema,
 });
 
 const TrackBase = {
@@ -173,6 +245,10 @@ export const VideoTrackSchema = z.object({
   type: z.literal('video'),
   hidden: z.boolean(),
   layout: z.discriminatedUnion('kind', [ScreenLayoutSchema, OverlayLayoutSchema]),
+  layoutKeyframes: z
+    .array(LayoutKeyframeSchema)
+    .optional()
+    .describe('v2, overlay tracks only: sorted by tUs; absent = `layout` in overlay mode'),
 });
 
 export const AudioTrackSchema = z.object({
@@ -181,9 +257,172 @@ export const AudioTrackSchema = z.object({
   gainDb: z.number().min(-60).max(12),
   muted: z.boolean(),
   solo: z.boolean(),
+  volumeKeyframes: z
+    .array(
+      z.object({ tUs: NonNegativeUs, gainDb: z.number().min(-60).max(12), easing: EasingSchema }),
+    )
+    .optional()
+    .describe('v2: sorted by tUs; added to gainDb'),
+  cleanup: z
+    .object({
+      noise: z.enum(['off', 'light', 'strong']),
+      normalize: z.boolean().describe('Loudness normalization to −16 LUFS on export'),
+      duck: z
+        .object({
+          byTrackId: prefixedId('trk').describe('The voice track this track ducks under'),
+          amountDb: z.number().min(-40).max(0),
+          attackMs: z.int().min(1).max(2000),
+          releaseMs: z.int().min(1).max(5000),
+        })
+        .optional(),
+    })
+    .optional()
+    .describe('v2'),
 });
 
 export const TrackSchema = z.discriminatedUnion('type', [VideoTrackSchema, AudioTrackSchema]);
+
+// ---------------------------------------------------------------------------------------------
+// v2 objects: text, callouts and privacy regions drawn above the video tracks.
+
+/** v2: fonts bundled with the app, so preview and export draw identical glyphs. */
+export const OBJECT_FONTS = ['sans', 'serif', 'mono', 'handwriting'] as const;
+
+const StrokeSchema = z.object({
+  color: HexColor,
+  width: z.number().min(0).max(0.05).describe('Fraction of the canvas short side'),
+});
+
+const ObjectBase = {
+  id: prefixedId('obj'),
+  inUs: NonNegativeUs,
+  outUs: NonNegativeUs,
+  box: FRectSchema,
+  opacity: Fraction.optional().describe('1 when absent'),
+  fadeInUs: NonNegativeUs.optional(),
+  fadeOutUs: NonNegativeUs.optional(),
+  keyframes: z
+    .array(z.object({ tUs: NonNegativeUs, box: FRectSchema, easing: EasingSchema }))
+    .optional()
+    .describe('Moves the box; timeline times inside [inUs, outUs], sorted'),
+};
+
+export const TextObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('text'),
+  text: z.string().max(2000),
+  preset: z.string().optional().describe('Style preset it came from, e.g. "title"'),
+  style: z.object({
+    font: z.enum(OBJECT_FONTS),
+    size: z.number().min(0.01).max(0.5).describe('Fraction of the canvas height'),
+    color: HexColor,
+    bold: z.boolean(),
+    italic: z.boolean(),
+    align: z.enum(['left', 'center', 'right']),
+    background: HexColor.optional(),
+    outline: StrokeSchema.optional(),
+  }),
+});
+
+export const ShapeObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.enum(['rectangle', 'ellipse']),
+  stroke: StrokeSchema,
+  fill: HexColor.optional(),
+});
+
+export const ArrowObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('arrow'),
+  tail: z
+    .enum(['top-left', 'top-right', 'bottom-left', 'bottom-right'])
+    .describe('Corner of the box the arrow starts at; the head is at the opposite corner'),
+  stroke: StrokeSchema,
+  head: z.enum(['triangle', 'open', 'none']),
+});
+
+export const StepObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('step'),
+  value: z.int().min(1).max(999),
+  format: z.enum(['1', 'A', 'a', 'I', 'i']),
+  fill: HexColor,
+  textColor: HexColor,
+});
+
+export const HighlightObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('highlight'),
+  color: HexColor,
+});
+
+export const SpotlightObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('spotlight'),
+  shape: z.enum(['rectangle', 'ellipse']),
+  dim: Fraction.describe('Opacity of the darkening outside the box'),
+});
+
+export const BlurObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('blur'),
+  radius: z.number().min(0.001).max(0.05).describe('Fraction of the canvas short side'),
+});
+
+export const PixelateObjectSchema = z.object({
+  ...ObjectBase,
+  kind: z.literal('pixelate'),
+  blockSize: z.number().min(0.002).max(0.1).describe('Fraction of the canvas short side'),
+});
+
+export const TimelineObjectSchema = z.union([
+  TextObjectSchema,
+  ShapeObjectSchema,
+  ArrowObjectSchema,
+  StepObjectSchema,
+  HighlightObjectSchema,
+  SpotlightObjectSchema,
+  BlurObjectSchema,
+  PixelateObjectSchema,
+]);
+
+export const ObjectTrackSchema = z.object({
+  id: prefixedId('trk'),
+  name: z.string(),
+  locked: z.boolean(),
+  hidden: z.boolean(),
+  items: z.array(TimelineObjectSchema).describe('Drawn in array order; times may overlap'),
+});
+
+/** v2: zoom and pan. `rect` is the part of the canvas that fills the frame. */
+export const CameraKeyframeSchema = z.object({
+  tUs: NonNegativeUs,
+  rect: FRectSchema,
+  easing: EasingSchema,
+});
+
+/** v2: background, padding, rounded corners and shadow around the screen layer. */
+export const BeautifySchema = z.object({
+  background: z.discriminatedUnion('type', [
+    z.object({ type: z.literal('color'), color: HexColor }),
+    z.object({
+      type: z.literal('gradient'),
+      from: HexColor,
+      to: HexColor,
+      angleDeg: z.number().min(0).max(360),
+    }),
+  ]),
+  padding: z.number().min(0).max(0.3).describe('Fraction of the canvas short side'),
+  cornerRadius: z.number().min(0).max(0.2).describe('Fraction of the canvas short side'),
+  shadow: ShadowSchema.optional(),
+});
+
+export const MarkerSchema = z.object({
+  id: prefixedId('mrk'),
+  tUs: NonNegativeUs,
+  label: z.string().max(200),
+  chapter: z.boolean().describe('Exported as an MP4 chapter'),
+});
 
 export const FRAME_RATES = [24, 25, 30, 50, 60] as const;
 
@@ -199,6 +438,16 @@ export const TimelineSchema = z.object({
   frameRate: z.literal(FRAME_RATES),
   marks: z.object({ inUs: Us.nullable(), outUs: Us.nullable() }),
   tracks: z.array(TrackSchema).describe('Bottom-to-top render order for video'),
+  objectTracks: z
+    .array(ObjectTrackSchema)
+    .optional()
+    .describe('v2: drawn above every video track, bottom to top'),
+  camera: z
+    .array(CameraKeyframeSchema)
+    .optional()
+    .describe('v2: sorted by tUs; zooms everything except face overlays'),
+  beautify: BeautifySchema.optional().describe('v2: replaces the plain canvas background'),
+  markers: z.array(MarkerSchema).optional().describe('v2: sorted by tUs'),
 });
 
 export const ExportPrefsSchema = z.object({
@@ -226,10 +475,10 @@ const projectShape = {
 };
 
 /** Structure only, without the cross-field invariants. */
-export const ProjectV1StructureSchema = z.object(projectShape);
+export const ProjectStructureSchema = z.object(projectShape);
 
 /** The full v1 schema: structure plus the invariants of §4.4.1. */
-export const ProjectV1Schema = ProjectV1StructureSchema.superRefine((project, ctx) => {
+export const ProjectSchema = ProjectStructureSchema.superRefine((project, ctx) => {
   for (const violation of checkProjectInvariants(project)) {
     ctx.addIssue({
       code: 'custom',
@@ -254,4 +503,15 @@ export type Track = z.infer<typeof TrackSchema>;
 export type Timeline = z.infer<typeof TimelineSchema>;
 export type FrameRate = (typeof FRAME_RATES)[number];
 export type ExportPrefs = z.infer<typeof ExportPrefsSchema>;
-export type ProjectV1 = z.infer<typeof ProjectV1StructureSchema>;
+export type Easing = (typeof EASINGS)[number];
+export type FRect = z.infer<typeof FRectSchema>;
+export type Shadow = z.infer<typeof ShadowSchema>;
+export type Border = z.infer<typeof BorderSchema>;
+export type FaceMode = (typeof FACE_MODES)[number];
+export type LayoutKeyframe = z.infer<typeof LayoutKeyframeSchema>;
+export type TimelineObject = z.infer<typeof TimelineObjectSchema>;
+export type ObjectTrack = z.infer<typeof ObjectTrackSchema>;
+export type CameraKeyframe = z.infer<typeof CameraKeyframeSchema>;
+export type Beautify = z.infer<typeof BeautifySchema>;
+export type Marker = z.infer<typeof MarkerSchema>;
+export type Project = z.infer<typeof ProjectStructureSchema>;

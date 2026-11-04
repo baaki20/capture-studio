@@ -22,7 +22,7 @@
  * - `overlayDestRect(layout, canvas, frame)`: the bounding box to draw and hit-test.
  * - `layoutFromDestRect(layout, rect, canvas, frame)`: a dragged or resized box back to a layout.
  */
-import type { NRect, OverlayLayout } from './schema';
+import type { Border, NRect, OverlayLayout, Shadow } from './schema';
 
 export interface Size {
   width: number;
@@ -52,6 +52,13 @@ export const FACE_WIDTH_MAX = 0.5;
 /** Rounded-rectangle radius bounds: fraction of the overlay's short side. */
 export const FACE_RADIUS_MIN = 0;
 export const FACE_RADIUS_MAX = 0.5;
+/** v2 face zoom inside the shape. */
+export const FACE_ZOOM_MIN = 1;
+export const FACE_ZOOM_MAX = 4;
+/** v2 border and shadow bounds: fractions of the canvas's short side. */
+export const BORDER_WIDTH_MAX = 0.05;
+export const SHADOW_BLUR_MAX = 0.1;
+export const SHADOW_OFFSET_MAX = 0.1;
 /** Corner-preset margin: fraction of the canvas's short side (matches `defaultFaceLayout`). */
 export const FACE_MARGIN = 0.03;
 
@@ -134,6 +141,26 @@ export function clampOverlayLayout(
     centerX: clamp(layout.centerX, Math.min(0.5, halfW), Math.max(0.5, 1 - halfW)),
     centerY: clamp(layout.centerY, Math.min(0.5, halfH), Math.max(0.5, 1 - halfH)),
     crop: layout.crop ? clampRectToFrame(layout.crop, frame) : null,
+    ...(layout.zoom === undefined
+      ? {}
+      : { zoom: clamp(layout.zoom, FACE_ZOOM_MIN, FACE_ZOOM_MAX) }),
+    ...(layout.border === undefined ? {} : { border: clampBorder(layout.border) }),
+    ...(layout.shadow === undefined ? {} : { shadow: clampShadow(layout.shadow) }),
+  };
+}
+
+/** Keeps a border inside the schema's range. */
+export function clampBorder(border: Border): Border {
+  return { ...border, width: clamp(border.width, 0, BORDER_WIDTH_MAX) };
+}
+
+/** Keeps a shadow inside the schema's range. */
+export function clampShadow(shadow: Shadow): Shadow {
+  return {
+    ...shadow,
+    blur: clamp(shadow.blur, 0, SHADOW_BLUR_MAX),
+    offsetX: clamp(shadow.offsetX, -SHADOW_OFFSET_MAX, SHADOW_OFFSET_MAX),
+    offsetY: clamp(shadow.offsetY, -SHADOW_OFFSET_MAX, SHADOW_OFFSET_MAX),
   };
 }
 

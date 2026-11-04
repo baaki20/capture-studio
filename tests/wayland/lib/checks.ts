@@ -8,7 +8,7 @@ import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { MetricsFile } from '../../../src/main/diagnostics/metrics-sampler';
 import { parseProject } from '../../../src/shared/project/migrations';
-import type { ProjectV1 } from '../../../src/shared/project/schema';
+import type { Project } from '../../../src/shared/project/schema';
 import type { ProjectSyncReport } from '../../sync/analysis';
 import { BIN_DIR } from './app';
 
@@ -89,7 +89,7 @@ export interface StreamLogStats {
 
 export interface ProjectInfo {
   root: string;
-  doc: ProjectV1 | null;
+  doc: Project | null;
   error: string | null;
   media: MediaFileInfo[];
   log: { streams: StreamLogStats[]; notices: { level: string; message: string }[] } | null;

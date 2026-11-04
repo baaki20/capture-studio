@@ -10,7 +10,7 @@
  * - In memory only.
  */
 import { applyPatches, type Patch } from 'immer';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 
 export const DEFAULT_HISTORY_LIMIT = 500;
 export const MIN_HISTORY_LIMIT = 200;
@@ -132,7 +132,7 @@ export class History {
   }
 
   /** Reverts the newest step; returns the restored document, or null when there is none. */
-  undo(doc: ProjectV1): ProjectV1 | null {
+  undo(doc: Project): Project | null {
     const entry = this.undoStack.pop();
     if (!entry) return null;
     entry.sealed = true;
@@ -141,7 +141,7 @@ export class History {
   }
 
   /** Re-applies the newest undone step; returns the document, or null when there is none. */
-  redo(doc: ProjectV1): ProjectV1 | null {
+  redo(doc: Project): Project | null {
     const entry = this.redoStack.pop();
     if (!entry) return null;
     this.undoStack.push(entry);

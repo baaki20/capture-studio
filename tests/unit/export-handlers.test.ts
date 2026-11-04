@@ -12,7 +12,7 @@ import { exportTempName, exportTempOwner } from '../../src/shared/export/temp-na
 import type { EventChannel, EventPayload, ExportOptions } from '../../src/shared/ipc/contract';
 import type { JobResult } from '../../src/shared/ipc/media-utility';
 import { silentLogger } from '../../src/shared/logger';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import {
   estimateEtaSec,
@@ -189,7 +189,7 @@ describe('export handlers', () => {
 
   it('exports the snapshot it was given and picks the encoder from the probe', async () => {
     const { doc, call, jobs } = setup();
-    const snapshot: ProjectV1 = { ...doc, name: 'Edited' };
+    const snapshot: Project = { ...doc, name: 'Edited' };
     await call('export.start', { projectId: doc.id, options: OPTIONS, doc: snapshot });
     expect(jobs[0]?.job.doc).toBe(snapshot);
     expect(jobs[0]?.job.root).toBe('/projects/Lesson.cstudio');

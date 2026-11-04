@@ -1,5 +1,5 @@
 /**
- * Writes docs/schemas/project-1.schema.json from the zod schema (spec §4.2, §4.4.1).
+ * Writes docs/schemas/project-<version>.schema.json from the zod schema (spec §4.2, §4.4.1).
  * `npm run gen:schema`; a unit test fails when the committed file is out of date.
  */
 import { promises as fs } from 'node:fs';

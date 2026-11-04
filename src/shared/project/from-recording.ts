@@ -29,8 +29,8 @@ import {
   MediaSchema,
   PROJECT_FORMAT,
   PROJECT_FORMAT_VERSION,
-  ProjectV1Schema,
-  ProjectV1StructureSchema,
+  ProjectSchema,
+  ProjectStructureSchema,
   RecordingInfoSchema,
   type AudioTrack,
   type Clip,
@@ -39,7 +39,7 @@ import {
   type MediaSync,
   type NRect,
   type OverlayLayout,
-  type ProjectV1,
+  type Project,
   type RecordingInfo,
   type Track,
   type VideoTrack,
@@ -89,9 +89,9 @@ export const RecordedStreamSchema = z.object({
 /** What the session manager records during a session (and finalize completes). */
 export const RecordingManifestSchema = z.object({
   version: z.literal(RECORDING_MANIFEST_VERSION),
-  projectId: ProjectV1StructureSchema.shape.id,
-  name: ProjectV1StructureSchema.shape.name,
-  createdAt: ProjectV1StructureSchema.shape.createdAt,
+  projectId: ProjectStructureSchema.shape.id,
+  name: ProjectStructureSchema.shape.name,
+  createdAt: ProjectStructureSchema.shape.createdAt,
   appVersion: z.string(),
   recording: RecordingInfoSchema.omit({ clockMode: true }),
   frameRate: z.literal(FRAME_RATES),
@@ -300,7 +300,7 @@ function toMedia(stream: RecordedStream, id: string): Media {
 export function projectFromRecording(
   manifest: RecordingManifest,
   options: FromRecordingOptions = {},
-): Result<ProjectV1, FromRecordingError> {
+): Result<Project, FromRecordingError> {
   const generate = options.generateId ?? ulid;
   const id = (kind: Parameters<typeof newId>[0]) => newId(kind, generate);
   const rec = manifest.recording;
@@ -445,7 +445,7 @@ export function projectFromRecording(
     tracks.push(audioTrack('System audio', systemComponent.id, clipsFor(system)));
   }
 
-  const project: ProjectV1 = {
+  const project: Project = {
     format: PROJECT_FORMAT,
     formatVersion: PROJECT_FORMAT_VERSION,
     id: manifest.projectId,
@@ -472,7 +472,7 @@ export function projectFromRecording(
     extensions: {},
   };
 
-  const parsed = ProjectV1Schema.safeParse(project);
+  const parsed = ProjectSchema.safeParse(project);
   if (!parsed.success) {
     return err({
       code: 'invalid-project',

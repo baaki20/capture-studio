@@ -9,7 +9,7 @@
  *   re-render (`onInvalidate`), so a paused preview settles on the exact frame.
  */
 import { layersAt, type VideoLayer } from '../../../shared/project/render-plan';
-import type { Media, ProjectV1 } from '../../../shared/project/schema';
+import type { Media, Project } from '../../../shared/project/schema';
 import type { CompositeItem, LumaProbe, PixelCapture, Size } from './compositor-webgl';
 import type { DecoderPool } from './decoder-pool';
 import type { CacheableFrame } from './frame-cache';
@@ -26,7 +26,7 @@ export interface CompositorLike {
 }
 
 export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
-  private doc: ProjectV1 | null = null;
+  private doc: Project | null = null;
   private media = new Map<string, Media>();
   private lastT: number | null = null;
   private waitingFor = new Set<string>();
@@ -46,7 +46,7 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
     return this.lastT;
   }
 
-  setDoc(doc: ProjectV1, mediaUrls: Record<string, string>): void {
+  setDoc(doc: Project, mediaUrls: Record<string, string>): void {
     this.doc = doc;
     this.media = new Map(doc.media.map((m) => [m.id, m]));
     this.pool.setSources(

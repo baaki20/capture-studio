@@ -38,7 +38,7 @@ import {
   type MediaUtilityEvent,
   type SystemAudioResult,
 } from '../../src/shared/ipc/media-utility';
-import { ProjectV1Schema, type ProjectV1 } from '../../src/shared/project/schema';
+import { ProjectSchema, type Project } from '../../src/shared/project/schema';
 import { createDefaultSettings, type Settings } from '../../src/shared/settings/schema';
 
 const T0 = 1_761_300_000_000_000; // engine clock µs at t0 (absolute, like performance.timeOrigin)
@@ -457,8 +457,8 @@ async function projectDirs(h: Harness): Promise<string[]> {
   );
 }
 
-async function readProject(root: string): Promise<ProjectV1> {
-  return ProjectV1Schema.parse(
+async function readProject(root: string): Promise<Project> {
+  return ProjectSchema.parse(
     JSON.parse(await fs.readFile(path.join(root, 'project.json'), 'utf8')),
   );
 }

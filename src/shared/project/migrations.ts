@@ -1,12 +1,18 @@
 /**
- * Project-file migrations and loading. v1 is the first format, so the chain is empty; later
- * formats append steps here (see `shared/migrate.ts`).
+ * Project-file migrations and loading. Each format appends one step here (see
+ * `shared/migrate.ts`).
  */
 import type { z } from 'zod';
 import { defineMigrations, migrate, type Migration } from '../migrate';
-import { PROJECT_FORMAT, PROJECT_FORMAT_VERSION, ProjectV1Schema, type ProjectV1 } from './schema';
+import { PROJECT_FORMAT, PROJECT_FORMAT_VERSION, ProjectSchema, type Project } from './schema';
 
-export const PROJECT_MIGRATIONS: readonly Migration[] = [];
+export const PROJECT_MIGRATIONS: readonly Migration[] = [
+  {
+    from: 1,
+    description: 'v1 → v2: teaching-editor fields are optional, so nothing else changes',
+    up: (doc) => doc,
+  },
+];
 
 export const projectMigrations = defineMigrations({
   versionKey: 'formatVersion',
@@ -17,7 +23,7 @@ export const projectMigrations = defineMigrations({
 export type ProjectParseResult =
   | {
       ok: true;
-      project: ProjectV1;
+      project: Project;
       /** True when the file's major version is newer than this app (R1.30): never save it. */
       readOnly: boolean;
       fileFormatVersion: number;
@@ -33,7 +39,7 @@ export type ProjectParseResult =
 /**
  * Migrates and validates a parsed `project.json`.
  *
- * A file with a newer major `formatVersion` is validated as if it were v1. If that succeeds it
+ * A file with a newer major `formatVersion` is validated as the current format. If that succeeds it
  * opens read-only (R1.30); otherwise it is reported as `newer-incompatible`.
  */
 export function parseProject(raw: unknown): ProjectParseResult {
@@ -56,7 +62,7 @@ export function parseProject(raw: unknown): ProjectParseResult {
       return { ok: false, reason: 'invalid', message: outcome.reason, issues: [] };
 
     case 'newer': {
-      const parsed = ProjectV1Schema.safeParse({
+      const parsed = ProjectSchema.safeParse({
         ...outcome.doc,
         formatVersion: PROJECT_FORMAT_VERSION,
       });
@@ -79,12 +85,12 @@ export function parseProject(raw: unknown): ProjectParseResult {
 
     case 'current':
     case 'migrated': {
-      const parsed = ProjectV1Schema.safeParse(outcome.doc);
+      const parsed = ProjectSchema.safeParse(outcome.doc);
       if (!parsed.success) {
         return {
           ok: false,
           reason: 'invalid',
-          message: 'project.json does not match schema v1',
+          message: `project.json does not match schema v${String(PROJECT_FORMAT_VERSION)}`,
           issues: parsed.error.issues,
         };
       }

@@ -1,11 +1,11 @@
 /** Messages between the editor page and the preview worker (`preview.worker.ts`). */
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import type { LumaProbe, PixelCapture } from './compositor-webgl';
 
 export type PreviewRequest =
   | { type: 'init'; canvas: OffscreenCanvas }
   /** The document to render (after every edit) and the `cs-media://` URL of each media. */
-  | { type: 'doc'; doc: ProjectV1; mediaUrls: Record<string, string> }
+  | { type: 'doc'; doc: Project; mediaUrls: Record<string, string> }
   /** Render timeline time `tUs`; `playing` lets the worker decode ahead and skip late frames. */
   | { type: 'render'; tUs: number; playing: boolean }
   /** Render `tUs` now and report the picture's luma (tests, diagnostics). */

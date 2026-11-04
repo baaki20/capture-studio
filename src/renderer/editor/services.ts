@@ -5,7 +5,7 @@
  * the preview pane attaches its worker to.
  */
 import type { EditorPreloadApi } from '../../shared/ipc/preload-api';
-import type { ProjectV1 } from '../../shared/project/schema';
+import type { Project } from '../../shared/project/schema';
 import { openAudioSource } from './audio/audio-source';
 import { AudioScheduler } from './audio/scheduler';
 import { Playback, type PreviewSink } from './playback';
@@ -18,7 +18,7 @@ import { createUiStore, type UiStore } from './ui-store';
 /** Forwards the document and render requests to the preview worker once its pane exists. */
 export class PreviewHub implements PreviewSink {
   private client: PreviewClient | null = null;
-  private doc: { doc: ProjectV1; mediaUrls: Record<string, string> } | null = null;
+  private doc: { doc: Project; mediaUrls: Record<string, string> } | null = null;
 
   get current(): PreviewClient | null {
     return this.client;
@@ -29,7 +29,7 @@ export class PreviewHub implements PreviewSink {
     if (client && this.doc) client.setDoc(this.doc.doc, this.doc.mediaUrls);
   }
 
-  setDoc(doc: ProjectV1, mediaUrls: Record<string, string>): void {
+  setDoc(doc: Project, mediaUrls: Record<string, string>): void {
     this.doc = { doc, mediaUrls };
     this.client?.setDoc(doc, mediaUrls);
   }

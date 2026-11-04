@@ -14,7 +14,7 @@ import {
   type FaceSizePreset,
 } from '../shared/project/face-layout';
 import type { ExternalOp } from '../shared/project/op-schema';
-import type { OverlayLayout, ProjectV1, Track, VideoTrack } from '../shared/project/schema';
+import type { OverlayLayout, Project, Track, VideoTrack } from '../shared/project/schema';
 import {
   applyOpsWithPatches,
   timelineDurationUs,
@@ -146,7 +146,7 @@ export const EditStep = z.discriminatedUnion('kind', [
 ]);
 export type EditStep = z.infer<typeof EditStep>;
 
-export function resolveTrack(doc: ProjectV1, ref: string): Track {
+export function resolveTrack(doc: Project, ref: string): Track {
   const byId = doc.timeline.tracks.find((t) => t.id === ref);
   if (byId) return byId;
   const wanted = ref.trim().toLowerCase();
@@ -160,11 +160,7 @@ export function resolveTrack(doc: ProjectV1, ref: string): Track {
   );
 }
 
-function videoTrack(
-  doc: ProjectV1,
-  ref: string | undefined,
-  kind: 'overlay' | 'screen',
-): VideoTrack {
+function videoTrack(doc: Project, ref: string | undefined, kind: 'overlay' | 'screen'): VideoTrack {
   if (ref !== undefined) {
     const track = resolveTrack(doc, ref);
     if (track.type !== 'video' || track.layout.kind !== kind) {
@@ -200,7 +196,7 @@ const COMPONENT_WORDS: Record<string, 'face-voice' | 'system-audio' | 'screen'> 
   screen: 'screen',
 };
 
-function resolveComponentId(doc: ProjectV1, ref: string): string {
+function resolveComponentId(doc: Project, ref: string): string {
   if (doc.components.some((c) => c.id === ref)) return ref;
   const type = COMPONENT_WORDS[ref.trim().toLowerCase()];
   const component = type ? doc.components.find((c) => c.type === type) : undefined;
@@ -212,7 +208,7 @@ function resolveComponentId(doc: ProjectV1, ref: string): string {
 }
 
 function faceLayoutOps(
-  doc: ProjectV1,
+  doc: Project,
   step: Extract<EditStep, { kind: 'faceLayout' }>,
 ): ExternalOp[] {
   const track = videoTrack(doc, step.track, 'overlay');
@@ -234,7 +230,7 @@ function faceLayoutOps(
 }
 
 /** The operations for one step against `doc`. */
-export function stepOps(doc: ProjectV1, step: EditStep): ExternalOp[] {
+export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
   const fps = doc.timeline.frameRate;
   const time = (t: TimeInput) => toUs(t, fps);
   switch (step.kind) {
@@ -342,7 +338,7 @@ export function stepOps(doc: ProjectV1, step: EditStep): ExternalOp[] {
  * Every step's operations, each resolved against the document the previous steps produce.
  * Refusals surface here, with the step they belong to, before anything is sent.
  */
-export function buildBatch(doc: ProjectV1, steps: readonly EditStep[]): ExternalOp[] {
+export function buildBatch(doc: Project, steps: readonly EditStep[]): ExternalOp[] {
   const all: ExternalOp[] = [];
   let current = doc;
   for (const [index, step] of steps.entries()) {

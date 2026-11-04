@@ -14,10 +14,11 @@
  * Pure: the caller reads the peaks files (`parsePeaks`) and decides what to cut.
  */
 import { type Us } from '../time';
+import { clipTimeAtRef } from './clip-time';
 import { fileToRefUs } from './media-time';
 import { PEAK_WINDOW_US } from './peaks';
 import { clipCoverage, isTrackAudible } from './render-plan';
-import type { AudioTrack, ProjectV1 } from './schema';
+import type { AudioTrack, Project } from './schema';
 import { timelineDurationUs } from './timeline-ops';
 
 /** A half-open time range `[startUs, endUs)`. */
@@ -99,7 +100,7 @@ function intersect(a: readonly UsRange[], b: readonly UsRange[]): UsRange[] {
 
 /** Where one audio track makes sound on the timeline (normalized). */
 function trackSound(
-  doc: ProjectV1,
+  doc: Project,
   track: AudioTrack,
   quietByMedia: ReadonlyMap<string, readonly UsRange[]>,
 ): UsRange[] {
@@ -109,14 +110,14 @@ function trackSound(
     const m = media.get(clip.mediaId);
     if (!m) continue;
     const covered = clipCoverage(clip, m);
-    if (!covered) continue;
+    // A freeze frame is silent (v2).
+    if (!covered || clip.freeze) continue;
     const quiet = quietByMedia.get(clip.mediaId);
     if (!quiet) {
       sound.push(covered);
       continue;
     }
-    const toTimeline = (fileUs: Us) =>
-      clip.timelineStartUs + (fileToRefUs(m, fileUs) - clip.sourceStartUs);
+    const toTimeline = (fileUs: Us) => clipTimeAtRef(clip, fileToRefUs(m, fileUs));
     const quietOnTimeline = normalizeRanges(
       quiet.map((r) => ({ startUs: toTimeline(r.startUs), endUs: toTimeline(r.endUs) })),
     );
@@ -131,7 +132,7 @@ function trackSound(
  * audible (there is nothing to judge by).
  */
 export function quietRangesOnTimeline(
-  doc: ProjectV1,
+  doc: Project,
   quietByMedia: ReadonlyMap<string, readonly UsRange[]>,
   options: QuietOptions,
 ): UsRange[] {

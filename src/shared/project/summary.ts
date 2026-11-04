@@ -6,7 +6,7 @@
  */
 import { formatTimecode, usToSeconds, type Us } from '../time';
 import { isTrackAudible } from './render-plan';
-import type { Component, Media, ProjectV1, ScreenLayout, OverlayLayout } from './schema';
+import type { Component, Media, Project, ScreenLayout, OverlayLayout } from './schema';
 import { clipDurationUs, clipEndUs, timelineDurationUs, trackFrameSize } from './timeline-ops';
 
 export interface TimeSummary {
@@ -74,7 +74,7 @@ export function timeSummary(us: Us, frameRate: number): TimeSummary {
   return { seconds: usToSeconds(us), timecode: formatTimecode(us, frameRate) };
 }
 
-export function summarizeProject(doc: ProjectV1): ProjectSummary {
+export function summarizeProject(doc: Project): ProjectSummary {
   const fps = doc.timeline.frameRate;
   const time = (us: Us) => timeSummary(us, fps);
   const media = new Map(doc.media.map((m) => [m.id, m]));

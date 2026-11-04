@@ -18,7 +18,7 @@ import type { ExportOptions, InvokeResponse } from '../../shared/ipc/contract';
 import type { Logger } from '../../shared/logger';
 import { describeChange } from '../../shared/project/change-summary';
 import { parsePeaks } from '../../shared/project/peaks';
-import type { ProjectV1 } from '../../shared/project/schema';
+import type { Project } from '../../shared/project/schema';
 import { quietRangesOnTimeline, quietWindows, type UsRange } from '../../shared/project/silence';
 import { applyOpsWithPatches } from '../../shared/project/timeline-ops';
 import { isTrackAudible } from '../../shared/project/render-plan';
@@ -37,7 +37,7 @@ export interface AutomationServiceDeps {
   /** Project ids with an open editor window. */
   openProjects(): string[];
   /** The saved project, or null when it does not exist or cannot be read. */
-  readProject(projectId: string): Promise<{ doc: ProjectV1; readOnly: boolean } | null>;
+  readProject(projectId: string): Promise<{ doc: Project; readOnly: boolean } | null>;
   editors: {
     live(projectId: string): EditorLink | null;
     ensure(projectId: string): Promise<EditorLink>;
@@ -52,7 +52,7 @@ export interface AutomationServiceDeps {
     start(request: {
       projectId: string;
       options: ExportOptions;
-      doc?: ProjectV1;
+      doc?: Project;
       overwrite?: boolean;
     }): Promise<InvokeResponse<'export.start'>>;
     cancel(jobId: string): void;
@@ -213,7 +213,7 @@ export class AutomationService {
   /** The live editor document if open, else the saved one (refusing recordings in progress). */
   private async current(
     projectId: string,
-  ): Promise<{ doc: ProjectV1; version: number; live: boolean; readOnly: boolean }> {
+  ): Promise<{ doc: Project; version: number; live: boolean; readOnly: boolean }> {
     const link = this.deps.editors.live(projectId);
     if (link) {
       const snapshot = await viaEditor(() => link.command('snapshot', {}));
@@ -223,7 +223,7 @@ export class AutomationService {
     return { doc: saved.doc, version: 0, live: false, readOnly: saved.readOnly };
   }
 
-  private async saved(projectId: string): Promise<{ doc: ProjectV1; readOnly: boolean }> {
+  private async saved(projectId: string): Promise<{ doc: Project; readOnly: boolean }> {
     const saved = await this.deps.readProject(projectId);
     if (!saved) throw new AutomationFailure('unknown-project', `no project ${projectId}`);
     const state = saved.doc.recording?.state;

@@ -16,14 +16,14 @@ import {
   type EditorAutomationCommand,
 } from '../../src/shared/ipc/editor-automation';
 import { PEAK_WINDOW_US } from '../../src/shared/project/peaks';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { counterIds, recordedProject } from '../fixtures/editor-project';
 
 const S = 1_000_000;
 const OPTIONS = { resolution: '720p', fps: 30, quality: 'draft', encoder: 'auto' } as const;
 
 /** An editor window: a real document store and automation handler behind a link. */
-function fakeEditor(doc: ProjectV1, readOnly = false) {
+function fakeEditor(doc: Project, readOnly = false) {
   const docStore = createDocumentStore({ opOptions: { generateId: counterIds('E') } });
   docStore.getState().load({ doc, revision: 0, mediaUrls: {}, readOnly });
   const handler = createAutomationHandler({
@@ -56,7 +56,7 @@ function peaksBytes(durationUs: number, quiet: [number, number][]): ArrayBuffer 
   return out.buffer;
 }
 
-function setup(options: { doc?: ProjectV1; readOnly?: boolean } = {}) {
+function setup(options: { doc?: Project; readOnly?: boolean } = {}) {
   const doc = options.doc ?? recordedProject({ pauses: [] });
   const editors = new Map<string, ReturnType<typeof fakeEditor>>();
   const listeners = new Set<(event: ExportJobEvent) => void>();
@@ -74,7 +74,7 @@ function setup(options: { doc?: ProjectV1; readOnly?: boolean } = {}) {
     }
     return Promise.resolve(editor.link);
   });
-  const startExport = vi.fn((_request: { projectId: string; doc?: ProjectV1 }) =>
+  const startExport = vi.fn((_request: { projectId: string; doc?: Project }) =>
     Promise.resolve({
       jobId: 'job_01',
       status: 'started' as const,

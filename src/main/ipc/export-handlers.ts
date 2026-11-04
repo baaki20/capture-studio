@@ -27,7 +27,7 @@ import type { ExportOptions, InvokeResponse } from '../../shared/ipc/contract';
 import type { JobResult } from '../../shared/ipc/media-utility';
 import type { Logger } from '../../shared/logger';
 import { audioSegments, videoTrackPlans } from '../../shared/project/render-plan';
-import type { ProjectV1 } from '../../shared/project/schema';
+import type { Project } from '../../shared/project/schema';
 import type { Settings } from '../../shared/settings/schema';
 import type { RunJobOptions } from '../utility-host';
 import type { IpcRouter } from './router';
@@ -39,7 +39,7 @@ export interface ExportHandlerDeps {
     job: {
       kind: 'export';
       root: string;
-      doc: ProjectV1;
+      doc: Project;
       options: ExportOptions;
       hardwareEncoder: string | null;
       output: string;
@@ -50,7 +50,7 @@ export interface ExportHandlerDeps {
   /** The project's folder, or null for an unknown id. */
   findRoot: (projectId: string) => Promise<string | null>;
   /** The saved document of a project folder, or null when unreadable. */
-  readProject: (root: string) => Promise<ProjectV1 | null>;
+  readProject: (root: string) => Promise<Project | null>;
   settings: () => Settings;
   /** The cached encoder probe (§1.4 `encode.ffmpeg.hw`). */
   probeEncoders: () => Promise<FfmpegEncoderReport>;
@@ -64,7 +64,7 @@ export interface ExportHandlerDeps {
    * Re-checks the media files on disk (missing, unreadable or damaged become offline, R1.29), so
    * a file that broke after the editor opened still blocks the export with a clear message.
    */
-  checkMedia?: (root: string, doc: ProjectV1) => Promise<ProjectV1>;
+  checkMedia?: (root: string, doc: Project) => Promise<Project>;
   fileExists?: (fullPath: string) => Promise<boolean>;
   now?: () => number;
   /** When this process started (epoch ms); older temp files are stale. */
@@ -98,7 +98,7 @@ export function withMp4Extension(file: string): string {
 }
 
 /** Media that the export would read but that are offline (R1.29). */
-export function offlineExportMedia(doc: ProjectV1): string[] {
+export function offlineExportMedia(doc: Project): string[] {
   const offline = new Set<string>();
   for (const plan of videoTrackPlans(doc)) {
     for (const piece of plan.pieces) {
@@ -260,10 +260,7 @@ export class ExportService {
     return output;
   }
 
-  private async load(
-    projectId: string,
-    doc?: ProjectV1,
-  ): Promise<{ root: string; doc: ProjectV1 }> {
+  private async load(projectId: string, doc?: Project): Promise<{ root: string; doc: Project }> {
     const root = await this.deps.findRoot(projectId);
     if (!root) throw new Error(`Project ${projectId} was not found.`);
     if (doc) {
@@ -275,11 +272,11 @@ export class ExportService {
     return { root, doc: saved };
   }
 
-  private defaultTarget(doc: ProjectV1): string {
+  private defaultTarget(doc: Project): string {
     return path.join(this.deps.settings().exportsDir, exportFileName(doc.name));
   }
 
-  private currentTarget(projectId: string, doc: ProjectV1): ChosenTarget {
+  private currentTarget(projectId: string, doc: Project): ChosenTarget {
     return (
       this.chosen.get(projectId) ?? { path: this.defaultTarget(doc), overwriteConfirmed: false }
     );
@@ -310,7 +307,7 @@ export class ExportService {
   async start(request: {
     projectId: string;
     options: ExportOptions;
-    doc?: ProjectV1 | undefined;
+    doc?: Project | undefined;
     overwrite?: boolean | undefined;
   }): Promise<InvokeResponse<'export.start'>> {
     const { root, doc } = await this.load(request.projectId, request.doc);

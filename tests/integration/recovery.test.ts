@@ -24,7 +24,7 @@ import {
   projectFromRecording,
   type RecordingManifest,
 } from '../../src/shared/project/from-recording';
-import { ProjectV1Schema, type ProjectV1 } from '../../src/shared/project/schema';
+import { ProjectSchema, type Project } from '../../src/shared/project/schema';
 import { unwrap } from '../../src/shared/result';
 import { finalizeRecording } from '../../src/utility/media/finalize';
 import { generatePeaks } from '../../src/utility/media/peaks';
@@ -273,8 +273,8 @@ function service(store: ProjectStore, runner = jobRunner()) {
   return { recovery, trashed, runner };
 }
 
-async function readProject(root: string): Promise<ProjectV1> {
-  return ProjectV1Schema.parse(
+async function readProject(root: string): Promise<Project> {
+  return ProjectSchema.parse(
     JSON.parse(await fs.readFile(path.join(root, 'project.json'), 'utf8')),
   );
 }

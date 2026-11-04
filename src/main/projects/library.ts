@@ -16,7 +16,8 @@ import type { COMPONENT_BADGES, LibraryEntrySchema } from '../../shared/ipc/cont
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
 import { sanitizeFileName, uniqueName } from '../../shared/naming/name-pattern';
-import { PROJECT_EXTENSION, type ProjectV1 } from '../../shared/project/schema';
+import { PROJECT_EXTENSION, type Project } from '../../shared/project/schema';
+import { clipTimelineDurationUs } from '../../shared/project/clip-time';
 import { mediaUrl } from './media-protocol';
 import {
   isProjectFolderName,
@@ -58,11 +59,11 @@ export class ImportError extends Error {
 const samePath = (a: string, b: string): boolean => path.resolve(a) === path.resolve(b);
 
 /** Timeline length: the end of the last clip, or the recorded length without pauses. */
-export function projectDurationUs(doc: ProjectV1): number {
+export function projectDurationUs(doc: Project): number {
   let end = 0;
   for (const track of doc.timeline.tracks) {
     for (const clip of track.clips) {
-      end = Math.max(end, clip.timelineStartUs + (clip.sourceEndUs - clip.sourceStartUs));
+      end = Math.max(end, clip.timelineStartUs + clipTimelineDurationUs(clip));
     }
   }
   if (end > 0 || !doc.recording) return end;
@@ -71,7 +72,7 @@ export function projectDurationUs(doc: ProjectV1): number {
 }
 
 /** Component badges (Screen, Face, Voice, System) for the media a project has. */
-export function componentBadges(doc: ProjectV1): Badge[] {
+export function componentBadges(doc: Project): Badge[] {
   const roles = new Set(doc.media.map((m) => m.role));
   const badges: Badge[] = [];
   if (roles.has('screen')) badges.push('screen');
@@ -249,7 +250,7 @@ export class Library {
     }
   }
 
-  private async entry(doc: ProjectV1, root: string): Promise<LibraryEntry> {
+  private async entry(doc: Project, root: string): Promise<LibraryEntry> {
     return {
       id: doc.id,
       name: doc.name,
@@ -262,7 +263,7 @@ export class Library {
   }
 
   /** The first thumbnail sheet of the screen (or camera) media, if it exists. */
-  private async thumbUrl(doc: ProjectV1, root: string): Promise<string | null> {
+  private async thumbUrl(doc: Project, root: string): Promise<string | null> {
     const media =
       doc.media.find((m) => m.role === 'screen') ?? doc.media.find((m) => m.kind === 'video');
     if (!media) return null;

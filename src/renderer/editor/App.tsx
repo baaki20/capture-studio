@@ -17,7 +17,7 @@ import { commandForKey, isTextEntryTarget, type EditorCommand } from './keyboard
 import { PreviewPane } from './preview/PreviewPane';
 import { encodePng } from './preview/png';
 import { createEditorServices, type EditorServices } from './services';
-import type { ProjectV1 } from '../../shared/project/schema';
+import type { Project } from '../../shared/project/schema';
 import { useDocumentStore } from './store/document-store';
 import { Timeline } from './Timeline/Timeline';
 import { useUi } from './ui-store';
@@ -163,7 +163,7 @@ function EditorLayout({ offline, onOffline }: OfflineProps) {
   const { docStore, autosave, ui } = services;
   const context = useCommandContext();
   /** The document snapshot being exported (R1.49), while the dialog is open. */
-  const [exporting, setExporting] = useState<ProjectV1 | null>(null);
+  const [exporting, setExporting] = useState<Project | null>(null);
 
   const openExport = () => {
     // Save first so the project on disk matches the snapshot the export uses.

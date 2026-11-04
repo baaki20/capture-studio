@@ -65,7 +65,7 @@ import {
   type PixelRect,
   type SegmentLayer,
 } from '../../../shared/project/render-plan';
-import type { Media, NRect, ProjectV1 } from '../../../shared/project/schema';
+import type { Media, NRect, Project } from '../../../shared/project/schema';
 import { timelineDurationUs } from '../../../shared/project/timeline-ops';
 import { err, ok, type Result } from '../../../shared/result';
 
@@ -102,7 +102,7 @@ export interface ExportSettings {
  * encoder (or null); it is used only with `encoder: 'auto'` and only if the exporter can drive it.
  */
 export function resolveExportSettings(
-  doc: ProjectV1,
+  doc: Project,
   options: ExportOptions,
   hardwareEncoder: string | null,
 ): ExportSettings {
@@ -201,7 +201,7 @@ export interface ExportGraphError {
 }
 
 export interface BuildExportGraphOptions {
-  doc: ProjectV1;
+  doc: Project;
   /** The project folder; media paths in the document are relative to it. */
   projectRoot: string;
   settings: ExportSettings;

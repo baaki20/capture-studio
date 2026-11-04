@@ -14,7 +14,7 @@ import {
   type Corner,
   type FaceSizePreset,
 } from '../../../shared/project/face-layout';
-import type { AudioTrack, NRect, OverlayLayout, ProjectV1 } from '../../../shared/project/schema';
+import type { AudioTrack, NRect, OverlayLayout, Project } from '../../../shared/project/schema';
 import {
   GAIN_MAX_DB,
   GAIN_MIN_DB,
@@ -92,7 +92,7 @@ export function InspectorPanel() {
   );
 }
 
-function TracksSection({ doc }: { doc: ProjectV1 }) {
+function TracksSection({ doc }: { doc: Project }) {
   const apply = useApply();
   return (
     <section>
@@ -171,7 +171,7 @@ function GainRow({ track }: { track: AudioTrack }) {
   );
 }
 
-function FaceSection({ doc }: { doc: ProjectV1 }) {
+function FaceSection({ doc }: { doc: Project }) {
   const apply = useApply();
   const gesture = useGesture();
   const track = faceTrack(doc);
@@ -284,7 +284,7 @@ function FaceSection({ doc }: { doc: ProjectV1 }) {
   );
 }
 
-function ScreenSection({ doc }: { doc: ProjectV1 }) {
+function ScreenSection({ doc }: { doc: Project }) {
   const apply = useApply();
   const track = screenTrack(doc);
   if (track?.layout.kind !== 'screen') return null;
@@ -358,7 +358,7 @@ function CropFields(props: {
   );
 }
 
-function SyncSection({ doc }: { doc: ProjectV1 }) {
+function SyncSection({ doc }: { doc: Project }) {
   const components = syncComponents(doc);
   if (components.length === 0) return null;
   return (

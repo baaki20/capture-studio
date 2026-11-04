@@ -7,7 +7,7 @@
  * Alt held excludes linked partners (`includeLinked: false`). Overlaps are resolved by the
  * operation itself (`onOverlap: 'nearest-free'`: nearest free position, or the clip stays).
  */
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import {
   clipDurationUs,
   clipEndUs,
@@ -44,7 +44,7 @@ export interface DragResult {
 
 /** Starts a drag from a hit on a clip (body → move, edge → trim). */
 export function beginClipDrag(
-  doc: ProjectV1,
+  doc: Project,
   clipId: string,
   zone: 'body' | 'start' | 'end',
   pointerUs: number,
@@ -60,13 +60,13 @@ export function beginClipDrag(
   return { kind: 'move', clipId, originUs: clip.timelineStartUs, grabUs: pointerUs };
 }
 
-function dragged(doc: ProjectV1, clipId: string, includeLinked: boolean): string[] {
+function dragged(doc: Project, clipId: string, includeLinked: boolean): string[] {
   return includeLinked ? linkedClips(doc, clipId).map((l) => l.clip.id) : [clipId];
 }
 
 /** The operation for the pointer at `pointerUs`, or null when the clip no longer exists. */
 export function dragOp(
-  doc: ProjectV1,
+  doc: Project,
   drag: ClipDrag,
   pointerUs: number,
   options: DragOptions,

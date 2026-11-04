@@ -9,7 +9,7 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ExportOptions } from '../../src/shared/ipc/contract';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { applyOp, type TimelineOp } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 import {
@@ -30,13 +30,13 @@ const STANDARD: ExportOptions = {
   encoder: 'auto',
 };
 
-function edit(doc: ProjectV1, ...ops: TimelineOp[]): ProjectV1 {
+function edit(doc: Project, ...ops: TimelineOp[]): Project {
   const generateId = counterIds('E');
   return ops.reduce((d, op) => unwrap(applyOp(d, op, { generateId })), doc);
 }
 
 /** Video media tagged BT.601, as WebCodecs recordings are. */
-function bt601(doc: ProjectV1): Map<string, MediaColor> {
+function bt601(doc: Project): Map<string, MediaColor> {
   return new Map(
     doc.media
       .filter((m) => m.kind === 'video')
@@ -45,7 +45,7 @@ function bt601(doc: ProjectV1): Map<string, MediaColor> {
 }
 
 function graph(
-  doc: ProjectV1,
+  doc: Project,
   options: Partial<ExportOptions> = {},
   hardware: string | null = null,
   mediaColor: Map<string, MediaColor> = bt601(doc),
@@ -79,7 +79,7 @@ function golden(g: ExportGraph): string {
   ].join('\n');
 }
 
-const id = (doc: ProjectV1, name: string) => trackByName(doc, name).id;
+const id = (doc: Project, name: string) => trackByName(doc, name).id;
 
 /** Canonical projects (§4.6.2). */
 const CANONICAL: Record<string, () => ExportGraph> = {
@@ -176,7 +176,7 @@ const CANONICAL: Record<string, () => ExportGraph> = {
   },
   'letterbox-untagged': () => {
     const doc = recordedProject({ pauses: [] });
-    const wide: ProjectV1 = {
+    const wide: Project = {
       ...doc,
       timeline: {
         ...doc.timeline,

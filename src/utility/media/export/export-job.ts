@@ -16,7 +16,7 @@ import path from 'node:path';
 import { exportTempName } from '../../../shared/export/temp-name';
 import type { ExportOptions } from '../../../shared/ipc/contract';
 import type { JobResult } from '../../../shared/ipc/media-utility';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import { timelineDurationUs } from '../../../shared/project/timeline-ops';
 import type { Logger } from '../../../shared/logger';
 import { silentLogger } from '../../../shared/logger';
@@ -39,7 +39,7 @@ export interface ExportJobOptions {
   ffprobePath?: string;
   /** The project folder. */
   root: string;
-  doc: ProjectV1;
+  doc: Project;
   options: ExportOptions;
   /** Probe-verified hardware encoder for `encoder: 'auto'`, or null. */
   hardwareEncoder: string | null;
@@ -129,7 +129,7 @@ function describeFailure(error: FfmpegRunError): string {
 async function probeColors(
   ffprobePath: string,
   root: string,
-  doc: ProjectV1,
+  doc: Project,
   signal?: AbortSignal,
 ): Promise<Map<string, MediaColor>> {
   const colors = new Map<string, MediaColor>();

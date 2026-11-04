@@ -20,7 +20,7 @@ import { History, MIN_HISTORY_LIMIT } from '../../src/renderer/editor/store/hist
 import { toIpcError } from '../../src/main/ipc/router';
 import { ProjectStoreError } from '../../src/main/projects/project-store';
 import { encodeIpcError } from '../../src/shared/ipc/errors';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { applyOpWithPatches, clipEndUs } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 import {
@@ -34,7 +34,7 @@ import {
 
 const S = 1_000_000;
 
-function openResult(doc: ProjectV1, revision = 0, readOnly = false): ProjectOpenResult {
+function openResult(doc: Project, revision = 0, readOnly = false): ProjectOpenResult {
   return { doc, revision, mediaUrls: {}, readOnly };
 }
 
@@ -47,7 +47,7 @@ function loadedStore(doc = recordedProject(), now?: () => number): DocumentStore
   return store;
 }
 
-function audioGain(doc: ProjectV1 | null, name: string): number {
+function audioGain(doc: Project | null, name: string): number {
   if (!doc) return NaN;
   const track = trackByName(doc, name);
   return track.type === 'audio' ? track.gainDb : NaN;
@@ -175,7 +175,7 @@ describe('document store', () => {
         (initial, templates) => {
           const store = createDocumentStore({ opOptions: { generateId: counterIds('Q') } });
           store.getState().load(openResult(initial));
-          const docs: ProjectV1[] = [initial];
+          const docs: Project[] = [initial];
           for (const template of templates) {
             const state = store.getState();
             state.beginGesture();
@@ -287,7 +287,7 @@ describe('autosave', () => {
   /** A fake `project.save`/`project.open` backend with main's revision rule. */
   function api() {
     let revision = 0;
-    const saved: { revision: number; doc: ProjectV1 }[] = [];
+    const saved: { revision: number; doc: Project }[] = [];
     const backend = (request: ProjectSaveRequest): Promise<{ revision: number }> => {
       if (request.revision !== revision) {
         return Promise.reject(

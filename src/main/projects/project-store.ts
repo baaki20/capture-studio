@@ -19,8 +19,8 @@ import { parseProject } from '../../shared/project/migrations';
 import {
   PROJECT_EXTENSION,
   PROJECT_FILE_NAME,
-  ProjectV1Schema,
-  type ProjectV1,
+  ProjectSchema,
+  type Project,
 } from '../../shared/project/schema';
 import { readFileWithFallback, writeFileAtomic, type LoadSource } from '../settings/atomic-file';
 import { mediaUrl, type ProjectRootRegistry } from './media-protocol';
@@ -39,14 +39,14 @@ export class ProjectStoreError extends Error {
 }
 
 export interface LoadedProject {
-  doc: ProjectV1;
+  doc: Project;
   readOnly: boolean;
   source: LoadSource;
   root: string;
 }
 
 export interface ProjectOpenResult {
-  doc: ProjectV1;
+  doc: Project;
   revision: number;
   mediaUrls: Record<string, string>;
   readOnly: boolean;
@@ -70,7 +70,7 @@ function stamp(date: Date): string {
   return date.toISOString().replace(/[-:]/g, '').replace('.', '-');
 }
 
-function parseProjectText(text: string): { doc: ProjectV1; readOnly: boolean } {
+function parseProjectText(text: string): { doc: Project; readOnly: boolean } {
   const parsed = parseProject(JSON.parse(text) as unknown);
   if (!parsed.ok) throw new Error(parsed.message);
   return { doc: parsed.project, readOnly: parsed.readOnly };
@@ -145,7 +145,7 @@ export class ProjectStore {
    * `project.save`: writes `doc` if `revision` is the current one and returns the new revision.
    * Rejects a stale revision, a read-only (newer-format) project and a doc for another project.
    */
-  async save(id: string, revision: number, doc: ProjectV1): Promise<{ revision: number }> {
+  async save(id: string, revision: number, doc: Project): Promise<{ revision: number }> {
     const root = this.requireRoot(id);
     return this.serialize(id, async () => {
       const current = this.revision(id);
@@ -169,13 +169,13 @@ export class ProjectStore {
    * Main's own writes (recording, finalize, recovery, rename). Validates, stamps `modifiedAt`,
    * writes atomically and bumps the revision.
    */
-  async write(root: string, doc: ProjectV1): Promise<number> {
+  async write(root: string, doc: Project): Promise<number> {
     this.register(doc.id, root);
     return this.serialize(doc.id, () => this.writeUnlocked(doc.id, root, doc));
   }
 
   /** Reads, changes and writes a project in one serialized step. */
-  async update(id: string, change: (doc: ProjectV1) => ProjectV1): Promise<ProjectV1> {
+  async update(id: string, change: (doc: Project) => Project): Promise<Project> {
     const root = this.requireRoot(id);
     return this.serialize(id, async () => {
       const loaded = await this.read(root);
@@ -189,8 +189,8 @@ export class ProjectStore {
     });
   }
 
-  private async writeUnlocked(id: string, root: string, doc: ProjectV1): Promise<number> {
-    const stamped = ProjectV1Schema.parse({
+  private async writeUnlocked(id: string, root: string, doc: Project): Promise<number> {
+    const stamped = ProjectSchema.parse({
       ...doc,
       modifiedAt: (this.options.now ?? (() => new Date()))().toISOString(),
     });

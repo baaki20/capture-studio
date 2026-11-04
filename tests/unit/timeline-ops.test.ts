@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { checkProjectInvariants } from '../../src/shared/project/invariants';
 import { mediaEditBounds, mediaRefBounds } from '../../src/shared/project/media-time';
-import { ProjectV1Schema, type ProjectV1, type Track } from '../../src/shared/project/schema';
+import { ProjectSchema, type Project, type Track } from '../../src/shared/project/schema';
 import {
   GAIN_MAX_DB,
   GAIN_MIN_DB,
@@ -47,10 +47,10 @@ function ids() {
   return { generateId: counterIds('X') };
 }
 
-function valid(result: OpResult): ProjectV1 {
+function valid(result: OpResult): Project {
   const doc = unwrap(result);
   expect(checkProjectInvariants(doc)).toEqual([]);
-  expect(ProjectV1Schema.safeParse(doc).success).toBe(true);
+  expect(ProjectSchema.safeParse(doc).success).toBe(true);
   return doc;
 }
 
@@ -68,7 +68,7 @@ function project() {
   return recordedProject();
 }
 
-function firstClip(doc: ProjectV1, track: string) {
+function firstClip(doc: Project, track: string) {
   const clip = trackByName(doc, track).clips[0];
   if (!clip) throw new Error(`no clip on ${track}`);
   return clip;

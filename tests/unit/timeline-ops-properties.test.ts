@@ -5,7 +5,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { checkProjectInvariants } from '../../src/shared/project/invariants';
-import { ProjectV1Schema, type ProjectV1 } from '../../src/shared/project/schema';
+import { ProjectSchema, type Project } from '../../src/shared/project/schema';
 import {
   applyOp,
   clipDurationUs,
@@ -29,7 +29,7 @@ import {
 const RUNS = { numRuns: 150 };
 
 /** Replaces clip and link IDs by their order of appearance, so documents compare by content. */
-function canonical(doc: ProjectV1) {
+function canonical(doc: Project) {
   const clipIds = new Map<string, string>();
   const linkIds = new Map<string, string>();
   const name = (map: Map<string, string>, id: string) => {
@@ -73,7 +73,7 @@ describe('timeline operations (properties)', () => {
             doc = result.value;
             expect(checkProjectInvariants(doc)).toEqual([]);
           }
-          expect(ProjectV1Schema.safeParse(doc).success).toBe(true);
+          expect(ProjectSchema.safeParse(doc).success).toBe(true);
         },
       ),
       RUNS,

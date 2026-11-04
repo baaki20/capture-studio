@@ -7,7 +7,7 @@
  */
 import type { EditorPreloadApi } from '../../../shared/ipc/preload-api';
 import type { ThumbnailIndex } from '../../../shared/ipc/media-utility';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import { PendingLoads } from './pending-loads';
 import { parsePeaks } from './waveform';
 
@@ -51,7 +51,7 @@ export class MediaAssets {
   }
 
   /** Starts loading what the document's media need (idempotent). */
-  load(doc: ProjectV1): void {
+  load(doc: Project): void {
     for (const media of doc.media) {
       if (media.status === 'missing' || media.status === 'failed') continue;
       const key = `${media.kind}:${media.id}`;

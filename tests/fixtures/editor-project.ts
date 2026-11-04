@@ -9,7 +9,7 @@ import {
   type RecordedStream,
   type Span,
 } from '../../src/shared/project/from-recording';
-import type { NRect, ProjectV1 } from '../../src/shared/project/schema';
+import type { NRect, Project } from '../../src/shared/project/schema';
 import { timelineDurationUs, type TimelineOp } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 
@@ -72,7 +72,7 @@ function stream(
 }
 
 /** Default: 60 s session, pause [20 s, 25 s), all four streams. */
-export function recordedProject(options: RecordedProjectOptions = {}): ProjectV1 {
+export function recordedProject(options: RecordedProjectOptions = {}): Project {
   const durationUs = options.durationUs ?? 60_000_000;
   const screenSize = options.screenSize ?? { width: 1920, height: 1080 };
   const offsets = {
@@ -133,14 +133,14 @@ export function recordedProject(options: RecordedProjectOptions = {}): ProjectV1
   );
 }
 
-export function trackByName(doc: ProjectV1, name: string) {
+export function trackByName(doc: Project, name: string) {
   const track = doc.timeline.tracks.find((t) => t.name === name);
   if (!track) throw new Error(`no track ${name}`);
   return track;
 }
 
 /** Random recorded projects: 10–120 s, up to 3 pauses, optional camera/mic/system. */
-export const arbRecordedProject: fc.Arbitrary<ProjectV1> = fc
+export const arbRecordedProject: fc.Arbitrary<Project> = fc
   .record({
     durationS: fc.integer({ min: 10, max: 120 }),
     pauses: fc.array(
@@ -223,7 +223,7 @@ export const arbOpTemplate: fc.Arbitrary<OpTemplate> = fc.record({
 });
 
 /** Turns a template into a concrete op for `doc` (clip and track picked by fraction). */
-export function resolveOp(doc: ProjectV1, t: OpTemplate): TimelineOp {
+export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
   const clips = doc.timeline.tracks.flatMap((tr) => tr.clips);
   const tracks = doc.timeline.tracks;
   const duration = Math.max(1, timelineDurationUs(doc));

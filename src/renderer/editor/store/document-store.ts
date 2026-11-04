@@ -1,6 +1,6 @@
 /**
  * The editor's project-document store (§1.2 "UI state", §1.7 "Undo"): Zustand (vanilla, so it
- * works outside React) holding the current `ProjectV1`, with every edit going through the pure
+ * works outside React) holding the current `Project`, with every edit going through the pure
  * operations in `shared/project/timeline-ops.ts` and recorded as Immer patches in `History`.
  *
  * For the timeline, inspector and preview builders:
@@ -33,7 +33,7 @@ import {
   type TimelineOp,
   type TimelineOpType,
 } from '../../../shared/project/timeline-ops';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import { err, ok, type Result } from '../../../shared/result';
 import { History, type HistoryOptions } from './history';
 
@@ -54,7 +54,7 @@ export interface EditorNotice {
   kind: 'reloaded' | 'save-failed' | 'assistant';
   message: string;
   /** For `reloaded`: the local version that was replaced by the one on disk. */
-  discardedDoc?: ProjectV1;
+  discardedDoc?: Project;
 }
 
 export interface ApplyOptions {
@@ -66,11 +66,11 @@ export interface ApplyOptions {
 
 export interface DocumentState {
   projectId: string | null;
-  doc: ProjectV1 | null;
+  doc: Project | null;
   /** The `project.save` revision the current `savedDoc` corresponds to. */
   revision: number;
   /** The document last confirmed on disk (reference-compare with `doc` for "dirty"). */
-  savedDoc: ProjectV1 | null;
+  savedDoc: Project | null;
   readOnly: boolean;
   mediaUrls: Record<string, string>;
   saveStatus: SaveStatus;
@@ -84,11 +84,11 @@ export interface DocumentState {
 
 export interface DocumentActions {
   load(open: ProjectOpenResult): void;
-  apply(op: TimelineOp, options?: ApplyOptions): Result<ProjectV1, EditError>;
+  apply(op: TimelineOp, options?: ApplyOptions): Result<Project, EditError>;
   applyBatch(
     ops: readonly TimelineOp[],
     options: { label: string },
-  ): Result<ProjectV1, BatchEditError>;
+  ): Result<Project, BatchEditError>;
   /** Shows an `assistant` notice unless a more important one (reload, save failure) is up. */
   showAssistantNotice(message: string): void;
   beginGesture(): void;
@@ -97,9 +97,9 @@ export interface DocumentActions {
   redo(): boolean;
   clearError(): void;
   dismissNotice(): void;
-  restoreDiscarded(): Result<ProjectV1, EditError>;
+  restoreDiscarded(): Result<Project, EditError>;
   markSaving(): void;
-  markSaved(revision: number, savedDoc: ProjectV1): void;
+  markSaved(revision: number, savedDoc: Project): void;
   markSaveFailed(message: string): void;
   reloadFromDisk(open: ProjectOpenResult, notice: EditorNotice): void;
 }
@@ -179,7 +179,7 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
       undoLabel: history.undoLabel,
       redoLabel: history.redoLabel,
     });
-    const statusFor = (doc: ProjectV1 | null, savedDoc: ProjectV1 | null, readOnly: boolean) =>
+    const statusFor = (doc: Project | null, savedDoc: Project | null, readOnly: boolean) =>
       readOnly ? 'read-only' : doc === savedDoc ? 'saved' : 'pending';
 
     const opened = (open: ProjectOpenResult): Partial<DocumentState> => {
@@ -198,7 +198,7 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
     };
 
     /** The document when edits are allowed, else why not. */
-    const editable = (): Result<ProjectV1, EditError> => {
+    const editable = (): Result<Project, EditError> => {
       const { doc, readOnly } = get();
       if (!doc) return err({ code: 'no-document', message: 'no project is open' });
       if (readOnly) {
@@ -246,7 +246,7 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
     const applyBatch = (
       ops: readonly TimelineOp[],
       batchOptions: { label: string },
-    ): Result<ProjectV1, BatchEditError> => {
+    ): Result<Project, BatchEditError> => {
       const target = editable();
       if (!target.ok) return target;
       if (history.inGesture) {

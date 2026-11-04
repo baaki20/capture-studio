@@ -20,7 +20,7 @@ import {
 } from '../../src/shared/ipc/media-utility';
 import { parseProject } from '../../src/shared/project/migrations';
 import { layersAt, maskAlpha } from '../../src/shared/project/render-plan';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import {
   applyOp,
   timelineDurationUs,
@@ -125,7 +125,7 @@ function makeMedia(dir: string, seconds: number): void {
   ]);
 }
 
-function syntheticProject(seconds: number): ProjectV1 {
+function syntheticProject(seconds: number): Project {
   return recordedProject({
     durationUs: seconds * 1_000_000,
     pauses: [],
@@ -135,7 +135,7 @@ function syntheticProject(seconds: number): ProjectV1 {
   });
 }
 
-function edit(doc: ProjectV1, ...ops: TimelineOp[]): ProjectV1 {
+function edit(doc: Project, ...ops: TimelineOp[]): Project {
   const generateId = counterIds('X');
   return ops.reduce((d, op) => unwrap(applyOp(d, op, { generateId })), doc);
 }
@@ -319,7 +319,7 @@ describe('export of a synthetic project (R1.46, R1.48)', () => {
     const system = trackByName(doc, 'System audio').id;
     const reference = edit(doc, { type: 'setMuted', trackId: voice, muted: true });
     const quieter = edit(reference, { type: 'setGain', trackId: system, gainDb: -12 });
-    const run = (d: ProjectV1, name: string) =>
+    const run = (d: Project, name: string) =>
       runExportJob({
         ffmpegPath: ffmpeg.ffmpeg,
         ffprobePath: ffmpeg.ffprobe,
@@ -359,14 +359,14 @@ describe('mask PNG', () => {
 
 describe('background colour', () => {
   const BG: Rgb = [0x30, 0x80, 0xc0];
-  const withBackground = (doc: ProjectV1, width: number): ProjectV1 => ({
+  const withBackground = (doc: Project, width: number): Project => ({
     ...doc,
     timeline: {
       ...doc.timeline,
       canvas: { ...doc.timeline.canvas, width, background: { type: 'color', color: '#3080C0' } },
     },
   });
-  const run = (doc: ProjectV1, name: string) =>
+  const run = (doc: Project, name: string) =>
     runExportJob({
       ffmpegPath: ffmpeg.ffmpeg,
       ffprobePath: ffmpeg.ffprobe,

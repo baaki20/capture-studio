@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { locateFfmpeg, type FfmpegLocation } from '../../src/main/ffmpeg/locate';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { applyOp, type TimelineOp } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 import {
@@ -33,13 +33,13 @@ let ffmpeg: FfmpegLocation;
 let work: string;
 let project: string;
 
-function edit(doc: ProjectV1, ...ops: TimelineOp[]): ProjectV1 {
+function edit(doc: Project, ...ops: TimelineOp[]): Project {
   const generateId = counterIds('M');
   return ops.reduce((d, op) => unwrap(applyOp(d, op, { generateId })), doc);
 }
 
 /** Screen and voice of SECONDS, split in two halves. */
-function halves(): ProjectV1 {
+function halves(): Project {
   const doc = recordedProject({
     durationUs: SECONDS * 1_000_000,
     screenSize: { width: W, height: H },
@@ -52,7 +52,7 @@ function halves(): ProjectV1 {
 }
 
 /** The second half first: move it after the end, then the first half after it, then close the gap. */
-function swapped(): ProjectV1 {
+function swapped(): Project {
   let doc = halves();
   const half = (SECONDS / 2) * 1_000_000;
   for (const name of ['Screen', 'Voice']) {
@@ -67,7 +67,7 @@ function swapped(): ProjectV1 {
 }
 
 /** Runs the export of `doc` and returns FFmpeg's peak RSS in MB. */
-async function exportPeakMb(doc: ProjectV1, name: string): Promise<number> {
+async function exportPeakMb(doc: Project, name: string): Promise<number> {
   const settings = resolveExportSettings(
     doc,
     { resolution: 'canvas', fps: 'project', quality: 'draft', encoder: 'software' },

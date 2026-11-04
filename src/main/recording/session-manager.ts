@@ -60,7 +60,7 @@ import {
   PROJECT_EXTENSION,
   type Media,
   type NRect,
-  type ProjectV1,
+  type Project,
   type RecordingInfo,
 } from '../../shared/project/schema';
 import { VIDEO_SYNC_RATE } from '../../shared/recording/drift';
@@ -1588,7 +1588,7 @@ export class SessionManager {
   private async markFailed(session: Session, reason: string): Promise<void> {
     if (!session.root || !session.projectId) return;
     await this.deps.store
-      .update(session.projectId, (doc: ProjectV1) =>
+      .update(session.projectId, (doc: Project) =>
         doc.recording
           ? { ...doc, recording: { ...doc.recording, state: 'failed', failureReason: reason } }
           : doc,

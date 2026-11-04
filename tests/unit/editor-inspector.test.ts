@@ -35,13 +35,13 @@ import {
 } from '../../src/renderer/editor/preview/overlay-geometry';
 import { overlayDestRect } from '../../src/shared/project/face-layout';
 import { layersAt } from '../../src/shared/project/render-plan';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { applyOp, trackFrameSize, type TimelineOp } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 import { exampleProject } from '../fixtures/example-project';
 
 const S = 1_000_000;
-const run = (doc: ProjectV1, op: TimelineOp | null) => unwrap(applyOp(doc, op!));
+const run = (doc: Project, op: TimelineOp | null) => unwrap(applyOp(doc, op!));
 
 describe('track controls (R1.40)', () => {
   it('maps gain, reset and toggles to operations', () => {

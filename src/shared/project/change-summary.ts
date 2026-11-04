@@ -4,7 +4,7 @@
  * canvas), so automation clients report this instead of what they asked for.
  */
 import { usToSeconds } from '../time';
-import type { Clip, ProjectV1 } from './schema';
+import type { Clip, Project } from './schema';
 import { timeSummary, type TimeSummary } from './summary';
 import { timelineDurationUs } from './timeline-ops';
 
@@ -32,7 +32,7 @@ function signedSeconds(seconds: number): string {
   return `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${String(Math.abs(rounded))} s`;
 }
 
-function clipsById(doc: ProjectV1): Map<string, { trackId: string; clip: Clip }> {
+function clipsById(doc: Project): Map<string, { trackId: string; clip: Clip }> {
   const map = new Map<string, { trackId: string; clip: Clip }>();
   for (const track of doc.timeline.tracks) {
     for (const clip of track.clips) map.set(clip.id, { trackId: track.id, clip });
@@ -42,7 +42,7 @@ function clipsById(doc: ProjectV1): Map<string, { trackId: string; clip: Clip }>
 
 const TRACK_FIELDS = ['name', 'locked', 'hidden', 'gainDb', 'muted', 'solo'] as const;
 
-export function describeChange(before: ProjectV1, after: ProjectV1): ChangeSummary {
+export function describeChange(before: Project, after: Project): ChangeSummary {
   const fps = after.timeline.frameRate;
   const durationBefore = timelineDurationUs(before);
   const durationAfter = timelineDurationUs(after);

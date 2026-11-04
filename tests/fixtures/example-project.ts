@@ -2,12 +2,12 @@
  * The abridged example of spec §4.4.2 made concrete (full IDs instead of "…"). Tests clone and
  * mutate it, so always call the function to get a fresh copy.
  */
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 
-export function exampleProject(): ProjectV1 {
+export function exampleProject(): Project {
   return {
     format: 'capture-studio.project',
-    formatVersion: 1,
+    formatVersion: 2,
     id: 'prj_01JBQ4ZJ4X6V3K8N2M7P5R9T0W',
     name: 'Lesson 2026-10-24 14-05',
     createdAt: '2026-10-24T14:05:12.345Z',

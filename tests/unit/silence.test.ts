@@ -2,7 +2,7 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { fileToRefUs } from '../../src/shared/project/media-time';
 import { PEAK_WINDOW_US } from '../../src/shared/project/peaks';
-import type { Media, ProjectV1 } from '../../src/shared/project/schema';
+import type { Media, Project } from '../../src/shared/project/schema';
 import {
   normalizeRanges,
   quietRangesOnTimeline,
@@ -30,14 +30,14 @@ function peaks(durationUs: number, quiet: UsRange[] = []): Int16Array {
   return out;
 }
 
-function mediaOf(doc: ProjectV1, role: Media['role']): Media {
+function mediaOf(doc: Project, role: Media['role']): Media {
   const media = doc.media.find((m) => m.role === role);
   if (!media) throw new Error(`no ${role}`);
   return media;
 }
 
 /** Timeline time of a file-local instant of `media`, through the track's clip that shows it. */
-function onTimeline(doc: ProjectV1, media: Media, fileUs: number): number {
+function onTimeline(doc: Project, media: Media, fileUs: number): number {
   const ref = fileToRefUs(media, fileUs);
   for (const track of doc.timeline.tracks) {
     for (const clip of track.clips) {

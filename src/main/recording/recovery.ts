@@ -33,7 +33,7 @@ import {
   FRAME_RATES,
   type FrameRate,
   type Media,
-  type ProjectV1,
+  type Project,
   type RecordingInfo,
 } from '../../shared/project/schema';
 import type { ProjectStore } from '../projects/project-store';
@@ -87,7 +87,7 @@ export interface RecoveryDeps {
 
 interface Found extends RecoveryCandidate {
   root: string;
-  doc: ProjectV1 | null;
+  doc: Project | null;
   log: SessionLog | null;
 }
 

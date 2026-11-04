@@ -17,7 +17,7 @@ import {
   projectFromRecording,
   type RecordingManifest,
 } from '../../src/shared/project/from-recording';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { unwrap } from '../../src/shared/result';
 
 let work: string;
@@ -31,7 +31,7 @@ afterEach(async () => {
 });
 
 let n = 0;
-function project(name = 'Lesson', createdAt = '2026-10-24T14:05:12.345Z'): ProjectV1 {
+function project(name = 'Lesson', createdAt = '2026-10-24T14:05:12.345Z'): Project {
   n += 1;
   const manifest: RecordingManifest = {
     version: 1,
@@ -182,7 +182,7 @@ describe('project store', () => {
     await store.write(root, doc);
     await fs.writeFile(
       path.join(root, 'project.json'),
-      JSON.stringify({ ...doc, formatVersion: 2, futureField: true }),
+      JSON.stringify({ ...doc, formatVersion: 3, futureField: true }),
     );
     const opened = await store.open(doc.id);
     expect(opened.readOnly).toBe(true);

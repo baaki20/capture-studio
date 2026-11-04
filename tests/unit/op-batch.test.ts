@@ -6,7 +6,7 @@ import {
   applyOpsWithPatches,
   type TimelineOp,
 } from '../../src/shared/project/timeline-ops';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import {
   arbOpTemplate,
   arbRecordedProject,
@@ -19,7 +19,7 @@ import {
 const S = 1_000_000;
 
 /** Resolves templates one after another, each against the document the previous ones produce. */
-function resolveSequence(doc: ProjectV1, templates: Parameters<typeof resolveOp>[1][]) {
+function resolveSequence(doc: Project, templates: Parameters<typeof resolveOp>[1][]) {
   const generateId = counterIds('Q');
   const ops: TimelineOp[] = [];
   let current = doc;

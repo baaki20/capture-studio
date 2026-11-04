@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { CapabilityReportSchema, FfmpegEncoderReportSchema } from '../capabilities/types';
-import { NRectSchema, ProjectV1Schema } from '../project/schema';
+import { NRectSchema, ProjectSchema } from '../project/schema';
 import { AutomationSettingsSchema, SettingsV1Schema } from '../settings/schema';
 import { CLI_ACTIONS } from './actions';
 import { EditorAutomationReplySchema, EditorAutomationRequestSchema } from './editor-automation';
@@ -177,7 +177,7 @@ export const OfflineMediaSchema = z.object({
 export type OfflineMedia = z.infer<typeof OfflineMediaSchema>;
 
 export const ProjectOpenResultSchema = z.object({
-  doc: ProjectV1Schema,
+  doc: ProjectSchema,
   revision: z.int().nonnegative(),
   /** `cs-media://` URL per media id. */
   mediaUrls: z.record(z.string(), z.string()),
@@ -198,7 +198,7 @@ export const SettingsLoadNoticeSchema = z.object({
 export const ProjectSaveSchema = z.strictObject({
   id: Id,
   revision: z.int().nonnegative(),
-  doc: ProjectV1Schema,
+  doc: ProjectSchema,
 });
 
 export const MediaAssetRequestSchema = z.strictObject({ projectId: Id, mediaId: Id });
@@ -224,7 +224,7 @@ export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
 export const ExportStartSchema = z.strictObject({
   projectId: Id,
   options: ExportOptionsSchema,
-  doc: ProjectV1Schema.optional(),
+  doc: ProjectSchema.optional(),
   overwrite: z.boolean().optional(),
 });
 

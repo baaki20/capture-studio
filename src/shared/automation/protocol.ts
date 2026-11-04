@@ -22,7 +22,7 @@ import {
   MAX_AUTOMATION_BATCH_OPS,
 } from '../ipc/editor-automation';
 import { TimelineOpSchema } from '../project/op-schema';
-import { ProjectV1StructureSchema, prefixedId } from '../project/schema';
+import { ProjectStructureSchema, prefixedId } from '../project/schema';
 
 export const AUTOMATION_PROTOCOL_VERSION = 1;
 /**
@@ -143,7 +143,7 @@ export const AUTOMATION_METHODS = {
   'project.get': method(
     ProjectRef,
     z.object({
-      doc: ProjectV1StructureSchema,
+      doc: ProjectStructureSchema,
       /** Pass back as `ifVersion` to refuse an edit if the document changed in between. */
       version: z.int().nonnegative(),
       live: z.boolean(),

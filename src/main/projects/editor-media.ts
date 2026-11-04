@@ -19,7 +19,7 @@ import path from 'node:path';
 import type { OfflineMedia } from '../../shared/ipc/contract';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
-import type { Media, ProjectV1 } from '../../shared/project/schema';
+import type { Media, Project } from '../../shared/project/schema';
 import {
   assetRelativePath,
   CACHE_DIR_NAME,
@@ -67,9 +67,9 @@ const defaultHealth = new MediaHealthCache();
  */
 export async function checkMediaPresence(
   root: string,
-  doc: ProjectV1,
+  doc: Project,
   health: MediaHealthCache = defaultHealth,
-): Promise<{ doc: ProjectV1; offline: Record<string, OfflineMedia> }> {
+): Promise<{ doc: Project; offline: Record<string, OfflineMedia> }> {
   const offline: Record<string, OfflineMedia> = {};
   const media = await Promise.all(
     doc.media.map(async (m) => {
@@ -90,9 +90,9 @@ export async function checkMediaPresence(
 /** `checkMediaPresence` without the reasons. */
 export async function markMediaPresence(
   root: string,
-  doc: ProjectV1,
+  doc: Project,
   health?: MediaHealthCache,
-): Promise<ProjectV1> {
+): Promise<Project> {
   return (await checkMediaPresence(root, doc, health)).doc;
 }
 

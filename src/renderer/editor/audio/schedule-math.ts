@@ -10,7 +10,7 @@ import {
   isTrackAudible,
   type AudioSegment,
 } from '../../../shared/project/render-plan';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 
 export const CHUNK_TARGET_US = 1_000_000;
 /** How far ahead of the heard time chunks are scheduled. */
@@ -209,7 +209,7 @@ export class ChunkAccumulator {
 }
 
 /** Gain per audio track after mute and solo (0 when inaudible), as the render plan has it. */
-export function trackGains(doc: ProjectV1): Map<string, number> {
+export function trackGains(doc: Project): Map<string, number> {
   const gains = new Map<string, number>();
   for (const track of doc.timeline.tracks) {
     if (track.type !== 'audio') continue;
@@ -219,7 +219,7 @@ export function trackGains(doc: ProjectV1): Map<string, number> {
 }
 
 /** A key that changes when the scheduled audio would change (not for gain-only edits). */
-export function scheduleSignature(doc: ProjectV1, mediaUrls: Record<string, string>): string {
+export function scheduleSignature(doc: Project, mediaUrls: Record<string, string>): string {
   return JSON.stringify(
     audioSegments(doc, { includeInaudible: true }).map((s) => [
       s.trackId,

@@ -7,7 +7,7 @@
  * first `RULER_HEIGHT` pixels). Rows follow `timeline.tracks` order (Screen, Face, Voice,
  * System audio).
  */
-import type { ProjectV1, Track } from '../../../shared/project/schema';
+import type { Project, Track } from '../../../shared/project/schema';
 import { clipEndUs } from '../../../shared/project/timeline-ops';
 
 export interface TimelineView {
@@ -90,7 +90,7 @@ export function rowHeight(track: Track): number {
   return track.type === 'video' ? VIDEO_ROW_HEIGHT : AUDIO_ROW_HEIGHT;
 }
 
-export function layoutRows(doc: ProjectV1): { rows: Row[]; height: number } {
+export function layoutRows(doc: Project): { rows: Row[]; height: number } {
   let top = RULER_HEIGHT + ROW_GAP;
   const rows = doc.timeline.tracks.map((track, trackIndex) => {
     const height = rowHeight(track);

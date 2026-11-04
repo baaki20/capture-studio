@@ -17,7 +17,7 @@ import path from 'node:path';
 import { _electron as electron, expect, test, type Page } from '@playwright/test';
 import type { ExportOptions } from '../../src/shared/ipc/contract';
 import { layersAt } from '../../src/shared/project/render-plan';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { applyOp } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
@@ -58,7 +58,7 @@ function ff(args: string[]): Buffer {
   });
 }
 
-function makeProject(projects: string): { root: string; doc: ProjectV1 } {
+function makeProject(projects: string): { root: string; doc: Project } {
   let doc = recordedProject({
     durationUs: SECONDS * 1_000_000,
     pauses: [],

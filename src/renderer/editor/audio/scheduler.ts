@@ -18,7 +18,7 @@
  * unit-tested; `AudioScheduler` does the Web Audio plumbing.
  */
 import { audioSegments, type AudioSegment } from '../../../shared/project/render-plan';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import {
   chunkLatenessS,
   LOOKAHEAD_US,
@@ -62,7 +62,7 @@ export class AudioScheduler {
   private readonly trackGainNodes = new Map<string, GainNode>();
   private readonly sources = new Map<string, Promise<AudioSource>>();
   private readonly nodes = new Set<PlayingNode>();
-  private doc: ProjectV1 | null = null;
+  private doc: Project | null = null;
   private mediaUrls: Record<string, string> = {};
   private signature = '';
   private anchor: TransportAnchor | null = null;
@@ -104,7 +104,7 @@ export class AudioScheduler {
   }
 
   /** Updates gains, and reschedules at the current time if the audio itself changed. */
-  setDoc(doc: ProjectV1, mediaUrls: Record<string, string>): void {
+  setDoc(doc: Project, mediaUrls: Record<string, string>): void {
     this.doc = doc;
     this.mediaUrls = mediaUrls;
     const gains = trackGains(doc);

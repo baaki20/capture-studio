@@ -16,7 +16,7 @@
  * Usage in the editor: `const autosave = startAutosave(store, window.csEditor.project)`.
  */
 import { ipcErrorCode, ipcErrorMessage } from '../../../shared/ipc/errors';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import type { DocumentStore, ProjectOpenResult, ProjectSaveRequest } from './document-store';
 
 export const AUTOSAVE_DEBOUNCE_MS = 1_500;
@@ -114,7 +114,7 @@ export function startAutosave(
   };
 
   const reload = async (projectId: string): Promise<void> => {
-    const local: ProjectV1 | null = store.getState().doc;
+    const local: Project | null = store.getState().doc;
     try {
       const open = await api.open(projectId);
       store.getState().reloadFromDisk(open, {

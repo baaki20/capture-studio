@@ -17,7 +17,7 @@ import type {
   Media,
   NRect,
   OverlayLayout,
-  ProjectV1,
+  Project,
   Track,
   VideoTrack,
 } from '../../../shared/project/schema';
@@ -52,7 +52,7 @@ export function toggleOp(track: Track, what: 'mute' | 'solo' | 'hide' | 'lock'):
 }
 
 /** The face-overlay track (the video track with an overlay layout), if any. */
-export function faceTrack(doc: ProjectV1): (VideoTrack & { layout: OverlayLayout }) | null {
+export function faceTrack(doc: Project): (VideoTrack & { layout: OverlayLayout }) | null {
   for (const track of doc.timeline.tracks) {
     if (track.type === 'video' && track.layout.kind === 'overlay') {
       return track as VideoTrack & { layout: OverlayLayout };
@@ -62,7 +62,7 @@ export function faceTrack(doc: ProjectV1): (VideoTrack & { layout: OverlayLayout
 }
 
 /** The screen track (the video track with a screen layout), if any. */
-export function screenTrack(doc: ProjectV1): VideoTrack | null {
+export function screenTrack(doc: Project): VideoTrack | null {
   for (const track of doc.timeline.tracks) {
     if (track.type === 'video' && track.layout.kind === 'screen') return track;
   }
@@ -70,7 +70,7 @@ export function screenTrack(doc: ProjectV1): VideoTrack | null {
 }
 
 function overlayOf(
-  doc: ProjectV1,
+  doc: Project,
   trackId: string,
 ): { track: VideoTrack; layout: OverlayLayout } | null {
   const track = doc.timeline.tracks.find((t) => t.id === trackId);
@@ -79,7 +79,7 @@ function overlayOf(
 }
 
 /** Corner preset (R1.41): moves the overlay into a corner with the standard margin. */
-export function cornerOp(doc: ProjectV1, trackId: string, corner: Corner): TimelineOp | null {
+export function cornerOp(doc: Project, trackId: string, corner: Corner): TimelineOp | null {
   const face = overlayOf(doc, trackId);
   if (!face) return null;
   const next = applyCornerPreset(
@@ -97,7 +97,7 @@ export function sizeOp(trackId: string, widthFraction: number): TimelineOp {
 }
 
 export function sizePresetOp(
-  doc: ProjectV1,
+  doc: Project,
   trackId: string,
   preset: FaceSizePreset,
 ): TimelineOp | null {
@@ -135,7 +135,7 @@ export function cropOp(trackId: string, crop: NRect | null): TimelineOp {
 }
 
 /** A box dragged or resized on the preview (canvas px) → overlay layout (aspect locked). */
-export function overlayRectOp(doc: ProjectV1, trackId: string, rect: PixelRect): TimelineOp | null {
+export function overlayRectOp(doc: Project, trackId: string, rect: PixelRect): TimelineOp | null {
   const face = overlayOf(doc, trackId);
   if (!face) return null;
   const next = layoutFromDestRect(
@@ -187,7 +187,7 @@ const ROLE_LABELS: Record<Media['role'], string> = {
 };
 
 /** The components that can be nudged (Face + Voice, System audio) with their recorded sync info. */
-export function syncComponents(doc: ProjectV1): ComponentSync[] {
+export function syncComponents(doc: Project): ComponentSync[] {
   const media = new Map(doc.media.map((m) => [m.id, m]));
   return doc.components
     .filter((c) => c.type !== 'screen')

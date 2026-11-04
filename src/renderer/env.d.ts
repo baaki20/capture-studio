@@ -6,7 +6,7 @@ import type {
   PickerPreloadApi,
   ShellPreloadApi,
 } from '../shared/ipc/preload-api';
-import type { ProjectV1 } from '../shared/project/schema';
+import type { Project } from '../shared/project/schema';
 import type { AudioCounters } from './editor/audio/scheduler';
 import type { PreviewCounterValues } from './editor/preview/playback-counters';
 
@@ -16,7 +16,7 @@ import type { PreviewCounterValues } from './editor/preview/playback-counters';
  */
 interface EditorDebugApi {
   /** The current project document. */
-  doc(): ProjectV1 | null;
+  doc(): Project | null;
   ui(): { playheadUs: number; playing: boolean; selection: string[]; snapping: boolean };
   /** Renders the playhead (or `tUs`) and measures the preview picture. */
   probePreview(tUs?: number): Promise<{ meanLuma: number; nonBlack: number; exact: boolean }>;

@@ -21,7 +21,8 @@
  *   only changes `syncAdjustUs` and never touches clips (non-destructive); where the nudged file
  *   no longer covers part of a clip, the render plan draws a gap and plays silence there.
  * - Timeline time equals the reference clock of the clip's media, offset by where the clip was
- *   placed: `refUs = sourceStartUs + (tUs − timelineStartUs)`.
+ *   placed: `refUs = sourceStartUs + (tUs − timelineStartUs)` (times the v2 speed, see
+ *   `clip-time.ts`, which every edit that cuts or trims a clip goes through).
  *
  * Results:
  * - `ok(sameDoc)` (reference-equal) when the operation changes nothing, e.g. a trim dragged
@@ -41,6 +42,17 @@ import { err, ok, type Result } from '../result';
 import { frameDurationUs, type Us } from '../time';
 import { clampOverlayLayout, clampRectToFrame, type Size } from './face-layout';
 import { checkProjectInvariants } from './invariants';
+import {
+  clipHead,
+  clipMaxEndUs,
+  clipMinStartUs,
+  clipRefAt,
+  clipSourceDurationUs,
+  clipTail,
+  clipTimelineDurationUs,
+  clipWithEnd,
+  clipWithStart,
+} from './clip-time';
 import { mediaEditBounds } from './media-time';
 import type {
   AudioTrack,
@@ -48,7 +60,7 @@ import type {
   Media,
   NRect,
   OverlayLayout,
-  ProjectV1,
+  Project,
   Track,
   VideoTrack,
 } from './schema';
@@ -79,7 +91,7 @@ export interface OpError {
   message: string;
 }
 
-export type OpResult = Result<ProjectV1, OpError>;
+export type OpResult = Result<Project, OpError>;
 
 export interface OpOptions {
   /** ULID source for new clip and link IDs (inject for deterministic tests). */
@@ -115,14 +127,14 @@ export type TimelineOp =
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
   | { type: 'setMarks'; inUs: Us | null; outUs: Us | null }
-  | { type: 'replaceDocument'; doc: ProjectV1 };
+  | { type: 'replaceDocument'; doc: Project };
 
 export type TimelineOpType = TimelineOp['type'];
 type OpOf<T extends TimelineOpType> = Extract<TimelineOp, { type: T }>;
 type OpArgs<T extends TimelineOpType> = Omit<OpOf<T>, 'type'>;
 
 export interface PatchedResult {
-  doc: ProjectV1;
+  doc: Project;
   patches: Patch[];
   inversePatches: Patch[];
 }
@@ -137,8 +149,11 @@ export interface ClipLocation {
   clip: Clip;
 }
 
-export function clipDurationUs(clip: Pick<Clip, 'sourceStartUs' | 'sourceEndUs'>): Us {
-  return clip.sourceEndUs - clip.sourceStartUs;
+/** Length of a clip on the timeline (`clip-time.ts`: the source length unless v2 speed is set). */
+export function clipDurationUs(
+  clip: Pick<Clip, 'sourceStartUs' | 'sourceEndUs' | 'durationUs' | 'freeze'>,
+): Us {
+  return clipTimelineDurationUs(clip);
 }
 
 export function clipEndUs(clip: Clip): Us {
@@ -146,18 +161,18 @@ export function clipEndUs(clip: Clip): Us {
 }
 
 /** The timeline's length: the latest clip end on any track (0 when empty). */
-export function timelineDurationUs(doc: ProjectV1): Us {
+export function timelineDurationUs(doc: Project): Us {
   let end = 0;
   for (const track of doc.timeline.tracks)
     for (const c of track.clips) end = Math.max(end, clipEndUs(c));
   return end;
 }
 
-export function findTrack(doc: ProjectV1, trackId: string): Track | null {
+export function findTrack(doc: Project, trackId: string): Track | null {
   return doc.timeline.tracks.find((t) => t.id === trackId) ?? null;
 }
 
-export function findClip(doc: ProjectV1, clipId: string): ClipLocation | null {
+export function findClip(doc: Project, clipId: string): ClipLocation | null {
   const tracks = doc.timeline.tracks;
   for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
     const track = tracks[trackIndex];
@@ -170,7 +185,7 @@ export function findClip(doc: ProjectV1, clipId: string): ClipLocation | null {
 }
 
 /** The clip and every clip sharing its `linkId` (just the clip when unlinked). */
-export function linkedClips(doc: ProjectV1, clipId: string): ClipLocation[] {
+export function linkedClips(doc: Project, clipId: string): ClipLocation[] {
   const loc = findClip(doc, clipId);
   if (!loc) return [];
   const linkId = loc.clip.linkId;
@@ -194,7 +209,7 @@ export function clipAt(track: Track, tUs: Us): Clip | null {
 }
 
 /** Every clip under the playhead (one per track at most). */
-export function clipsAt(doc: ProjectV1, tUs: Us): ClipLocation[] {
+export function clipsAt(doc: Project, tUs: Us): ClipLocation[] {
   const result: ClipLocation[] = [];
   doc.timeline.tracks.forEach((track, trackIndex) => {
     const clip = clipAt(track, tUs);
@@ -206,7 +221,7 @@ export function clipsAt(doc: ProjectV1, tUs: Us): ClipLocation[] {
 /** Reference-clock time shown at timeline time `tUs` on a track, or null in a gap. */
 export function refTimeAt(track: Track, tUs: Us): Us | null {
   const clip = clipAt(track, tUs);
-  return clip ? clip.sourceStartUs + (tUs - clip.timelineStartUs) : null;
+  return clip ? clipRefAt(clip, tUs) : null;
 }
 
 /**
@@ -214,7 +229,7 @@ export function refTimeAt(track: Track, tUs: Us): Us | null {
  * of `excludeClipIds` (the clips being dragged). Sorted and deduplicated.
  */
 export function snapPoints(
-  doc: ProjectV1,
+  doc: Project,
   options: { playheadUs?: Us | null; excludeClipIds?: readonly string[] } = {},
 ): Us[] {
   const exclude = new Set(options.excludeClipIds ?? []);
@@ -250,7 +265,7 @@ export function snapTo(
 }
 
 /** Picture size of the media shown on a video track (for layout clamping). */
-export function trackFrameSize(doc: ProjectV1, track: VideoTrack): Size {
+export function trackFrameSize(doc: Project, track: VideoTrack): Size {
   const byId = new Map(doc.media.map((m) => [m.id, m]));
   for (const clip of track.clips) {
     const video = byId.get(clip.mediaId)?.video;
@@ -287,7 +302,7 @@ interface Ctx {
  * No change gives the input document and empty patch lists.
  */
 export function applyOpWithPatches(
-  doc: ProjectV1,
+  doc: Project,
   op: TimelineOp,
   options: OpOptions = {},
 ): Result<PatchedResult, OpError> {
@@ -318,7 +333,7 @@ export function applyOpWithPatches(
 }
 
 /** Applies an operation and returns the new document. */
-export function applyOp(doc: ProjectV1, op: TimelineOp, options: OpOptions = {}): OpResult {
+export function applyOp(doc: Project, op: TimelineOp, options: OpOptions = {}): OpResult {
   const result = applyOpWithPatches(doc, op, options);
   return result.ok ? ok(result.value.doc) : result;
 }
@@ -334,7 +349,7 @@ export interface BatchOpError extends OpError {
  * allowed; a batch that changes nothing gives the input document and empty patch lists.
  */
 export function applyOpsWithPatches(
-  doc: ProjectV1,
+  doc: Project,
   ops: readonly TimelineOp[],
   options: OpOptions = {},
 ): Result<PatchedResult, BatchOpError> {
@@ -355,7 +370,7 @@ export function applyOpsWithPatches(
 }
 
 function opFn<T extends TimelineOpType>(type: T) {
-  return (doc: ProjectV1, args: OpArgs<T>, options?: OpOptions): OpResult =>
+  return (doc: Project, args: OpArgs<T>, options?: OpOptions): OpResult =>
     applyOp(doc, { ...args, type } as unknown as TimelineOp, options);
 }
 
@@ -384,7 +399,7 @@ export const unlink = opFn('unlink');
 export const relink = opFn('relink');
 export const setMarks = opFn('setMarks');
 
-function runOp(draft: ProjectV1, op: TimelineOp, ctx: Ctx): void {
+function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
   switch (op.type) {
     case 'split':
       splitDraft(draft, op, ctx);
@@ -463,27 +478,27 @@ function isTime(t: number): boolean {
   return Number.isSafeInteger(t) && t >= 0;
 }
 
-function requireTrack(draft: ProjectV1, trackId: string): Track {
+function requireTrack(draft: Project, trackId: string): Track {
   return findTrack(draft, trackId) ?? fail('unknown-track', `unknown track ${trackId}`);
 }
 
-function audioTrack(draft: ProjectV1, trackId: string): AudioTrack {
+function audioTrack(draft: Project, trackId: string): AudioTrack {
   const track = requireTrack(draft, trackId);
   if (track.type !== 'audio') fail('wrong-track-type', `track ${trackId} is not an audio track`);
   return track;
 }
 
-function videoTrack(draft: ProjectV1, trackId: string): VideoTrack {
+function videoTrack(draft: Project, trackId: string): VideoTrack {
   const track = requireTrack(draft, trackId);
   if (track.type !== 'video') fail('wrong-track-type', `track ${trackId} is not a video track`);
   return track;
 }
 
-function requireClip(draft: ProjectV1, clipId: string): ClipLocation {
+function requireClip(draft: Project, clipId: string): ClipLocation {
   return findClip(draft, clipId) ?? fail('unknown-clip', `unknown clip ${clipId}`);
 }
 
-function requireMedia(draft: ProjectV1, mediaId: string): Media {
+function requireMedia(draft: Project, mediaId: string): Media {
   return (
     draft.media.find((m) => m.id === mediaId) ?? fail('unknown-media', `unknown media ${mediaId}`)
   );
@@ -494,14 +509,14 @@ function plain<T extends object>(value: T): T {
   return isDraft(value) ? current<T>(value as Draft<T>) : value;
 }
 
-function dissolveLink(draft: ProjectV1, linkId: string): void {
+function dissolveLink(draft: Project, linkId: string): void {
   for (const track of draft.timeline.tracks) {
     for (const clip of track.clips) if (clip.linkId === linkId) clip.linkId = null;
   }
 }
 
 /** Clears link IDs that only one clip still carries. */
-function normalizeLinks(draft: ProjectV1): void {
+function normalizeLinks(draft: Project): void {
   const counts = new Map<string, number>();
   for (const track of draft.timeline.tracks) {
     for (const clip of track.clips) {
@@ -520,7 +535,7 @@ function sortClips(track: Track): void {
 }
 
 /** A clip's edit group as clip IDs: the clip, plus its linked partners unless excluded. */
-function editGroup(draft: ProjectV1, clipId: string, includeLinked: boolean): ClipLocation[] {
+function editGroup(draft: Project, clipId: string, includeLinked: boolean): ClipLocation[] {
   const loc = requireClip(draft, clipId);
   if (!includeLinked && loc.clip.linkId !== null) dissolveLink(draft, loc.clip.linkId);
   return linkedClips(draft, clipId);
@@ -534,7 +549,7 @@ function assertUnlocked(group: readonly ClipLocation[]): void {
 
 /** Distinct edit groups for a selection, keyed by their first clip ID. */
 function editGroups(
-  draft: ProjectV1,
+  draft: Project,
   clipIds: readonly string[],
   includeLinked: boolean,
 ): ClipLocation[][] {
@@ -552,7 +567,7 @@ function editGroups(
 // ---------------------------------------------------------------------------------------------
 // Split
 
-function splitDraft(draft: ProjectV1, op: OpOf<'split'>, ctx: Ctx): void {
+function splitDraft(draft: Project, op: OpOf<'split'>, ctx: Ctx): void {
   const at = op.atUs;
   if (!isTime(at)) fail('invalid-value', 'split time must be ≥ 0');
   let groups: ClipLocation[][];
@@ -573,17 +588,10 @@ function splitDraft(draft: ProjectV1, op: OpOf<'split'>, ctx: Ctx): void {
     if (offset < ctx.minUs || clipDurationUs(first) - offset < ctx.minUs) continue;
     const rightLink = first.linkId === null ? null : ctx.id('link');
     for (const { track, clip } of group) {
-      const right: Clip = {
-        id: ctx.id('clip'),
-        mediaId: clip.mediaId,
-        timelineStartUs: at,
-        sourceStartUs: clip.sourceStartUs + offset,
-        sourceEndUs: clip.sourceEndUs,
-        linkId: rightLink,
-      };
-      clip.sourceEndUs = clip.sourceStartUs + offset;
+      const whole = plain(clip);
+      const right: Clip = { ...clipTail(whole, at), id: ctx.id('clip'), linkId: rightLink };
       const index = track.clips.findIndex((c) => c.id === clip.id);
-      track.clips.splice(index + 1, 0, right);
+      track.clips.splice(index, 1, clipHead(whole, at), right);
     }
     count++;
   }
@@ -598,7 +606,7 @@ function neighbours(track: Track, clipId: string): { prev: Clip | null; next: Cl
   return { prev: track.clips[index - 1] ?? null, next: track.clips[index + 1] ?? null };
 }
 
-function trimDraft(draft: ProjectV1, op: OpOf<'trim'>, ctx: Ctx): void {
+function trimDraft(draft: Project, op: OpOf<'trim'>, ctx: Ctx): void {
   if (!Number.isSafeInteger(op.toUs)) fail('invalid-value', 'trim time must be an integer');
   const group = editGroup(draft, op.clipId, op.includeLinked ?? true);
   assertUnlocked(group);
@@ -610,31 +618,38 @@ function trimDraft(draft: ProjectV1, op: OpOf<'trim'>, ctx: Ctx): void {
     let hi = Number.POSITIVE_INFINITY;
     for (const { track, clip } of group) {
       const bounds = mediaEditBounds(requireMedia(draft, clip.mediaId));
-      hi = Math.min(hi, start + (bounds.endUs - clip.sourceStartUs));
+      hi = Math.min(hi, clipMaxEndUs(clip, bounds.endUs));
       const { next } = neighbours(track, clip.id);
       if (next) hi = Math.min(hi, next.timelineStartUs);
     }
     const lo = start + ctx.minUs;
     const newEnd = Math.min(Math.max(op.toUs, lo), Math.max(lo, hi));
     if (newEnd === end) return;
-    for (const { clip } of group) clip.sourceEndUs = clip.sourceStartUs + (newEnd - start);
+    for (const { clip } of group) replaceClip(draft, clip.id, clipWithEnd(plain(clip), newEnd));
     return;
   }
 
   let lo = 0;
   for (const { track, clip } of group) {
     const bounds = mediaEditBounds(requireMedia(draft, clip.mediaId));
-    lo = Math.max(lo, start - (clip.sourceStartUs - bounds.startUs));
+    lo = Math.max(lo, clipMinStartUs(clip, bounds.startUs));
     const { prev } = neighbours(track, clip.id);
     if (prev) lo = Math.max(lo, clipEndUs(prev));
   }
   const hi = end - ctx.minUs;
   const newStart = Math.max(Math.min(op.toUs, hi), Math.min(lo, hi));
-  const delta = newStart - start;
-  if (delta === 0) return;
-  for (const { clip } of group) {
-    clip.timelineStartUs = newStart;
-    clip.sourceStartUs += delta;
+  if (newStart === start) return;
+  for (const { clip } of group) replaceClip(draft, clip.id, clipWithStart(plain(clip), newStart));
+}
+
+/** Replaces a clip (found by ID) with a new value in place. */
+function replaceClip(draft: Project, clipId: string, next: Clip): void {
+  for (const track of draft.timeline.tracks) {
+    const index = track.clips.findIndex((c) => c.id === clipId);
+    if (index >= 0) {
+      track.clips[index] = next;
+      return;
+    }
   }
 }
 
@@ -659,7 +674,7 @@ function freeSpans(track: Track, exclude: ReadonlySet<string>): Span[] {
   return spans;
 }
 
-function moveDraft(draft: ProjectV1, op: OpOf<'move'>): void {
+function moveDraft(draft: Project, op: OpOf<'move'>): void {
   if (!Number.isSafeInteger(op.toStartUs)) fail('invalid-value', 'move time must be an integer');
   const group = editGroup(draft, op.clipId, op.includeLinked ?? true);
   assertUnlocked(group);
@@ -699,7 +714,7 @@ function moveDraft(draft: ProjectV1, op: OpOf<'move'>): void {
 // ---------------------------------------------------------------------------------------------
 // Delete, ripple delete, cut range
 
-function removeClips(draft: ProjectV1, ids: ReadonlySet<string>): void {
+function removeClips(draft: Project, ids: ReadonlySet<string>): void {
   for (const track of draft.timeline.tracks) {
     if (track.clips.some((c) => ids.has(c.id))) {
       track.clips = track.clips.filter((c) => !ids.has(c.id));
@@ -707,7 +722,7 @@ function removeClips(draft: ProjectV1, ids: ReadonlySet<string>): void {
   }
 }
 
-function deleteDraft(draft: ProjectV1, op: OpOf<'delete'>): void {
+function deleteDraft(draft: Project, op: OpOf<'delete'>): void {
   const groups = editGroups(draft, op.clipIds, op.includeLinked ?? true);
   if (groups.length === 0) fail('nothing-to-do', 'no clips selected');
   for (const group of groups) assertUnlocked(group);
@@ -715,7 +730,7 @@ function deleteDraft(draft: ProjectV1, op: OpOf<'delete'>): void {
   normalizeLinks(draft);
 }
 
-function rippleDeleteDraft(draft: ProjectV1, op: OpOf<'rippleDelete'>, ctx: Ctx): void {
+function rippleDeleteDraft(draft: Project, op: OpOf<'rippleDelete'>, ctx: Ctx): void {
   const groups = editGroups(draft, op.clipIds, op.includeLinked ?? true);
   if (groups.length === 0) fail('nothing-to-do', 'no clips selected');
   for (const group of groups) assertUnlocked(group);
@@ -740,7 +755,7 @@ export function mapTimeThroughCut(t: Us, a: Us, b: Us): Us {
   return a;
 }
 
-function cutDraft(draft: ProjectV1, a: Us, b: Us, ctx: Ctx): void {
+function cutDraft(draft: Project, a: Us, b: Us, ctx: Ctx): void {
   const removed = b - a;
   const tracks = draft.timeline.tracks;
 
@@ -769,7 +784,7 @@ function cutDraft(draft: ProjectV1, a: Us, b: Us, ctx: Ctx): void {
         out.push({ ...clip, timelineStartUs: s - removed });
       } else {
         if (s < a) {
-          const left = { ...clip, sourceEndUs: clip.sourceStartUs + (a - s) };
+          const left = clipHead(clip, a);
           if (clipDurationUs(left) >= ctx.minUs) out.push(left);
         }
         if (e > b) {
@@ -780,10 +795,9 @@ function cutDraft(draft: ProjectV1, a: Us, b: Us, ctx: Ctx): void {
             linkId = known;
           }
           const right: Clip = {
-            ...clip,
+            ...clipTail(clip, b),
             id: s < a ? ctx.id('clip') : clip.id,
             timelineStartUs: a,
-            sourceStartUs: clip.sourceStartUs + (b - s),
             linkId,
           };
           if (clipDurationUs(right) >= ctx.minUs) out.push(right);
@@ -814,7 +828,7 @@ const OVERLAY_ONLY_KEYS = [
   'mirror',
 ] as const;
 
-function layoutDraft(draft: ProjectV1, trackId: string, patch: LayoutPatch): void {
+function layoutDraft(draft: Project, trackId: string, patch: LayoutPatch): void {
   const track = videoTrack(draft, trackId);
   const frame = trackFrameSize(draft, track);
   const layout = plain(track.layout);
@@ -849,7 +863,7 @@ function layoutDraft(draft: ProjectV1, trackId: string, patch: LayoutPatch): voi
   track.layout = clampOverlayLayout(merged, draft.timeline.canvas, frame);
 }
 
-function nudgeDraft(draft: ProjectV1, op: OpOf<'nudge'>): void {
+function nudgeDraft(draft: Project, op: OpOf<'nudge'>): void {
   if (!Number.isFinite(op.syncAdjustUs)) fail('invalid-value', 'nudge must be a number');
   let mediaIds: string[];
   if ('componentId' in op.target) {
@@ -865,7 +879,7 @@ function nudgeDraft(draft: ProjectV1, op: OpOf<'nudge'>): void {
   for (const id of mediaIds) requireMedia(draft, id).syncAdjustUs = value;
 }
 
-function relinkDraft(draft: ProjectV1, clipIds: readonly string[], ctx: Ctx): void {
+function relinkDraft(draft: Project, clipIds: readonly string[], ctx: Ctx): void {
   const locs = [...new Set(clipIds)].map((id) => requireClip(draft, id));
   if (locs.length < 2) fail('cannot-link', 'select at least two clips to link');
   assertUnlocked(locs);
@@ -879,6 +893,12 @@ function relinkDraft(draft: ProjectV1, clipIds: readonly string[], ctx: Ctx): vo
       clipDurationUs(clip) !== clipDurationUs(first)
     ) {
       fail('cannot-link', 'linked clips must start together and have the same length');
+    }
+    if (
+      clipSourceDurationUs(clip) !== clipSourceDurationUs(first) ||
+      (clip.freeze ?? false) !== (first.freeze ?? false)
+    ) {
+      fail('cannot-link', 'linked clips must play at the same speed');
     }
   }
   const linkId = ctx.id('link');

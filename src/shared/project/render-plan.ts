@@ -45,8 +45,9 @@ import {
   type PixelRect,
   type Size,
 } from './face-layout';
+import { clipRefAt, clipTimeAtRef } from './clip-time';
 import { mediaRefBounds, refToFileUs, refToFileUsExact, type MediaClock } from './media-time';
-import type { Clip, Media, NRect, ProjectV1, Track, VideoTrack } from './schema';
+import type { Clip, Media, NRect, Project, Track, VideoTrack } from './schema';
 import { clipAt, clipEndUs, timelineDurationUs } from './timeline-ops';
 
 export type { PixelRect } from './face-layout';
@@ -162,7 +163,7 @@ export function containRect(source: Size, canvas: Size): PixelRect {
 
 /** Geometry of a clip on a video track, or null when its media has no known picture size. */
 export function layerGeometry(
-  doc: ProjectV1,
+  doc: Project,
   track: VideoTrack,
   trackIndex: number,
   clip: Clip,
@@ -203,7 +204,7 @@ export function layerGeometry(
   };
 }
 
-function mediaMap(doc: ProjectV1): Map<string, Media> {
+function mediaMap(doc: Project): Map<string, Media> {
   return new Map(doc.media.map((m) => [m.id, m]));
 }
 
@@ -216,7 +217,7 @@ function clockOf(media: Media): MediaClock {
   };
 }
 
-function visibleVideoTracks(doc: ProjectV1): { track: VideoTrack; trackIndex: number }[] {
+function visibleVideoTracks(doc: Project): { track: VideoTrack; trackIndex: number }[] {
   const result: { track: VideoTrack; trackIndex: number }[] = [];
   doc.timeline.tracks.forEach((track, trackIndex) => {
     if (track.type === 'video' && !track.hidden) result.push({ track, trackIndex });
@@ -225,7 +226,7 @@ function visibleVideoTracks(doc: ProjectV1): { track: VideoTrack; trackIndex: nu
 }
 
 function refAt(clip: Clip, tUs: Us): Us {
-  return clip.sourceStartUs + (tUs - clip.timelineStartUs);
+  return clipRefAt(clip, tUs);
 }
 
 /**
@@ -235,12 +236,17 @@ function refAt(clip: Clip, tUs: Us): Us {
  */
 export function clipCoverage(clip: Clip, media: MediaClock): { startUs: Us; endUs: Us } | null {
   const bounds = mediaRefBounds(media);
+  if (clip.freeze) {
+    // A freeze frame shows one source instant for its whole length.
+    if (clip.sourceStartUs < bounds.startUs || clip.sourceStartUs >= bounds.endUs) return null;
+    return { startUs: clip.timelineStartUs, endUs: clipEndUs(clip) };
+  }
   const refStart = Math.max(clip.sourceStartUs, bounds.startUs);
   const refEnd = Math.min(clip.sourceEndUs, bounds.endUs);
   if (refEnd <= refStart) return null;
   return {
-    startUs: clip.timelineStartUs + (refStart - clip.sourceStartUs),
-    endUs: clip.timelineStartUs + (refEnd - clip.sourceStartUs),
+    startUs: refStart === clip.sourceStartUs ? clip.timelineStartUs : clipTimeAtRef(clip, refStart),
+    endUs: refEnd === clip.sourceEndUs ? clipEndUs(clip) : clipTimeAtRef(clip, refEnd),
   };
 }
 
@@ -253,7 +259,7 @@ function covers(clip: Clip, media: MediaClock, tUs: Us): boolean {
 // Video
 
 /** Visible video layers at timeline time `tUs`, bottom to top. */
-export function layersAt(doc: ProjectV1, tUs: Us): VideoLayer[] {
+export function layersAt(doc: Project, tUs: Us): VideoLayer[] {
   const media = mediaMap(doc);
   const layers: VideoLayer[] = [];
   for (const { track, trackIndex } of visibleVideoTracks(doc)) {
@@ -269,7 +275,7 @@ export function layersAt(doc: ProjectV1, tUs: Us): VideoLayer[] {
 }
 
 function segmentLayer(
-  doc: ProjectV1,
+  doc: Project,
   track: VideoTrack,
   trackIndex: number,
   clip: Clip,
@@ -292,7 +298,7 @@ function segmentLayer(
 }
 
 /** Timeline intervals over which the visible layer set is constant, covering `[0, duration)`. */
-export function segments(doc: ProjectV1): Segment[] {
+export function segments(doc: Project): Segment[] {
   const duration = timelineDurationUs(doc);
   if (duration === 0) return [];
   const tracks = visibleVideoTracks(doc);
@@ -368,7 +374,7 @@ export function segmentLayersAt(segment: Segment, tUs: Us): VideoLayer[] {
 }
 
 /** Per visible video track: clip and gap pieces covering `[0, duration)` (export step 2). */
-export function videoTrackPlans(doc: ProjectV1): VideoTrackPlan[] {
+export function videoTrackPlans(doc: Project): VideoTrackPlan[] {
   const duration = timelineDurationUs(doc);
   const media = mediaMap(doc);
   return visibleVideoTracks(doc).map(({ track, trackIndex }) => {
@@ -398,7 +404,7 @@ export function dbToLinear(db: number): number {
 }
 
 /** Whether a track is heard, given mute and solo across all audio tracks. */
-export function isTrackAudible(doc: ProjectV1, track: Track): boolean {
+export function isTrackAudible(doc: Project, track: Track): boolean {
   if (track.type !== 'audio' || track.muted) return false;
   const anySolo = doc.timeline.tracks.some((t) => t.type === 'audio' && t.solo);
   return !anySolo || track.solo;
@@ -409,7 +415,7 @@ export function isTrackAudible(doc: ProjectV1, track: Track): boolean {
  * while another track is) are left out unless `includeInaudible` is set.
  */
 export function audioSegments(
-  doc: ProjectV1,
+  doc: Project,
   options: { includeInaudible?: boolean } = {},
 ): AudioSegment[] {
   const media = mediaMap(doc);

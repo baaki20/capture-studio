@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { recordedProject } from '../fixtures/editor-project';
 
@@ -22,7 +22,7 @@ function ff(args: string[]): void {
   execFileSync(FFMPEG, ['-hide_banner', '-loglevel', 'error', '-y', ...args]);
 }
 
-export function makeProject(projects: string): ProjectV1 {
+export function makeProject(projects: string): Project {
   const doc = recordedProject({
     durationUs: SECONDS * S,
     pauses: [],

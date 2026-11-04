@@ -17,7 +17,7 @@ import {
   smoothstep,
   videoTrackPlans,
 } from '../../src/shared/project/render-plan';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { applyOp, clipEndUs, timelineDurationUs } from '../../src/shared/project/timeline-ops';
 import { unwrap } from '../../src/shared/result';
 import {
@@ -32,7 +32,7 @@ import { exampleProject } from '../fixtures/example-project';
 
 const S = 1_000_000;
 
-function edit(doc: ProjectV1, ...ops: Parameters<typeof applyOp>[1][]): ProjectV1 {
+function edit(doc: Project, ...ops: Parameters<typeof applyOp>[1][]): Project {
   const generateId = counterIds('E');
   return ops.reduce((d, op) => unwrap(applyOp(d, op, { generateId })), doc);
 }
@@ -244,7 +244,7 @@ describe('audioSegments', () => {
     const doc = recordedProject();
     const voice = trackByName(doc, 'Voice').id;
     const system = trackByName(doc, 'System audio').id;
-    const tracksOf = (d: ProjectV1) => [...new Set(audioSegments(d).map((a) => a.trackId))];
+    const tracksOf = (d: Project) => [...new Set(audioSegments(d).map((a) => a.trackId))];
     expect(tracksOf(doc)).toEqual([voice, system]);
     expect(tracksOf(edit(doc, { type: 'setMuted', trackId: voice, muted: true }))).toEqual([
       system,
@@ -279,7 +279,7 @@ describe('audioSegments', () => {
 });
 
 describe('non-destructive sync nudge (R1.42)', () => {
-  const nudgeFace = (doc: ProjectV1, syncAdjustUs: number) =>
+  const nudgeFace = (doc: Project, syncAdjustUs: number) =>
     edit(doc, { type: 'nudge', target: { componentId: 'cmp_face' }, syncAdjustUs });
 
   it('shows a gap where the nudged camera file does not cover the clip', () => {

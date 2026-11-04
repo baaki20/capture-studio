@@ -11,6 +11,8 @@ export const ID_PREFIXES = {
   track: 'trk',
   clip: 'clp',
   link: 'lnk',
+  object: 'obj',
+  marker: 'mrk',
   secret: 'sec',
   job: 'job',
 } as const;

@@ -20,7 +20,7 @@ import {
   type EditorAutomationCommand,
 } from '../../src/shared/ipc/editor-automation';
 import { PEAK_WINDOW_US } from '../../src/shared/project/peaks';
-import type { ProjectV1 } from '../../src/shared/project/schema';
+import type { Project } from '../../src/shared/project/schema';
 import { counterIds } from './editor-project';
 
 /** Peaks for an audio media: loud except inside `quiet` (file-local µs ranges). */
@@ -46,7 +46,7 @@ export interface FakeApp {
   frames: { width: number; height: number; pngBase64: string };
 }
 
-export function fakeApp(doc: ProjectV1): FakeApp {
+export function fakeApp(doc: Project): FakeApp {
   let store: DocumentStore | null = null;
   let link: EditorLink | null = null;
   const peaks = new Map<string, ArrayBuffer>();

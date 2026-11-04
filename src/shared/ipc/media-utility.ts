@@ -8,7 +8,7 @@
  */
 import { z } from 'zod';
 import { FfmpegEncoderReportSchema } from '../capabilities/types';
-import { ProjectV1StructureSchema } from '../project/schema';
+import { ProjectStructureSchema } from '../project/schema';
 import { ExportOptionsSchema, StreamKindSchema } from './contract';
 
 const Id = z.string().min(1).max(64);
@@ -47,7 +47,7 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('export'),
     root: AbsPath,
-    doc: ProjectV1StructureSchema,
+    doc: ProjectStructureSchema,
     options: ExportOptionsSchema,
     hardwareEncoder: z.string().nullable(),
     output: AbsPath,

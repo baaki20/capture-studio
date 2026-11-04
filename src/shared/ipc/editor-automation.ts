@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { TimelineOpSchema } from '../project/op-schema';
-import { ProjectV1StructureSchema } from '../project/schema';
+import { ProjectStructureSchema } from '../project/schema';
 
 const TimeSummarySchema = z.object({ seconds: z.number(), timecode: z.string() });
 
@@ -69,7 +69,7 @@ export const EDITOR_AUTOMATION_COMMANDS = {
   snapshot: command(
     z.strictObject({}),
     z.object({
-      doc: ProjectV1StructureSchema,
+      doc: ProjectStructureSchema,
       version: z.int().nonnegative(),
       readOnly: z.boolean(),
     }),

@@ -12,9 +12,9 @@ import {
   type RecordingManifest,
 } from '../../src/shared/project/from-recording';
 import {
-  ProjectV1Schema,
+  ProjectSchema,
   type Clip,
-  type ProjectV1,
+  type Project,
   type Track,
 } from '../../src/shared/project/schema';
 import { unwrap } from '../../src/shared/result';
@@ -26,7 +26,7 @@ function counterIds(): () => string {
 
 const OPTIONS = { generateId: counterIds, now: () => new Date('2026-10-24T14:20:00.000Z') };
 
-function build(manifest: RecordingManifest): ProjectV1 {
+function build(manifest: RecordingManifest): Project {
   return unwrap(projectFromRecording(manifest, { ...OPTIONS, generateId: counterIds() }));
 }
 
@@ -115,7 +115,7 @@ function defaultStreams(): RecordedStream[] {
   ];
 }
 
-function track(project: ProjectV1, name: string): Track {
+function track(project: Project, name: string): Track {
   const t = project.timeline.tracks.find((x) => x.name === name);
   if (!t) throw new Error(`no track ${name}`);
   return t;
@@ -132,7 +132,7 @@ function sessionAt(clips: Clip[], t: number): number | null {
 describe('projectFromRecording', () => {
   it('builds a valid project with screen, linked face + voice, and system audio', () => {
     const project = build(manifest());
-    expect(ProjectV1Schema.safeParse(project).success).toBe(true);
+    expect(ProjectSchema.safeParse(project).success).toBe(true);
     expect(checkProjectInvariants(project)).toEqual([]);
     expect(project.timeline.tracks.map((t) => `${t.type}:${t.name}`)).toEqual([
       'video:Screen',

@@ -5,7 +5,7 @@
  * Render requests are coalesced: while the worker is drawing, only the newest request waits, so
  * a slow frame never builds a queue (late frames are dropped, not shown late).
  */
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import type { LumaProbe, PixelCapture } from './compositor-webgl';
 import { PlaybackCounters, type PreviewCounterValues } from './playback-counters';
 import type { PreviewEvent, PreviewRequest, PreviewStats } from './protocol';
@@ -49,7 +49,7 @@ export class PreviewClient {
     this.post({ type: 'init', canvas: offscreen }, [offscreen]);
   }
 
-  setDoc(doc: ProjectV1, mediaUrls: Record<string, string>): void {
+  setDoc(doc: Project, mediaUrls: Record<string, string>): void {
     this.post({ type: 'doc', doc, mediaUrls });
   }
 

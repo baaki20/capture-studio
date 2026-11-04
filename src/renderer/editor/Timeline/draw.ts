@@ -4,8 +4,9 @@
  * link highlights, offline clips, parts a sync nudge left uncovered, the snap guide and the
  * playhead. Geometry comes from `geometry.ts`, so drawing and hit testing agree.
  */
+import { clipRefAtExact } from '../../../shared/project/clip-time';
 import { clipCoverage } from '../../../shared/project/render-plan';
-import type { Clip, Media, ProjectV1 } from '../../../shared/project/schema';
+import type { Clip, Media, Project } from '../../../shared/project/schema';
 import { clipEndUs } from '../../../shared/project/timeline-ops';
 import { formatTimecode } from '../../../shared/time';
 import { refToFileUsExact } from '../../../shared/project/media-time';
@@ -55,7 +56,7 @@ export const DARK_PALETTE: TimelinePalette = {
 };
 
 export interface DrawInput {
-  doc: ProjectV1;
+  doc: Project;
   rows: readonly Row[];
   view: TimelineView;
   width: number;
@@ -221,7 +222,7 @@ function drawClip(
 }
 
 function fileUsAt(clip: Clip, media: Media, tUs: number): number {
-  return refToFileUsExact(media, clip.sourceStartUs + (tUs - clip.timelineStartUs));
+  return refToFileUsExact(media, clipRefAtExact(clip, tUs));
 }
 
 function drawThumbnails(

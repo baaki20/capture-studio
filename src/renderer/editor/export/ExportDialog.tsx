@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useState } from 'react';
 import type { ExportOptions, InvokeResponse } from '../../../shared/ipc/contract';
 import type { EditorPreloadApi } from '../../../shared/ipc/preload-api';
-import type { ProjectV1 } from '../../../shared/project/schema';
+import type { Project } from '../../../shared/project/schema';
 import {
   describeEncoder,
   describeQuality,
@@ -19,7 +19,7 @@ import styles from './ExportDialog.module.css';
 export interface ExportDialogProps {
   projectId: string;
   /** The editor's current document: the export uses this snapshot (R1.49). */
-  doc: ProjectV1;
+  doc: Project;
   /** Called when the user closes the dialog (never while an export runs). */
   onClose: () => void;
   /** Defaults to `window.csEditor`; tests and stories pass their own. */

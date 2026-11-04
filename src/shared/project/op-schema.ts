@@ -7,7 +7,7 @@
  * every edit passes the same per-operation checks as a user's.
  */
 import { z } from 'zod';
-import { NRectSchema, prefixedId } from './schema';
+import { BorderSchema, NRectSchema, ShadowSchema, prefixedId } from './schema';
 import type { TimelineOp } from './timeline-ops';
 
 /** A `TimelineOp` that automation may send. */
@@ -27,6 +27,9 @@ const LayoutPatchSchema = z.strictObject({
   cornerRadius: z.number().optional(),
   mirror: z.boolean().optional(),
   crop: NRectSchema.nullable().optional(),
+  zoom: z.number().optional(),
+  border: BorderSchema.optional(),
+  shadow: ShadowSchema.optional(),
 });
 
 const NudgeTargetSchema = z.union([
