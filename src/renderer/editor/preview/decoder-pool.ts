@@ -176,8 +176,9 @@ export class MediaDecoder<F extends CacheableFrame> {
       const expected = run.frameTimestampAt(tUs);
       const frame = this.cache.frameAt(this.mediaId, tUs);
       if (frame && frame.timestamp === expected) return { frame, exact: true };
-      if (expected !== null && !this.pumping) {
-        // The cache evicted the frame since; decode it again.
+      if (expected !== null) {
+        // The cache evicted the frame since; decode it again. A pump that is running (callers
+        // usually `request` just before) sees `forceSeek` when it finishes and seeks then.
         this.forceSeek = true;
         this.request(tUs);
       }

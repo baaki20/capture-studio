@@ -236,6 +236,25 @@ describe('DecoderPool', () => {
     expect(pool.frameFor('m', 4 * S)).toMatchObject({ exact: true, frame: { timestamp: 4 * S } });
   });
 
+  it('decodes an evicted frame again when asked the way the renderer asks (request, then frameFor)', async () => {
+    // One key frame at 0: the run that showed 4 s covers 0–5.5 s, and going back to 0.2 s is
+    // "inside" it, but the cache kept only the window around 4 s.
+    const w = world(6 * S, 100_000, 100 * S);
+    const { pool, cache } = setup(w);
+    pool.request('m', 4 * S);
+    await settle(pool);
+    pool.request('m', 4 * S); // the next render of 4 s trims the cache to its window
+    await settle(pool);
+    expect(cache.timestamps('m')).not.toContain(0.2 * S);
+    let answer: { exact: boolean } = { exact: false };
+    for (let i = 0; i < 20 && !answer.exact; i++) {
+      pool.request('m', 0.2 * S);
+      answer = pool.frameFor('m', 0.2 * S);
+      await settle(pool);
+    }
+    expect(answer).toMatchObject({ exact: true, frame: { timestamp: 0.2 * S } });
+  });
+
   it('closes every decoded frame exactly once and stops decoding removed media', async () => {
     const w = world();
     const { pool, cache } = setup(w);
