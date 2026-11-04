@@ -1,20 +1,37 @@
 /**
- * The inspector (R1.40–R1.42): per-track gain, mute, solo, hide and lock; the face overlay
- * (corner and size presets, size, shape, radius, mirror, crop); the screen crop; and the sync
- * nudge of Face + Voice and System audio with the recorded clock information. Every control maps
- * to a timeline operation through `inspector-ops.ts`; sliders group a whole drag into one undo
- * step.
+ * The inspector (R1.40–R1.42, R2.1–R2.4): per-track gain, mute, solo, hide and lock; the face
+ * overlay (corner and size presets, size, shape, radius, mirror, crop, zoom); its border and
+ * shadow; its layout over time (face mode for the In–Out range or from the playhead, and the
+ * keyframe list); the screen crop; and the sync nudge of Face + Voice and System audio with the
+ * recorded clock information. Every control maps to a timeline operation through
+ * `inspector-ops.ts`; sliders group a whole drag into one undo step. Geometry shown and edited is
+ * the keyframe in effect at the playhead.
  */
 import { useState, type ReactNode } from 'react';
 import {
+  BORDER_WIDTH_MAX,
   FACE_CORNERS,
   FACE_SIZE_PRESETS,
   FACE_WIDTH_MAX,
   FACE_WIDTH_MIN,
+  FACE_ZOOM_MAX,
+  FACE_ZOOM_MIN,
+  SHADOW_BLUR_MAX,
+  SHADOW_OFFSET_MAX,
   type Corner,
   type FaceSizePreset,
 } from '../../../shared/project/face-layout';
-import type { AudioTrack, NRect, OverlayLayout, Project } from '../../../shared/project/schema';
+import {
+  EASINGS,
+  FACE_MODES,
+  type AudioTrack,
+  type Easing,
+  type NRect,
+  type OverlayLayout,
+  type Project,
+  type VideoTrack,
+} from '../../../shared/project/schema';
+import { formatTimecode } from '../../../shared/time';
 import {
   GAIN_MAX_DB,
   GAIN_MIN_DB,
@@ -26,13 +43,28 @@ import { errorText } from '../commands';
 import { useEditor } from '../EditorContext';
 import styles from '../Editor.module.css';
 import { useDocumentStore } from '../store/document-store';
+import { useUi } from '../ui-store';
 import {
+  DEFAULT_BORDER,
+  DEFAULT_SHADOW,
+  EASING_LABELS,
+  FACE_MODE_LABELS,
   NUDGE_MAX_MS,
+  addKeyframeOp,
+  alphaOf,
+  borderOp,
   cornerOp,
   cropOp,
+  faceLayoutAt,
+  faceModeOp,
   faceTrack,
   gainOp,
+  keyframeEasingOp,
   mirrorOp,
+  removeKeyframeOp,
+  shadowOp,
+  withAlpha,
+  zoomOp,
   nudgeOp,
   radiusOp,
   resetGainOp,
@@ -86,6 +118,8 @@ export function InspectorPanel() {
     <aside className={styles.inspector} aria-label="Inspector" data-testid="inspector">
       <TracksSection doc={doc} />
       <FaceSection doc={doc} />
+      <FaceStyleSection doc={doc} />
+      <FaceTimeSection doc={doc} />
       <ScreenSection doc={doc} />
       <SyncSection doc={doc} />
     </aside>
@@ -174,9 +208,14 @@ function GainRow({ track }: { track: AudioTrack }) {
 function FaceSection({ doc }: { doc: Project }) {
   const apply = useApply();
   const gesture = useGesture();
+  const { ui } = useEditor();
+  const playheadUs = useUi(ui, (s) => s.playheadUs);
   const track = faceTrack(doc);
   if (!track) return null;
+  // Style is the track's; geometry is the keyframe's in effect at the playhead.
   const layout = track.layout;
+  const shown = faceLayoutAt(doc, track.id, playheadUs);
+  const width = shown?.layout.width ?? layout.width;
   const frame = trackFrameSize(doc, track);
   return (
     <section data-testid="face-panel">
@@ -188,7 +227,7 @@ function FaceSection({ doc }: { doc: Project }) {
             <button
               key={corner}
               type="button"
-              onClick={() => apply(cornerOp(doc, track.id, corner))}
+              onClick={() => apply(cornerOp(doc, track.id, corner, playheadUs))}
             >
               {CORNER_LABELS[corner]}
             </button>
@@ -204,11 +243,11 @@ function FaceSection({ doc }: { doc: Project }) {
           min={FACE_WIDTH_MIN}
           max={FACE_WIDTH_MAX}
           step={0.005}
-          value={layout.width}
-          onChange={(e) => apply(sizeOp(track.id, Number(e.target.value)))}
+          value={width}
+          onChange={(e) => apply(sizeOp(doc, track.id, Number(e.target.value), playheadUs))}
           {...gesture}
         />
-        <span className={styles.muted}>{`${String(Math.round(layout.width * 100))} %`}</span>
+        <span className={styles.muted}>{`${String(Math.round(width * 100))} %`}</span>
       </div>
       <div className={styles.field}>
         <span />
@@ -217,7 +256,7 @@ function FaceSection({ doc }: { doc: Project }) {
             <button
               key={preset}
               type="button"
-              onClick={() => apply(sizePresetOp(doc, track.id, preset))}
+              onClick={() => apply(sizePresetOp(doc, track.id, preset, playheadUs))}
             >
               {preset.charAt(0).toUpperCase() + preset.slice(1)}
             </button>
@@ -271,6 +310,20 @@ function FaceSection({ doc }: { doc: Project }) {
         />
         <span />
       </div>
+      <div className={styles.field}>
+        <label htmlFor="face-zoom">Zoom</label>
+        <input
+          id="face-zoom"
+          type="range"
+          min={FACE_ZOOM_MIN}
+          max={FACE_ZOOM_MAX}
+          step={0.05}
+          value={layout.zoom ?? 1}
+          onChange={(e) => apply(zoomOp(track.id, Number(e.target.value)))}
+          {...gesture}
+        />
+        <span className={styles.muted}>{`${(layout.zoom ?? 1).toFixed(2)}×`}</span>
+      </div>
       <CropFields
         label="Face crop"
         crop={layout.crop}
@@ -279,8 +332,276 @@ function FaceSection({ doc }: { doc: Project }) {
       />
       <p className={styles.muted}>
         Drag the face in the preview to move it; drag a corner to resize.
+        {track.layoutKeyframes ? ' Position and size change the keyframe at the playhead.' : ''}
       </p>
     </section>
+  );
+}
+
+/** Border and drop shadow of the face (R2.4), as fractions of the canvas's short side. */
+function FaceStyleSection({ doc }: { doc: Project }) {
+  const apply = useApply();
+  const gesture = useGesture();
+  const track = faceTrack(doc);
+  if (!track) return null;
+  const { border, shadow } = track.layout;
+  const short = Math.min(doc.timeline.canvas.width, doc.timeline.canvas.height);
+  const px = (fraction: number) => `${String(Math.round(fraction * short))} px`;
+  return (
+    <section data-testid="face-style-panel">
+      <h2>Border and shadow</h2>
+      <div className={styles.field}>
+        <label htmlFor="face-border">Border</label>
+        <input
+          id="face-border"
+          type="checkbox"
+          checked={border !== undefined}
+          onChange={(e) => apply(borderOp(track.id, e.target.checked ? DEFAULT_BORDER : null))}
+        />
+        {border ? (
+          <input
+            type="color"
+            aria-label="Border colour"
+            value={border.color.slice(0, 7)}
+            onChange={(e) => apply(borderOp(track.id, { ...border, color: e.target.value }))}
+          />
+        ) : (
+          <span />
+        )}
+      </div>
+      {border ? (
+        <div className={styles.field}>
+          <label htmlFor="face-border-width">Width</label>
+          <input
+            id="face-border-width"
+            type="range"
+            min={0.001}
+            max={BORDER_WIDTH_MAX / 2}
+            step={0.001}
+            value={border.width}
+            onChange={(e) =>
+              apply(borderOp(track.id, { ...border, width: Number(e.target.value) }))
+            }
+            {...gesture}
+          />
+          <span className={styles.muted}>{px(border.width)}</span>
+        </div>
+      ) : null}
+      <div className={styles.field}>
+        <label htmlFor="face-shadow">Shadow</label>
+        <input
+          id="face-shadow"
+          type="checkbox"
+          checked={shadow !== undefined}
+          onChange={(e) => apply(shadowOp(track.id, e.target.checked ? DEFAULT_SHADOW : null))}
+        />
+        {shadow ? (
+          <input
+            type="color"
+            aria-label="Shadow colour"
+            value={shadow.color.slice(0, 7)}
+            onChange={(e) =>
+              apply(
+                shadowOp(track.id, {
+                  ...shadow,
+                  color: withAlpha(e.target.value, alphaOf(shadow.color)),
+                }),
+              )
+            }
+          />
+        ) : (
+          <span />
+        )}
+      </div>
+      {shadow ? (
+        <>
+          <div className={styles.field}>
+            <label htmlFor="face-shadow-blur">Blur</label>
+            <input
+              id="face-shadow-blur"
+              type="range"
+              min={0}
+              max={SHADOW_BLUR_MAX}
+              step={0.002}
+              value={shadow.blur}
+              onChange={(e) =>
+                apply(shadowOp(track.id, { ...shadow, blur: Number(e.target.value) }))
+              }
+              {...gesture}
+            />
+            <span className={styles.muted}>{px(shadow.blur)}</span>
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="face-shadow-distance">Distance</label>
+            <input
+              id="face-shadow-distance"
+              type="range"
+              min={0}
+              max={SHADOW_OFFSET_MAX}
+              step={0.002}
+              value={shadow.offsetY}
+              onChange={(e) =>
+                apply(shadowOp(track.id, { ...shadow, offsetY: Number(e.target.value) }))
+              }
+              {...gesture}
+            />
+            <span className={styles.muted}>{px(shadow.offsetY)}</span>
+          </div>
+          <div className={styles.field}>
+            <label htmlFor="face-shadow-opacity">Opacity</label>
+            <input
+              id="face-shadow-opacity"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={alphaOf(shadow.color)}
+              onChange={(e) =>
+                apply(
+                  shadowOp(track.id, {
+                    ...shadow,
+                    color: withAlpha(shadow.color, Number(e.target.value)),
+                  }),
+                )
+              }
+              {...gesture}
+            />
+            <span
+              className={styles.muted}
+            >{`${String(Math.round(alphaOf(shadow.color) * 100))} %`}</span>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** Transition lengths offered for a face mode over the In–Out range. */
+const MODE_EASES: { us: number; label: string }[] = [
+  { us: 0, label: 'Cut' },
+  { us: 300_000, label: '0.3 s' },
+  { us: 600_000, label: '0.6 s' },
+  { us: 1_000_000, label: '1 s' },
+];
+
+/** Layout over time (R2.1, R2.2): face mode and the keyframe list. */
+function FaceTimeSection({ doc }: { doc: Project }) {
+  const apply = useApply();
+  const { ui, playback } = useEditor();
+  const playheadUs = useUi(ui, (s) => s.playheadUs);
+  const [easeUs, setEaseUs] = useState(300_000);
+  const track = faceTrack(doc);
+  if (!track) return null;
+  const fps = doc.timeline.frameRate;
+  const { inUs, outUs } = doc.timeline.marks;
+  const range = inUs !== null && outUs !== null && outUs > inUs;
+  const current = faceLayoutAt(doc, track.id, playheadUs);
+  return (
+    <section data-testid="face-time-panel">
+      <h2>Layout over time</h2>
+      <p className={styles.muted}>
+        {range
+          ? `Face mode for In–Out (${formatTimecode(inUs, fps)}–${formatTimecode(outUs, fps)}):`
+          : 'Face mode from the playhead on (set In and Out for a section):'}
+      </p>
+      <div className={styles.field}>
+        <span>Mode</span>
+        <span
+          className={styles.group}
+          style={{ flexWrap: 'wrap' }}
+          role="group"
+          aria-label="Face mode"
+        >
+          {FACE_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={current?.mode === mode}
+              onClick={() => apply(faceModeOp(doc, track.id, mode, playheadUs, easeUs))}
+            >
+              {FACE_MODE_LABELS[mode]}
+            </button>
+          ))}
+        </span>
+        <span />
+      </div>
+      {range ? (
+        <div className={styles.field}>
+          <label htmlFor="face-mode-ease">Change</label>
+          <select
+            id="face-mode-ease"
+            value={easeUs}
+            onChange={(e) => setEaseUs(Number(e.target.value))}
+          >
+            {MODE_EASES.map((option) => (
+              <option key={option.us} value={option.us}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <span />
+        </div>
+      ) : null}
+      <KeyframeList
+        track={track}
+        fps={fps}
+        activeUs={current?.keyTime ?? null}
+        onSeek={(tUs) => playback.seek(tUs)}
+      />
+      <button type="button" onClick={() => apply(addKeyframeOp(track.id, playheadUs))}>
+        Add keyframe at playhead
+      </button>
+    </section>
+  );
+}
+
+function KeyframeList(props: {
+  track: VideoTrack;
+  fps: number;
+  activeUs: number | null;
+  onSeek: (tUs: number) => void;
+}) {
+  const apply = useApply();
+  const keys = props.track.layoutKeyframes ?? [];
+  if (keys.length === 0) {
+    return <p className={styles.muted}>No keyframes: the face keeps one layout.</p>;
+  }
+  return (
+    <ul className={styles.keyframeList} aria-label="Layout keyframes" data-testid="keyframe-list">
+      {keys.map((key) => (
+        <li key={key.tUs} aria-current={key.tUs === props.activeUs ? 'true' : undefined}>
+          <button
+            type="button"
+            className={styles.linkButton}
+            title="Go to this keyframe"
+            onClick={() => props.onSeek(key.tUs)}
+          >
+            {formatTimecode(key.tUs, props.fps)}
+          </button>
+          <span>{FACE_MODE_LABELS[key.mode]}</span>
+          <select
+            aria-label={`Change after ${formatTimecode(key.tUs, props.fps)}`}
+            value={key.easing}
+            onChange={(e) =>
+              apply(keyframeEasingOp(props.track.id, key.tUs, e.target.value as Easing))
+            }
+          >
+            {EASINGS.map((easing) => (
+              <option key={easing} value={easing}>
+                {EASING_LABELS[easing]}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            aria-label={`Delete keyframe at ${formatTimecode(key.tUs, props.fps)}`}
+            onClick={() => apply(removeKeyframeOp(props.track.id, key.tUs))}
+          >
+            ×
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

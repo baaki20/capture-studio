@@ -54,13 +54,26 @@ import {
   clipWithStart,
 } from './clip-time';
 import { mediaEditBounds } from './media-time';
+import {
+  FACE_EASE_MAX_US,
+  faceModeSegment,
+  faceStateAt,
+  keyframesThroughCut,
+  moveKeyframe,
+  removeKeyframe,
+  upsertKeyframe,
+} from './layout-keyframes';
 import type {
   AudioTrack,
+  Border,
   Clip,
+  Easing,
+  FaceMode,
+  LayoutKeyframe,
   Media,
-  NRect,
   OverlayLayout,
   Project,
+  Shadow,
   Track,
   VideoTrack,
 } from './schema';
@@ -98,8 +111,19 @@ export interface OpOptions {
   generateId?: () => string;
 }
 
-/** Fields of an overlay or screen layout that `setLayout` may change. */
-export type LayoutPatch = Partial<Omit<OverlayLayout, 'kind'>>;
+/**
+ * Fields of an overlay or screen layout that `setLayout` may change. `border` and `shadow`
+ * take null to remove them.
+ */
+export type LayoutPatch = Flatten<
+  Partial<Omit<OverlayLayout, 'kind' | 'border' | 'shadow'>> & {
+    border?: Border | null;
+    shadow?: Shadow | null;
+  }
+>;
+
+/** One object type instead of an intersection (so it equals the op schema's inferred type). */
+type Flatten<T> = { [K in keyof T]: T[K] };
 
 export type NudgeTarget = { componentId: string } | { mediaIds: string[] };
 
@@ -123,6 +147,24 @@ export type TimelineOp =
   | { type: 'setHidden'; trackId: string; hidden: boolean }
   | { type: 'setLocked'; trackId: string; locked: boolean }
   | { type: 'setLayout'; trackId: string; layout: LayoutPatch }
+  | {
+      type: 'setLayoutKeyframe';
+      trackId: string;
+      tUs: Us;
+      mode?: FaceMode;
+      layout?: LayoutPatch;
+      easing?: Easing;
+    }
+  | { type: 'removeLayoutKeyframe'; trackId: string; tUs: Us }
+  | { type: 'moveLayoutKeyframe'; trackId: string; fromUs: Us; toUs: Us }
+  | {
+      type: 'setFaceMode';
+      trackId: string;
+      startUs: Us;
+      endUs: Us;
+      mode: FaceMode;
+      easeUs?: Us;
+    }
   | { type: 'nudge'; target: NudgeTarget; syncAdjustUs: Us }
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
@@ -391,8 +433,22 @@ export const setMuted = opFn('setMuted');
 export const setSolo = opFn('setSolo');
 export const setHidden = opFn('setHidden');
 export const setLocked = opFn('setLocked');
-/** Changes a video track's layout (face overlay geometry, or the screen crop); clamped. */
+/**
+ * Changes a video track's layout (face overlay geometry and style, or the screen crop); clamped.
+ * On a face track with layout keyframes the change applies to every keyframe too (the whole
+ * track); `setLayoutKeyframe` changes one.
+ */
 export const setLayout = opFn('setLayout');
+/**
+ * Sets the face layout keyframe at a time (R2.1): its mode, layout fields and easing. A new
+ * keyframe starts from the state in effect there; see `layout-keyframes.ts`.
+ */
+export const setLayoutKeyframe = opFn('setLayoutKeyframe');
+export const removeLayoutKeyframe = opFn('removeLayoutKeyframe');
+/** Moves a face layout keyframe to another time (not onto another keyframe). */
+export const moveLayoutKeyframe = opFn('moveLayoutKeyframe');
+/** The face in one mode on a time range, eased in and out (per-segment layout, R2.2). */
+export const setFaceMode = opFn('setFaceMode');
 /** Sets `syncAdjustUs` of a component's (or explicit) media; clip positions do not change. */
 export const nudge = opFn('nudge');
 export const unlink = opFn('unlink');
@@ -443,6 +499,12 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
       return;
     case 'setLayout':
       layoutDraft(draft, op.trackId, op.layout);
+      return;
+    case 'setLayoutKeyframe':
+    case 'removeLayoutKeyframe':
+    case 'moveLayoutKeyframe':
+    case 'setFaceMode':
+      layoutKeyframeDraft(draft, op);
       return;
     case 'nudge':
       nudgeDraft(draft, op);
@@ -805,6 +867,9 @@ function cutDraft(draft: Project, a: Us, b: Us, ctx: Ctx): void {
       }
     }
     track.clips = out;
+    if (track.type === 'video' && track.layoutKeyframes) {
+      setKeyframes(track, keyframesThroughCut(plain(track.layoutKeyframes), a, b));
+    }
   }
 
   const marks = draft.timeline.marks;
@@ -828,39 +893,155 @@ const OVERLAY_ONLY_KEYS = [
   'mirror',
 ] as const;
 
-function layoutDraft(draft: Project, trackId: string, patch: LayoutPatch): void {
-  const track = videoTrack(draft, trackId);
-  const frame = trackFrameSize(draft, track);
-  const layout = plain(track.layout);
+/** `patch` applied to an overlay layout, validated and clamped. */
+function mergeOverlayPatch(
+  layout: OverlayLayout,
+  patch: LayoutPatch,
+  canvas: Size,
+  frame: Size,
+): OverlayLayout {
+  for (const k of ['centerX', 'centerY', 'width', 'cornerRadius', 'zoom'] as const) {
+    const v = patch[k];
+    if (v !== undefined && !Number.isFinite(v)) fail('invalid-value', `${k} must be a number`);
+  }
+  const { border, shadow, crop, ...rest } = patch;
+  const merged: OverlayLayout = { ...layout, ...rest, kind: 'overlay' };
+  if (crop !== undefined) merged.crop = crop === null ? null : clampRectToFrame(crop, frame);
+  if (border === null) delete merged.border;
+  else if (border !== undefined) merged.border = border;
+  if (shadow === null) delete merged.shadow;
+  else if (shadow !== undefined) merged.shadow = shadow;
+  return clampOverlayLayout(merged, canvas, frame);
+}
+
+function checkCrop(patch: LayoutPatch): void {
   if (patch.crop !== undefined && patch.crop !== null) {
     const { x, y, width, height } = patch.crop;
     if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
       fail('invalid-value', 'crop must be a rectangle with a positive size');
     }
   }
-  const crop: NRect | null | undefined =
-    patch.crop === undefined || patch.crop === null
-      ? patch.crop
-      : clampRectToFrame(patch.crop, frame);
+}
+
+function layoutDraft(draft: Project, trackId: string, patch: LayoutPatch): void {
+  const track = videoTrack(draft, trackId);
+  const frame = trackFrameSize(draft, track);
+  const layout = plain(track.layout);
+  checkCrop(patch);
 
   if (layout.kind === 'screen') {
-    if (OVERLAY_ONLY_KEYS.some((k) => patch[k] !== undefined)) {
+    if (
+      OVERLAY_ONLY_KEYS.some((k) => patch[k] !== undefined) ||
+      patch.border !== undefined ||
+      patch.shadow !== undefined
+    ) {
       fail('wrong-track-type', `track ${trackId} has a screen layout; only crop can change`);
     }
-    if (crop !== undefined) track.layout = { ...layout, crop };
+    if (patch.crop !== undefined) {
+      track.layout = {
+        ...layout,
+        crop: patch.crop === null ? null : clampRectToFrame(patch.crop, frame),
+      };
+    }
     return;
   }
-  for (const k of ['centerX', 'centerY', 'width', 'cornerRadius'] as const) {
-    const v = patch[k];
-    if (v !== undefined && !Number.isFinite(v)) fail('invalid-value', `${k} must be a number`);
+  const canvas = draft.timeline.canvas;
+  track.layout = mergeOverlayPatch(layout, patch, canvas, frame);
+  if (track.layoutKeyframes) {
+    setKeyframes(
+      track,
+      plain(track.layoutKeyframes).map((k) => ({
+        ...k,
+        layout: mergeOverlayPatch(k.layout, patch, canvas, frame),
+      })),
+    );
   }
-  const merged: OverlayLayout = {
-    ...layout,
-    ...patch,
-    kind: 'overlay',
-    crop: crop === undefined ? layout.crop : crop,
-  };
-  track.layout = clampOverlayLayout(merged, draft.timeline.canvas, frame);
+}
+
+/** Stores keyframes, dropping the field when there are none. */
+function setKeyframes(track: VideoTrack, keys: LayoutKeyframe[] | undefined): void {
+  if (keys && keys.length > 0) track.layoutKeyframes = keys;
+  else delete track.layoutKeyframes;
+}
+
+function overlayTrack(draft: Project, trackId: string): VideoTrack & { layout: OverlayLayout } {
+  const track = videoTrack(draft, trackId);
+  if (track.layout.kind !== 'overlay') {
+    fail('wrong-track-type', `track ${trackId} is not a face overlay track`);
+  }
+  return track as VideoTrack & { layout: OverlayLayout };
+}
+
+function requireTime(t: Us, name: string): void {
+  if (!isTime(t)) fail('invalid-value', `${name} must be a time ≥ 0`);
+}
+
+function layoutKeyframeDraft(
+  draft: Project,
+  op: OpOf<'setLayoutKeyframe' | 'removeLayoutKeyframe' | 'moveLayoutKeyframe' | 'setFaceMode'>,
+): void {
+  const track = overlayTrack(draft, op.trackId);
+  if (track.locked) fail('track-locked', `track ${track.name} is locked`);
+  const keys = track.layoutKeyframes ? plain(track.layoutKeyframes) : undefined;
+  const layout = plain(track.layout);
+  switch (op.type) {
+    case 'setLayoutKeyframe': {
+      requireTime(op.tUs, 'the keyframe time');
+      let next: OverlayLayout | undefined;
+      if (op.layout) {
+        checkCrop(op.layout);
+        const base =
+          keys?.find((k) => k.tUs === op.tUs)?.layout ?? faceStateAt(keys, layout, op.tUs).layout;
+        next = mergeOverlayPatch(
+          base,
+          op.layout,
+          draft.timeline.canvas,
+          trackFrameSize(draft, track),
+        );
+      }
+      setKeyframes(
+        track,
+        upsertKeyframe(keys, layout, op.tUs, {
+          ...(op.mode ? { mode: op.mode } : {}),
+          ...(next ? { layout: next } : {}),
+          ...(op.easing ? { easing: op.easing } : {}),
+        }),
+      );
+      return;
+    }
+    case 'removeLayoutKeyframe': {
+      const next = removeKeyframe(keys, op.tUs);
+      if (next === null) fail('nothing-to-do', `no layout keyframe at ${String(op.tUs)} µs`);
+      setKeyframes(track, next);
+      return;
+    }
+    case 'moveLayoutKeyframe': {
+      requireTime(op.toUs, 'the keyframe time');
+      const next = moveKeyframe(keys, op.fromUs, op.toUs);
+      if (next === null) {
+        fail(
+          keys?.some((k) => k.tUs === op.fromUs) ? 'overlap' : 'nothing-to-do',
+          keys?.some((k) => k.tUs === op.fromUs)
+            ? `another layout keyframe is at ${String(op.toUs)} µs`
+            : `no layout keyframe at ${String(op.fromUs)} µs`,
+        );
+      }
+      setKeyframes(track, next);
+      return;
+    }
+    case 'setFaceMode': {
+      requireTime(op.startUs, 'the start');
+      requireTime(op.endUs, 'the end');
+      if (op.endUs <= op.startUs) fail('invalid-value', 'the face mode range needs start < end');
+      const easeUs = op.easeUs ?? 0;
+      if (!isTime(easeUs) || easeUs > FACE_EASE_MAX_US) {
+        fail('invalid-value', `the change takes 0–${String(FACE_EASE_MAX_US / 1e6)} s`);
+      }
+      const ease = Math.min(easeUs, Math.floor((op.endUs - op.startUs) / 2));
+      setKeyframes(track, faceModeSegment(keys, layout, op.startUs, op.endUs, op.mode, ease));
+      return;
+    }
+  }
 }
 
 function nudgeDraft(draft: Project, op: OpOf<'nudge'>): void {

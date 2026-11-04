@@ -5,7 +5,7 @@
  */
 import type { NRect } from '../../../shared/project/schema';
 import { maskRadius, type PixelRect, type VideoLayer } from '../../../shared/project/render-plan';
-import type { Scene } from '../../../shared/project/scene';
+import type { RectF, Scene, SceneLayer, SceneShadow } from '../../../shared/project/scene';
 
 export interface Size {
   width: number;
@@ -17,8 +17,11 @@ export interface Size {
  * render loop) needs no DOM types; the WebGL compositor takes `TexImageSource` pictures.
  */
 export interface CompositeItemOf<F> {
-  /** `opacity` (scene layers) multiplies the layer; 1 when absent. */
-  layer: VideoLayer & { opacity?: number };
+  /**
+   * `opacity` multiplies the layer (1 when absent); `border` is drawn inside the mask's edge and
+   * `shadow` under the layer (scene layers, `sceneAt`).
+   */
+  layer: VideoLayer & Partial<Pick<SceneLayer, 'opacity' | 'border' | 'shadow'>>;
   /** The decoded picture, or null for a placeholder. */
   frame: F | null;
   /** The media's picture size (`Media.video`), the space of `layer.sourceRect`. */
@@ -47,7 +50,7 @@ export function parseHexColor(color: string): [number, number, number, number] {
  * Clip-space corners of a destination rect for a TRIANGLE_STRIP in the order top-left,
  * top-right, bottom-left, bottom-right.
  */
-export function quadVertices(dest: PixelRect, canvas: Size): Float32Array {
+export function quadVertices(dest: RectF, canvas: Size): Float32Array {
   const x0 = (dest.x / canvas.width) * 2 - 1;
   const x1 = ((dest.x + dest.width) / canvas.width) * 2 - 1;
   const y0 = 1 - (dest.y / canvas.height) * 2;
@@ -66,6 +69,38 @@ export function quadUvs(source: NRect, media: Size, mirror: boolean): Float32Arr
   const v1 = (source.y + source.height) / media.height;
   if (mirror) [u0, u1] = [u1, u0];
   return new Float32Array([u0, v0, u1, v0, u0, v1, u1, v1]);
+}
+
+/** The smallest blur the shadow shader uses (an edge of `smoothstep(-b, b)` needs b > 0). */
+export const MIN_SHADOW_BLUR_PX = 0.5;
+
+/**
+ * Where a layer's drop shadow is drawn: the mask's rect moved by the offset (`maskRect`), and the
+ * quad covering it with the blur on every side (`quad`). The shadow fades over `±blur` px around
+ * the moved mask's edge.
+ */
+export function shadowGeometry(
+  dest: PixelRect,
+  shadow: SceneShadow,
+): { maskRect: RectF; quad: RectF; blur: number } {
+  const blur = Math.max(MIN_SHADOW_BLUR_PX, shadow.blurPx);
+  const maskRect = {
+    x: dest.x + shadow.offsetXPx,
+    y: dest.y + shadow.offsetYPx,
+    width: dest.width,
+    height: dest.height,
+  };
+  const pad = blur + 1;
+  return {
+    maskRect,
+    quad: {
+      x: maskRect.x - pad,
+      y: maskRect.y - pad,
+      width: maskRect.width + 2 * pad,
+      height: maskRect.height + 2 * pad,
+    },
+    blur,
+  };
 }
 
 /** Mask uniforms of a layer: its rect in canvas px and the effective corner radius. */

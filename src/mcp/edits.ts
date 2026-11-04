@@ -14,7 +14,14 @@ import {
   type FaceSizePreset,
 } from '../shared/project/face-layout';
 import type { ExternalOp } from '../shared/project/op-schema';
-import type { OverlayLayout, Project, Track, VideoTrack } from '../shared/project/schema';
+import {
+  EASINGS,
+  FACE_MODES,
+  type OverlayLayout,
+  type Project,
+  type Track,
+  type VideoTrack,
+} from '../shared/project/schema';
 import {
   applyOpsWithPatches,
   timelineDurationUs,
@@ -99,6 +106,52 @@ export const SHAPES = {
       .optional()
       .describe('Rounded shape only: fraction of the short side (0–0.5)'),
     mirror: z.boolean().optional(),
+    zoom: z.number().optional().describe('Zoom into the camera picture inside the shape (1–4)'),
+    border: z
+      .object({
+        width: z.number().describe('Fraction of the canvas short side (0–0.05), e.g. 0.006'),
+        color: z.string().describe('#RRGGBB or #RRGGBBAA'),
+      })
+      .nullable()
+      .optional()
+      .describe('null removes the border'),
+    shadow: z
+      .object({
+        blur: z.number().describe('Fraction of the canvas short side (0–0.1), e.g. 0.03'),
+        offsetX: z.number().describe('Fraction of the short side (−0.1–0.1)'),
+        offsetY: z.number().describe('Fraction of the short side (−0.1–0.1), e.g. 0.015'),
+        color: z.string().describe('#RRGGBBAA, e.g. #00000099'),
+      })
+      .nullable()
+      .optional()
+      .describe('null removes the shadow'),
+  },
+  faceMode: {
+    track: TrackRef.optional().describe('Default: the face (camera overlay) track'),
+    start: TimeInput,
+    end: TimeInput,
+    mode: z
+      .enum(FACE_MODES)
+      .describe('overlay, full (face fills the frame), side-by-side (screen left), hidden'),
+    transitionSeconds: z
+      .number()
+      .min(0)
+      .max(2)
+      .optional()
+      .describe('Eased change into and out of the mode; default 0 (a cut)'),
+  },
+  faceKeyframe: {
+    track: TrackRef.optional().describe('Default: the face (camera overlay) track'),
+    at: TimeInput,
+    remove: z.boolean().optional().describe('Remove the keyframe at this time instead'),
+    mode: z.enum(FACE_MODES).optional(),
+    easing: z
+      .enum(EASINGS)
+      .optional()
+      .describe('How it changes to the next keyframe; hold keeps it, then cuts'),
+    width: z.number().optional().describe('Overlay width, fraction of the canvas width'),
+    centerX: z.number().optional().describe('Overlay centre, fraction of canvas width'),
+    centerY: z.number().optional().describe('Overlay centre, fraction of canvas height'),
   },
   screenCrop: {
     track: TrackRef.optional().describe('Default: the screen track'),
@@ -140,6 +193,8 @@ export const EditStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('moveClip'), ...SHAPES.moveClip }),
   z.object({ kind: z.literal('track'), ...SHAPES.track }),
   z.object({ kind: z.literal('faceLayout'), ...SHAPES.faceLayout }),
+  z.object({ kind: z.literal('faceMode'), ...SHAPES.faceMode }),
+  z.object({ kind: z.literal('faceKeyframe'), ...SHAPES.faceKeyframe }),
   z.object({ kind: z.literal('screenCrop'), ...SHAPES.screenCrop }),
   z.object({ kind: z.literal('syncNudge'), ...SHAPES.syncNudge }),
   z.object({ kind: z.literal('marks'), ...SHAPES.marks }),
@@ -225,8 +280,19 @@ function faceLayoutOps(
   }
   if (step.centerX !== undefined) layout.centerX = step.centerX;
   if (step.centerY !== undefined) layout.centerY = step.centerY;
-  const { kind: _kind, ...patch } = layout;
-  return [{ type: 'setLayout', trackId: track.id, layout: patch }];
+  if (step.zoom !== undefined) layout.zoom = step.zoom;
+  const { kind: _kind, border: _border, shadow: _shadow, ...patch } = layout;
+  return [
+    {
+      type: 'setLayout',
+      trackId: track.id,
+      layout: {
+        ...patch,
+        ...(step.border !== undefined ? { border: step.border } : {}),
+        ...(step.shadow !== undefined ? { shadow: step.shadow } : {}),
+      },
+    },
+  ];
 }
 
 /** The operations for one step against `doc`. */
@@ -307,6 +373,42 @@ export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
     }
     case 'faceLayout':
       return faceLayoutOps(doc, step);
+    case 'faceMode': {
+      const track = videoTrack(doc, step.track, 'overlay');
+      const startUs = time(step.start);
+      const endUs = time(step.end);
+      if (endUs <= startUs) throw new ToolInputError('The face mode must end after it starts.');
+      return [
+        {
+          type: 'setFaceMode',
+          trackId: track.id,
+          startUs,
+          endUs,
+          mode: step.mode,
+          easeUs: Math.round((step.transitionSeconds ?? 0) * 1e6),
+        },
+      ];
+    }
+    case 'faceKeyframe': {
+      const track = videoTrack(doc, step.track, 'overlay');
+      const tUs = time(step.at);
+      if (step.remove) return [{ type: 'removeLayoutKeyframe', trackId: track.id, tUs }];
+      const layout = {
+        ...(step.width !== undefined ? { width: step.width } : {}),
+        ...(step.centerX !== undefined ? { centerX: step.centerX } : {}),
+        ...(step.centerY !== undefined ? { centerY: step.centerY } : {}),
+      };
+      return [
+        {
+          type: 'setLayoutKeyframe',
+          trackId: track.id,
+          tUs,
+          ...(step.mode ? { mode: step.mode } : {}),
+          ...(step.easing ? { easing: step.easing } : {}),
+          ...(Object.keys(layout).length > 0 ? { layout } : {}),
+        },
+      ];
+    }
     case 'screenCrop': {
       const track = videoTrack(doc, step.track, 'screen');
       return [{ type: 'setLayout', trackId: track.id, layout: { crop: step.crop } }];

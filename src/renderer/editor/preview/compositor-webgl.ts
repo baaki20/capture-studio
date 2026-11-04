@@ -29,6 +29,7 @@ import {
   parseHexColor,
   quadUvs,
   quadVertices,
+  shadowGeometry,
   type CompositeItemOf,
   type Size,
 } from './compositor-math';
@@ -58,12 +59,27 @@ uniform float u_canvasHeight;
 uniform int u_solid;
 uniform vec4 u_color;
 uniform float u_opacity;
+// 0: the layer (border inside its edge); 1: its drop shadow (u_color, edge blurred by u_blur).
+uniform int u_pass;
+uniform float u_border;
+uniform vec4 u_borderColor;
+uniform float u_blur;
 out vec4 outColor;
 ${MASK_COVERAGE_GLSL}
 void main() {
   vec2 p = vec2(gl_FragCoord.x - u_rect.x, (u_canvasHeight - gl_FragCoord.y) - u_rect.y);
-  float coverage = csMaskCoverage(p, u_rect.zw, u_radius) * u_opacity;
+  float d = csMaskDistance(p, u_rect.zw, u_radius);
+  if (u_pass == 1) {
+    float shadow = (1.0 - smoothstep(-u_blur, u_blur, d)) * u_color.a * u_opacity;
+    outColor = vec4(u_color.rgb * shadow, shadow);
+    return;
+  }
+  float coverage = (1.0 - smoothstep(-0.5, 0.5, d)) * u_opacity;
   vec4 color = u_solid == 1 ? u_color : vec4(texture(u_tex, v_uv).rgb, 1.0);
+  if (u_border > 0.0) {
+    float inner = 1.0 - smoothstep(-0.5, 0.5, d + u_border);
+    color.rgb = mix(color.rgb, u_borderColor.rgb, (1.0 - inner) * u_borderColor.a);
+  }
   outColor = vec4(color.rgb * coverage, coverage);
 }
 `;
@@ -111,6 +127,7 @@ void main() {
 const FULLSCREEN_VERTICES = new Float32Array([-1, 1, 1, 1, -1, -1, 1, -1]);
 
 const PLACEHOLDER: [number, number, number, number] = [0.22, 0.24, 0.28, 1];
+const NO_COLOR: [number, number, number, number] = [0, 0, 0, 0];
 
 /** A colour texture with its framebuffer. */
 interface Target {
@@ -183,9 +200,19 @@ export class WebGlCompositor {
     this.posBuffer = gl.createBuffer();
     this.uvBuffer = gl.createBuffer();
     this.uniforms = Object.fromEntries(
-      ['u_tex', 'u_rect', 'u_radius', 'u_canvasHeight', 'u_solid', 'u_color', 'u_opacity'].map(
-        (name) => [name, gl.getUniformLocation(this.program, name)],
-      ),
+      [
+        'u_tex',
+        'u_rect',
+        'u_radius',
+        'u_canvasHeight',
+        'u_solid',
+        'u_color',
+        'u_opacity',
+        'u_pass',
+        'u_border',
+        'u_borderColor',
+        'u_blur',
+      ].map((name) => [name, gl.getUniformLocation(this.program, name)]),
     );
   }
 
@@ -259,19 +286,35 @@ export class WebGlCompositor {
     gl.uniform1i(this.uniforms.u_tex ?? null, 0);
 
     items.forEach((item, index) => {
+      const { rect, radius } = maskUniforms(item.layer);
+      const opacity = item.layer.opacity ?? 1;
+      gl.uniform1f(this.uniforms.u_radius ?? null, radius);
+      gl.uniform1f(this.uniforms.u_opacity ?? null, opacity);
+      if (item.layer.shadow && opacity > 0) {
+        const shadow = shadowGeometry(item.layer.destRect, item.layer.shadow);
+        this.bindAttribute(this.posBuffer, 'a_pos', quadVertices(shadow.quad, this.size));
+        const m = shadow.maskRect;
+        gl.uniform4f(this.uniforms.u_rect ?? null, m.x, m.y, m.width, m.height);
+        gl.uniform1i(this.uniforms.u_pass ?? null, 1);
+        gl.uniform1f(this.uniforms.u_blur ?? null, shadow.blur);
+        gl.uniform4f(this.uniforms.u_color ?? null, ...parseHexColor(item.layer.shadow.color));
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+      gl.uniform1i(this.uniforms.u_pass ?? null, 0);
+      const border = item.layer.border;
+      gl.uniform1f(this.uniforms.u_border ?? null, border ? border.widthPx : 0);
+      const borderColor = border ? parseHexColor(border.color) : NO_COLOR;
+      gl.uniform4f(this.uniforms.u_borderColor ?? null, ...borderColor);
       this.bindAttribute(this.posBuffer, 'a_pos', quadVertices(item.layer.destRect, this.size));
       this.bindAttribute(
         this.uvBuffer,
         'a_uv',
         quadUvs(item.layer.sourceRect, item.mediaSize, item.layer.mirror),
       );
-      const { rect, radius } = maskUniforms(item.layer);
       gl.uniform4f(this.uniforms.u_rect ?? null, ...rect);
-      gl.uniform1f(this.uniforms.u_radius ?? null, radius);
       const solid = item.frame === null || item.layer.offline;
       gl.uniform1i(this.uniforms.u_solid ?? null, solid ? 1 : 0);
       gl.uniform4f(this.uniforms.u_color ?? null, ...PLACEHOLDER);
-      gl.uniform1f(this.uniforms.u_opacity ?? null, item.layer.opacity ?? 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.texture(index));
       if (!solid && item.frame) {

@@ -2,15 +2,16 @@
  * The preview (R1.33, R1.41): the worker-rendered canvas plus the face-overlay handles on top.
  * Clicking the face selects it and shows its bounding box; dragging moves it, corner handles
  * resize it with the aspect locked; the result goes through `layoutFromDestRect`, so the overlay
- * stays inside the canvas. A drag is one undo step.
+ * stays inside the canvas. A drag is one undo step. With layout keyframes the box is the face at
+ * the playhead, draggable while it is settled in overlay mode, and a drag changes the keyframe in
+ * effect there (`inspector-ops.ts`).
  */
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { overlayDestRect, type PixelRect } from '../../../shared/project/face-layout';
-import { trackFrameSize } from '../../../shared/project/timeline-ops';
+import type { PixelRect } from '../../../shared/project/face-layout';
 import { errorText } from '../commands';
 import { useEditor } from '../EditorContext';
 import styles from '../Editor.module.css';
-import { faceTrack, overlayRectOp } from '../InspectorPanel/inspector-ops';
+import { faceBoxAt, faceTrack, overlayRectOp } from '../InspectorPanel/inspector-ops';
 import { useDocumentStore } from '../store/document-store';
 import { useUi } from '../ui-store';
 import {
@@ -62,6 +63,7 @@ function FaceHandles() {
   const { docStore, ui } = useEditor();
   const doc = useDocumentStore(docStore, (s) => s.doc);
   const selected = useUi(ui, (s) => s.overlaySelected);
+  const playheadUs = useUi(ui, (s) => s.playheadUs);
   const layerRef = useRef<HTMLDivElement>(null);
   const drag = useRef<DragSession | null>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -77,11 +79,10 @@ function FaceHandles() {
   }, []);
 
   const track = doc ? faceTrack(doc) : null;
-  const visible = track !== null && !track.hidden && track.clips.length > 0;
+  const faceRect = doc ? faceBoxAt(doc, playheadUs) : null;
+  const visible = track !== null && faceRect !== null;
   const canvas = doc?.timeline.canvas ?? { width: 1, height: 1 };
   const transform = containTransform(box, canvas);
-  const faceRect =
-    doc && track ? overlayDestRect(track.layout, canvas, trackFrameSize(doc, track)) : null;
   const shown = faceRect ? canvasToDisplay(transform, faceRect) : null;
 
   const local = (event: ReactPointerEvent) => {
@@ -90,7 +91,7 @@ function FaceHandles() {
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!visible || !shown || !faceRect || event.button !== 0) return;
+    if (!visible || !shown || event.button !== 0) return;
     const { x, y } = local(event);
     const handle = hitOverlay(shown, x, y);
     const state = ui.getState();
@@ -129,7 +130,7 @@ function FaceHandles() {
     const a = displayToCanvas(transform, session.startX, session.startY);
     const b = displayToCanvas(transform, x, y);
     const rect = dragOverlayRect(session.startRect, session.handle, b.x - a.x, b.y - a.y);
-    const op = overlayRectOp(d, face.id, rect);
+    const op = overlayRectOp(d, face.id, rect, ui.getState().playheadUs);
     if (!op) return;
     const result = docStore.getState().apply(op);
     if (!result.ok) ui.getState().setStatus(errorText(result.error));

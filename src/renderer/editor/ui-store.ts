@@ -19,6 +19,8 @@ export interface UiState {
   snapping: boolean;
   /** The face overlay is selected in the preview (bounding box shown, R1.41). */
   overlaySelected: boolean;
+  /** The selected face layout keyframe in the timeline (R2.1); Delete removes it. */
+  selectedKeyframe: { trackId: string; tUs: number } | null;
   /** One-line status ("Nothing to split", errors). */
   status: string | null;
 }
@@ -31,6 +33,7 @@ export interface UiActions {
   setView(view: TimelineView): void;
   setSnapping(on: boolean): void;
   setOverlaySelected(on: boolean): void;
+  selectKeyframe(key: { trackId: string; tUs: number } | null): void;
   setStatus(status: string | null): void;
 }
 
@@ -48,13 +51,16 @@ export function createUiStore(initial: Partial<UiState> = {}): UiStore {
     view: DEFAULT_VIEW,
     snapping: true,
     overlaySelected: false,
+    selectedKeyframe: null,
     status: null,
     ...initial,
     setPlayhead: (us) => {
       if (us !== get().playheadUs) set({ playheadUs: Math.max(0, Math.round(us)) });
     },
     setTransport: (playing, rate) => set({ playing, rate }),
-    select: (clipIds) => set({ selection: [...new Set(clipIds)] }),
+    select: (clipIds) => set({ selection: [...new Set(clipIds)], selectedKeyframe: null }),
+    selectKeyframe: (key) =>
+      set(key ? { selectedKeyframe: key, selection: [] } : { selectedKeyframe: null }),
     toggleSelected: (clipId) => {
       const current = get().selection;
       set({

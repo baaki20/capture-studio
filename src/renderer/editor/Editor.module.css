@@ -289,3 +289,32 @@ button[aria-pressed='true'] {
   place-items: center;
   z-index: 10;
 }
+
+.keyframeList {
+  list-style: none;
+  margin: var(--space-1) 0 var(--space-2);
+  padding: 0;
+}
+
+.keyframeList li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-1);
+  border-radius: 4px;
+}
+
+.keyframeList li[aria-current='true'] {
+  background: color-mix(in srgb, var(--editor-accent) 18%, transparent);
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline;
+  cursor: pointer;
+}

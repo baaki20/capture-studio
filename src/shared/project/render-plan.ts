@@ -519,12 +519,16 @@ export function maskAlpha(mask: LayerMask, width: number, height: number): Uint8
 /**
  * `maskCoverage` in GLSL ES 3.00. `p` is the fragment position inside the destination rect in
  * pixels (origin top-left, pixel centres at .5), `size` the rect size, `radius` from `maskRadius`.
+ * `csMaskDistance` is `roundedRectDistance` (borders and shadows use it).
  */
 export const MASK_COVERAGE_GLSL = `
-float csMaskCoverage(vec2 p, vec2 size, float radius) {
+float csMaskDistance(vec2 p, vec2 size, float radius) {
   float r = clamp(radius, 0.0, 0.5 * min(size.x, size.y));
   vec2 q = abs(p - 0.5 * size) - (0.5 * size - r);
-  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+}
+float csMaskCoverage(vec2 p, vec2 size, float radius) {
+  float d = csMaskDistance(p, size, radius);
   return 1.0 - smoothstep(-0.5, 0.5, d);
 }
 `;

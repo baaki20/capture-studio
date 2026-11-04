@@ -126,7 +126,16 @@ export function runCommand(command: EditorCommand, ctx: CommandContext): void {
       );
       return;
     case 'delete':
-    case 'ripple-delete':
+    case 'ripple-delete': {
+      const key = ui.selectedKeyframe;
+      if (key && selection.length === 0) {
+        if (
+          apply(ctx, { type: 'removeLayoutKeyframe', trackId: key.trackId, tUs: key.tUs }, command)
+        ) {
+          ui.selectKeyframe(null);
+        }
+        return;
+      }
       if (selection.length === 0) {
         ui.setStatus('Select clips to delete.');
         return;
@@ -141,6 +150,7 @@ export function runCommand(command: EditorCommand, ctx: CommandContext): void {
         ui.select([]);
       }
       return;
+    }
     case 'mark-in':
       apply(
         ctx,

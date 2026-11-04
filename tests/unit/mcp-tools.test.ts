@@ -56,7 +56,9 @@ describe('Capture Studio MCP tools', () => {
         'nudge_sync',
         'redo',
         'remove_silences',
+        'set_face_keyframe',
         'set_face_layout',
+        'set_face_mode',
         'set_marks',
         'set_screen_crop',
         'set_track',
@@ -140,6 +142,62 @@ describe('Capture Studio MCP tools', () => {
     expect(fake.editor()!.getState().undoLabel).toBe('Tidy up');
     fake.editor()!.getState().undo();
     expect(fake.editor()!.getState().doc).toEqual(doc);
+  });
+
+  it('styles the face, changes its mode over time and lists the keyframes (R2.1–R2.4)', async () => {
+    const { call, doc, fake } = await setup();
+    const styled = await call('set_face_layout', {
+      project: doc.id,
+      zoom: 1.5,
+      border: { width: 0.006, color: '#FFFFFF' },
+      shadow: { blur: 0.03, offsetX: 0, offsetY: 0.015, color: '#00000099' },
+    });
+    expect(styled.isError).toBe(false);
+    const mode = await call('set_face_mode', {
+      project: doc.id,
+      start: 4,
+      end: 8,
+      mode: 'side-by-side',
+      transitionSeconds: 0.5,
+    });
+    expect(mode.text).toMatch(/^Applied "Face side-by-side 4 s–8 s"/);
+    const keyed = await call('set_face_keyframe', {
+      project: doc.id,
+      at: 10,
+      mode: 'hidden',
+      easing: 'hold',
+    });
+    expect(keyed.isError).toBe(false);
+    const face = trackByName(fake.editor()!.getState().doc!, 'Face');
+    if (face.type !== 'video' || face.layout.kind !== 'overlay') throw new Error('no face overlay');
+    expect(face.layout).toMatchObject({ zoom: 1.5, border: { color: '#FFFFFF' } });
+    expect(face.layoutKeyframes?.map((k) => [k.tUs / S, k.mode])).toEqual([
+      [3.5, 'overlay'],
+      [4, 'side-by-side'],
+      [7.5, 'side-by-side'],
+      [8, 'overlay'],
+      [10, 'hidden'],
+    ]);
+    const summary = JSON.parse((await call('get_project', { project: doc.id })).text) as {
+      tracks: { name: string; layoutKeyframes?: { mode: string; at: { seconds: number } }[] }[];
+    };
+    const listed = summary.tracks.find((t) => t.name === 'Face')?.layoutKeyframes ?? [];
+    expect(listed.map((k) => k.mode)).toEqual([
+      'overlay',
+      'side-by-side',
+      'side-by-side',
+      'overlay',
+      'hidden',
+    ]);
+    const removed = await call('set_face_keyframe', { project: doc.id, at: 10, remove: true });
+    expect(removed.isError).toBe(false);
+    const backwards = await call('set_face_mode', {
+      project: doc.id,
+      start: 5,
+      end: 2,
+      mode: 'full',
+    });
+    expect(backwards).toMatchObject({ isError: true });
   });
 
   it('explains mistakes and refusals', async () => {

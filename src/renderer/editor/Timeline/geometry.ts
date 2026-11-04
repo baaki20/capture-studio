@@ -28,6 +28,9 @@ export const MAX_PX_PER_SEC = 1_500;
 export const EDGE_GRAB_PX = 6;
 /** Snap distance (R1.39). */
 export const SNAP_PX = 8;
+/** Face layout keyframes (R2.1): a strip at the bottom of the face row, and the grab distance. */
+export const KEYFRAME_LANE_PX = 14;
+export const KEYFRAME_GRAB_PX = 6;
 
 export function timeToX(view: TimelineView, tUs: number): number {
   return ((tUs - view.scrollUs) * view.pxPerSec) / 1_000_000;
@@ -103,6 +106,7 @@ export function layoutRows(doc: Project): { rows: Row[]; height: number } {
 
 export type Hit =
   | { kind: 'ruler'; tUs: number }
+  | { kind: 'keyframe'; trackId: string; keyUs: number; tUs: number }
   | { kind: 'clip'; trackId: string; clipId: string; zone: 'body' | 'start' | 'end'; tUs: number }
   | { kind: 'track'; trackId: string; tUs: number }
   | { kind: 'none'; tUs: number };
@@ -113,6 +117,8 @@ export function hitTest(rows: readonly Row[], view: TimelineView, x: number, y: 
   if (y < RULER_HEIGHT) return { kind: 'ruler', tUs };
   const row = rows.find((r) => y >= r.top && y < r.top + r.height);
   if (!row) return { kind: 'none', tUs };
+  const key = keyframeAt(row, view, x, y);
+  if (key !== null) return { kind: 'keyframe', trackId: row.track.id, keyUs: key, tUs };
   let best: { clipId: string; zone: 'body' | 'start' | 'end'; distance: number } | null = null;
   for (const clip of row.track.clips) {
     const x0 = timeToX(view, clip.timelineStartUs);
@@ -140,6 +146,31 @@ export function hitTest(rows: readonly Row[], view: TimelineView, x: number, y: 
   if (best)
     return { kind: 'clip', trackId: row.track.id, clipId: best.clipId, zone: best.zone, tUs };
   return { kind: 'track', trackId: row.track.id, tUs };
+}
+
+/** Layout keyframe times of a row's track (face overlay tracks only). */
+export function rowKeyframes(row: Row): readonly number[] {
+  const track = row.track;
+  if (track.type !== 'video' || track.layout.kind !== 'overlay') return [];
+  return (track.layoutKeyframes ?? []).map((k) => k.tUs);
+}
+
+/** The y of the keyframe lane's centre line in a row. */
+export function keyframeLaneY(row: Row): number {
+  return row.top + row.height - KEYFRAME_LANE_PX / 2;
+}
+
+/** The keyframe nearest to x in the row's keyframe lane, within the grab distance, or null. */
+export function keyframeAt(row: Row, view: TimelineView, x: number, y: number): number | null {
+  if (y < row.top + row.height - KEYFRAME_LANE_PX) return null;
+  let best: { tUs: number; distance: number } | null = null;
+  for (const tUs of rowKeyframes(row)) {
+    const distance = Math.abs(timeToX(view, tUs) - x);
+    if (distance <= KEYFRAME_GRAB_PX && (!best || distance < best.distance)) {
+      best = { tUs, distance };
+    }
+  }
+  return best?.tUs ?? null;
 }
 
 export interface RulerTick {

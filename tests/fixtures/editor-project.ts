@@ -190,7 +190,12 @@ const OP_KINDS = [
   'hide',
   'lock',
   'layout',
+  'layout-style',
   'crop',
+  'keyframe',
+  'keyframe-remove',
+  'keyframe-move',
+  'face-mode',
   'nudge',
   'unlink',
   'relink',
@@ -232,6 +237,14 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
   const clipId = clip?.id ?? 'clp_none';
   const track = tracks[Math.floor(t.a * tracks.length)];
   const trackId = track?.id ?? 'trk_none';
+  // Face edits mostly go to the overlay track (sometimes to another, which they must refuse).
+  const face = tracks.find((tr) => tr.type === 'video' && tr.layout.kind === 'overlay');
+  const faceId = t.c < 0.9 ? (face?.id ?? trackId) : trackId;
+  const faceKeys = face?.type === 'video' ? (face.layoutKeyframes ?? []) : [];
+  const keyTime = (f: number) => faceKeys[Math.floor(f * faceKeys.length)]?.tUs ?? time(f);
+  const modes = ['overlay', 'full', 'side-by-side', 'hidden'] as const;
+  const easings = ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'hold'] as const;
+  const pick = <T>(list: readonly T[], f: number): T => list[Math.floor(f * list.length)] as T;
   switch (t.kind) {
     case 'split-selected':
       return { type: 'split', atUs: time(t.b), clipIds: [clipId], includeLinked: t.flag };
@@ -276,6 +289,50 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
           mirror: t.flag,
         },
       };
+    case 'layout-style':
+      return {
+        type: 'setLayout',
+        trackId: faceId,
+        layout: {
+          zoom: 0.5 + t.b * 4,
+          // Within the schema's ranges (the operation clamps the rest of the way).
+          border: t.flag ? null : { width: t.c * 0.05, color: '#FFFFFF' },
+          shadow:
+            t.b < 0.3
+              ? null
+              : { blur: t.b * 0.1, offsetX: t.c * 0.1 - 0.05, offsetY: 0.02, color: '#00000099' },
+        },
+      };
+    case 'keyframe':
+      return {
+        type: 'setLayoutKeyframe',
+        trackId: faceId,
+        tUs: t.flag ? keyTime(t.b) : time(t.b),
+        mode: pick(modes, t.b),
+        easing: pick(easings, (t.b * 7) % 1),
+        ...(t.c < 0.5 ? { layout: { centerX: t.c, width: 0.1 + t.c * 0.3 } } : {}),
+      };
+    case 'keyframe-remove':
+      return { type: 'removeLayoutKeyframe', trackId: faceId, tUs: keyTime(t.b) };
+    case 'keyframe-move':
+      return {
+        type: 'moveLayoutKeyframe',
+        trackId: faceId,
+        fromUs: keyTime(t.b),
+        toUs: time(t.c),
+      };
+    case 'face-mode': {
+      const x = time(Math.min(t.b, t.c));
+      const y = time(Math.max(t.b, t.c));
+      return {
+        type: 'setFaceMode',
+        trackId: faceId,
+        startUs: x,
+        endUs: y === x ? x + 1 : y,
+        mode: pick(modes, t.b),
+        easeUs: t.flag ? 0 : Math.round(t.c * 2_500_000),
+      };
+    }
     case 'crop':
       return {
         type: 'setLayout',

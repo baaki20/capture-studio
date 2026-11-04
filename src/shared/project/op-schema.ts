@@ -7,7 +7,7 @@
  * every edit passes the same per-operation checks as a user's.
  */
 import { z } from 'zod';
-import { BorderSchema, NRectSchema, ShadowSchema, prefixedId } from './schema';
+import { BorderSchema, EASINGS, FACE_MODES, NRectSchema, ShadowSchema, prefixedId } from './schema';
 import type { TimelineOp } from './timeline-ops';
 
 /** A `TimelineOp` that automation may send. */
@@ -28,9 +28,11 @@ const LayoutPatchSchema = z.strictObject({
   mirror: z.boolean().optional(),
   crop: NRectSchema.nullable().optional(),
   zoom: z.number().optional(),
-  border: BorderSchema.optional(),
-  shadow: ShadowSchema.optional(),
+  border: BorderSchema.nullable().optional().describe('null removes the border'),
+  shadow: ShadowSchema.nullable().optional().describe('null removes the shadow'),
 });
+const FaceMode = z.enum(FACE_MODES);
+const Easing = z.enum(EASINGS);
 
 const NudgeTargetSchema = z.union([
   z.strictObject({ componentId: prefixedId('cmp') }),
@@ -75,6 +77,29 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('setHidden'), trackId: TrackId, hidden: z.boolean() }),
   z.strictObject({ type: z.literal('setLocked'), trackId: TrackId, locked: z.boolean() }),
   z.strictObject({ type: z.literal('setLayout'), trackId: TrackId, layout: LayoutPatchSchema }),
+  z.strictObject({
+    type: z.literal('setLayoutKeyframe'),
+    trackId: TrackId,
+    tUs: NonNegativeUs,
+    mode: FaceMode.optional(),
+    layout: LayoutPatchSchema.optional(),
+    easing: Easing.optional(),
+  }),
+  z.strictObject({ type: z.literal('removeLayoutKeyframe'), trackId: TrackId, tUs: NonNegativeUs }),
+  z.strictObject({
+    type: z.literal('moveLayoutKeyframe'),
+    trackId: TrackId,
+    fromUs: NonNegativeUs,
+    toUs: NonNegativeUs,
+  }),
+  z.strictObject({
+    type: z.literal('setFaceMode'),
+    trackId: TrackId,
+    startUs: NonNegativeUs,
+    endUs: NonNegativeUs,
+    mode: FaceMode,
+    easeUs: NonNegativeUs.optional(),
+  }),
   z.strictObject({ type: z.literal('nudge'), target: NudgeTargetSchema, syncAdjustUs: Us }),
   z.strictObject({ type: z.literal('unlink'), clipIds: ClipIds }),
   z.strictObject({ type: z.literal('relink'), clipIds: ClipIds }),

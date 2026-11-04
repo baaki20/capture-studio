@@ -126,6 +126,10 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   setHidden: 'Hide track',
   setLocked: 'Lock track',
   setLayout: 'Change layout',
+  setLayoutKeyframe: 'Change layout keyframe',
+  removeLayoutKeyframe: 'Delete layout keyframe',
+  moveLayoutKeyframe: 'Move layout keyframe',
+  setFaceMode: 'Change face mode',
   nudge: 'Sync nudge',
   unlink: 'Unlink',
   relink: 'Link',
@@ -144,6 +148,8 @@ export function defaultCoalesceKey(op: TimelineOp): string | null {
       return `gain:${op.trackId}`;
     case 'setLayout':
       return `layout:${op.trackId}`;
+    case 'setLayoutKeyframe':
+      return `layout-key:${op.trackId}:${String(op.tUs)}`;
     case 'nudge':
       return `nudge:${JSON.stringify(op.target)}`;
     case 'setMarks':

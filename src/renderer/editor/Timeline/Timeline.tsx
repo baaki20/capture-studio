@@ -2,8 +2,9 @@
  * The timeline (R1.31–R1.44): React track headers (with Face + Voice as one linked component
  * group) beside a canvas that draws the ruler, clips, waveforms, thumbnails, marks and playhead
  * (`draw.ts`). Pointer handling on the canvas: scrub on the ruler, select, move and trim clips
- * (one undo step per drag), Ctrl+wheel zoom, wheel scroll. Hit testing and drawing share
- * `geometry.ts`.
+ * (one undo step per drag), select a face layout keyframe (jumping to it) and drag it along the
+ * face row's keyframe lane (R2.1; snapped to frames, one undo step), Ctrl+wheel zoom, wheel
+ * scroll. Hit testing and drawing share `geometry.ts`.
  */
 import {
   useEffect,
@@ -35,7 +36,9 @@ import {
 } from './geometry';
 
 type Session =
-  { kind: 'scrub' } | { kind: 'clip'; drag: ClipDrag; startX: number; started: boolean };
+  | { kind: 'scrub' }
+  | { kind: 'clip'; drag: ClipDrag; startX: number; started: boolean }
+  | { kind: 'keyframe'; trackId: string; atUs: number; startX: number; started: boolean };
 
 const DRAG_START_PX = 3;
 
@@ -101,6 +104,7 @@ export function Timeline() {
         linkedToSelection: linked,
         playheadUs: state.playheadUs,
         snapUs: snapUs.current,
+        selectedKeyframe: state.selectedKeyframe,
         assets,
       });
     };
@@ -176,6 +180,18 @@ export function Timeline() {
       scrubTo(hit.tUs);
       return;
     }
+    if (hit.kind === 'keyframe') {
+      state.selectKeyframe({ trackId: hit.trackId, tUs: hit.keyUs });
+      playback.seek(hit.keyUs);
+      session.current = {
+        kind: 'keyframe',
+        trackId: hit.trackId,
+        atUs: hit.keyUs,
+        startX: x,
+        started: false,
+      };
+      return;
+    }
     if (hit.kind !== 'clip') {
       if (!event.shiftKey && !event.ctrlKey) state.select([]);
       session.current = null;
@@ -196,17 +212,41 @@ export function Timeline() {
     if (!current) {
       const hit = hitTest(layoutRows(d).rows, state.view, x, y);
       event.currentTarget.style.cursor =
-        hit.kind === 'clip'
-          ? hit.zone === 'body'
-            ? 'grab'
-            : 'ew-resize'
-          : hit.kind === 'ruler'
-            ? 'text'
-            : 'default';
+        hit.kind === 'keyframe'
+          ? 'ew-resize'
+          : hit.kind === 'clip'
+            ? hit.zone === 'body'
+              ? 'grab'
+              : 'ew-resize'
+            : hit.kind === 'ruler'
+              ? 'text'
+              : 'default';
       return;
     }
     if (current.kind === 'scrub') {
       scrubTo(xToTime(state.view, x));
+      return;
+    }
+    if (current.kind === 'keyframe') {
+      if (!current.started) {
+        if (Math.abs(x - current.startX) < DRAG_START_PX) return;
+        current.started = true;
+        docStore.getState().beginGesture();
+      }
+      const fps = d.timeline.frameRate;
+      const toUs = frameToUs(usToFrame(Math.max(0, xToTime(state.view, x)), fps), fps);
+      if (toUs === current.atUs) return;
+      const moved = docStore.getState().apply({
+        type: 'moveLayoutKeyframe',
+        trackId: current.trackId,
+        fromUs: current.atUs,
+        toUs,
+      });
+      // Onto another keyframe: stay put until the pointer moves past it.
+      if (!moved.ok) return;
+      current.atUs = toUs;
+      state.selectKeyframe({ trackId: current.trackId, tUs: toUs });
+      playback.seek(toUs);
       return;
     }
     if (!current.started) {
@@ -229,7 +269,9 @@ export function Timeline() {
   const endSession = () => {
     const current = session.current;
     session.current = null;
-    if (current?.kind === 'clip' && current.started) docStore.getState().endGesture();
+    if ((current?.kind === 'clip' || current?.kind === 'keyframe') && current.started) {
+      docStore.getState().endGesture();
+    }
     if (snapUs.current !== null) {
       snapUs.current = null;
       redraw.current(); // without the snap guide

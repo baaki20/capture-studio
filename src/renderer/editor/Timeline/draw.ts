@@ -1,8 +1,8 @@
 /**
  * Draws the timeline on a 2D canvas (§4.2 "canvas renderer + React chrome"): ruler with
  * timecodes, In/Out marks, clips with thumbnails (video) or waveforms (audio), selection and
- * link highlights, offline clips, parts a sync nudge left uncovered, the snap guide and the
- * playhead. Geometry comes from `geometry.ts`, so drawing and hit testing agree.
+ * link highlights, offline clips, parts a sync nudge left uncovered, face layout keyframes
+ * (diamonds in the face row's lane), the snap guide and the playhead. Geometry comes from `geometry.ts`, so drawing and hit testing agree.
  */
 import { clipRefAtExact } from '../../../shared/project/clip-time';
 import { clipCoverage } from '../../../shared/project/render-plan';
@@ -10,7 +10,16 @@ import type { Clip, Media, Project } from '../../../shared/project/schema';
 import { clipEndUs } from '../../../shared/project/timeline-ops';
 import { formatTimecode } from '../../../shared/time';
 import { refToFileUsExact } from '../../../shared/project/media-time';
-import { RULER_HEIGHT, rulerTicks, timeToX, type Row, type TimelineView } from './geometry';
+import {
+  KEYFRAME_LANE_PX,
+  RULER_HEIGHT,
+  keyframeLaneY,
+  rowKeyframes,
+  rulerTicks,
+  timeToX,
+  type Row,
+  type TimelineView,
+} from './geometry';
 import type { MediaAssets } from './media-assets';
 import { thumbCell } from './thumbnails';
 import { columnPeaks } from './waveform';
@@ -33,6 +42,8 @@ export interface TimelinePalette {
   marks: string;
   playhead: string;
   snap: string;
+  keyframe: string;
+  keyframeLane: string;
 }
 
 export const DARK_PALETTE: TimelinePalette = {
@@ -53,6 +64,8 @@ export const DARK_PALETTE: TimelinePalette = {
   marks: 'rgba(242, 201, 76, 0.16)',
   playhead: '#ff5b5b',
   snap: '#7fd1ff',
+  keyframe: '#e8e9ee',
+  keyframeLane: 'rgba(0, 0, 0, 0.35)',
 };
 
 export interface DrawInput {
@@ -66,8 +79,41 @@ export interface DrawInput {
   linkedToSelection: ReadonlySet<string>;
   playheadUs: number;
   snapUs: number | null;
+  /** The selected face layout keyframe, if any. */
+  selectedKeyframe?: { trackId: string; tUs: number } | null;
   assets: MediaAssets | null;
   palette?: TimelinePalette;
+}
+
+/** The face row's keyframe lane: a strip with a diamond per keyframe (the selected one filled). */
+function drawKeyframes(
+  ctx: CanvasRenderingContext2D,
+  input: DrawInput,
+  p: TimelinePalette,
+  row: Row,
+): void {
+  const keys = rowKeyframes(row);
+  if (keys.length === 0) return;
+  ctx.fillStyle = p.keyframeLane;
+  ctx.fillRect(0, row.top + row.height - KEYFRAME_LANE_PX, input.width, KEYFRAME_LANE_PX);
+  const y = keyframeLaneY(row);
+  const r = KEYFRAME_LANE_PX / 2 - 2;
+  for (const tUs of keys) {
+    const x = timeToX(input.view, tUs);
+    if (x < -r || x > input.width + r) continue;
+    const selected =
+      input.selectedKeyframe?.trackId === row.track.id && input.selectedKeyframe.tUs === tUs;
+    ctx.beginPath();
+    ctx.moveTo(x, y - r);
+    ctx.lineTo(x + r, y);
+    ctx.lineTo(x, y + r);
+    ctx.lineTo(x - r, y);
+    ctx.closePath();
+    ctx.fillStyle = selected ? p.selected : p.keyframe;
+    ctx.fill();
+    ctx.strokeStyle = p.clipBorder;
+    ctx.stroke();
+  }
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
@@ -112,6 +158,7 @@ export function drawTimeline(ctx: CanvasRenderingContext2D, input: DrawInput): v
       if (x1 < 0 || x0 > width) continue;
       drawClip(ctx, input, p, row, clip, media.get(clip.mediaId) ?? null, x0, x1);
     }
+    drawKeyframes(ctx, input, p, row);
   }
 
   // In/Out marks.

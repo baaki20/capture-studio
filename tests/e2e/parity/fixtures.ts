@@ -70,8 +70,14 @@ export function ff(args: string[]): Buffer {
 const W = 1280;
 const H = 720;
 
-/** The usual recording: a grey 1280×720 screen and a magenta 640×480 camera, BT.601 tagged. */
-function writeMedia(root: string, seconds: number): void {
+/** The camera's centre square (`centreSquare` media), in camera pixels. */
+const CAMERA_SQUARE = { x: 240, y: 180, width: 160, height: 120 };
+
+/**
+ * The usual recording: a grey 1280×720 screen and a magenta 640×480 camera, BT.601 tagged. With
+ * `centreSquare` the camera has a black `CAMERA_SQUARE`, which shows the face crop and zoom.
+ */
+function writeMedia(root: string, seconds: number, centreSquare = false): void {
   const media = path.join(root, 'media');
   mkdirSync(media, { recursive: true });
   const d = String(seconds);
@@ -99,6 +105,12 @@ function writeMedia(root: string, seconds: number): void {
     'lavfi',
     '-i',
     `color=c=0xFF00FF:s=640x480:r=${String(FPS)}:d=${d}`,
+    ...(centreSquare
+      ? [
+          '-vf',
+          `drawbox=x=${String(CAMERA_SQUARE.x)}:y=${String(CAMERA_SQUARE.y)}:w=${String(CAMERA_SQUARE.width)}:h=${String(CAMERA_SQUARE.height)}:color=black:t=fill`,
+        ]
+      : []),
     '-c:v',
     'libx264',
     '-preset',
@@ -125,9 +137,9 @@ function recorded(seconds: number, serial: string, name: string): Project {
   return { ...doc, id: `prj_01JBQ4ZJ4X6V3K8N2M7P5R9T${serial}P`, name };
 }
 
-function save(projectsDir: string, doc: Project, seconds: number) {
+function save(projectsDir: string, doc: Project, seconds: number, centreSquare = false) {
   const root = path.join(projectsDir, `${doc.name}.cstudio`);
-  writeMedia(root, seconds);
+  writeMedia(root, seconds, centreSquare);
   writeFileSync(path.join(root, 'project.json'), JSON.stringify(doc, null, 2));
   return { root, doc };
 }
@@ -142,6 +154,53 @@ function faceRect(doc: Project, tUs: number): RectF | null {
 }
 
 const FACE: KeyedRegion = { name: 'face', key: magenta, rectAt: faceRect };
+
+const green = (r: number, g: number, b: number) => g > 170 && r < 90 && b < 90;
+const black = (r: number, g: number, b: number) => r < 40 && g < 40 && b < 40;
+
+/** The face layer at `tUs`. */
+function faceLayer(doc: Project, tUs: number) {
+  const face = trackByName(doc, 'Face').id;
+  return sceneAt(doc, tUs).layers.find((l) => l.trackId === face) ?? null;
+}
+
+/** Bordered face: the border colour covers the whole box, the picture is inset by its width. */
+const BORDER: KeyedRegion = { name: 'border', key: green, rectAt: faceRect };
+const FACE_INSIDE_BORDER: KeyedRegion = {
+  name: 'face inside the border',
+  key: magenta,
+  rectAt: (doc, tUs) => {
+    const layer = faceLayer(doc, tUs);
+    const w = layer?.border?.widthPx ?? 0;
+    return layer
+      ? {
+          x: layer.destRect.x + w,
+          y: layer.destRect.y + w,
+          width: layer.destRect.width - 2 * w,
+          height: layer.destRect.height - 2 * w,
+        }
+      : null;
+  },
+};
+/** The camera's centre square where the face's source rect (crop, zoom) puts it. */
+const CAMERA_CENTRE: KeyedRegion = {
+  name: 'camera centre square',
+  key: black,
+  rectAt: (doc, tUs) => {
+    const layer = faceLayer(doc, tUs);
+    if (!layer) return null;
+    const src = layer.sourceRect;
+    const dst = layer.destRect;
+    const sx = dst.width / src.width;
+    const sy = dst.height / src.height;
+    return {
+      x: dst.x + (CAMERA_SQUARE.x - src.x) * sx,
+      y: dst.y + (CAMERA_SQUARE.y - src.y) * sy,
+      width: CAMERA_SQUARE.width * sx,
+      height: CAMERA_SQUARE.height * sy,
+    };
+  },
+};
 
 /** Phase 1: a rounded face overlay on the screen (the original R1.48 parity project). */
 const roundedFace: ParityFixture = {
@@ -201,7 +260,41 @@ const faceKeyframes: ParityFixture = {
   },
 };
 
-export const FIXTURES: readonly ParityFixture[] = [roundedFace, faceKeyframes];
+/** Phase 2: face zoom ×2, a green border and a drop shadow (R2.3, R2.4). */
+const faceStyle: ParityFixture = {
+  name: 'p2-face-style',
+  frames: [5, 22, 39, 56, 73, 90, 107, 124, 141, 158],
+  minSsim: 0.98,
+  regions: [BORDER, FACE_INSIDE_BORDER, CAMERA_CENTRE],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    let doc = recorded(seconds, '3', 'Parity face style');
+    doc = unwrap(
+      applyOp(
+        doc,
+        {
+          type: 'setLayout',
+          trackId: trackByName(doc, 'Face').id,
+          layout: {
+            shape: 'rounded',
+            cornerRadius: 0.12,
+            width: 0.35,
+            centerX: 0.68,
+            centerY: 0.6,
+            zoom: 2,
+            border: { width: 0.01, color: '#00FF00' },
+            shadow: { blur: 0.03, offsetX: 0.01, offsetY: 0.02, color: '#000000B0' },
+          },
+        },
+        { generateId: counterIds('S') },
+      ),
+    );
+    return save(projectsDir, doc, seconds, true);
+  },
+};
+
+export const FIXTURES: readonly ParityFixture[] = [roundedFace, faceKeyframes, faceStyle];
 
 /** Timeline time of an output frame. */
 export function exportFrameTimeUs(n: number): number {

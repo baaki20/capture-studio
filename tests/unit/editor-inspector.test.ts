@@ -73,24 +73,24 @@ describe('face overlay panel (R1.41)', () => {
   });
 
   it('moves the overlay to each corner with the margin, inside the canvas', () => {
-    const topLeft = run(doc, cornerOp(doc, face.id, 'top-left'));
+    const topLeft = run(doc, cornerOp(doc, face.id, 'top-left', 0));
     const layout = faceTrack(topLeft)!.layout;
     const rect = overlayDestRect(layout, canvas, trackFrameSize(topLeft, faceTrack(topLeft)!));
     expect(rect.x).toBe(Math.round(0.03 * 1080));
     expect(rect.y).toBe(Math.round(0.03 * 1080));
-    const bottomRight = run(doc, cornerOp(doc, face.id, 'bottom-right'));
+    const bottomRight = run(doc, cornerOp(doc, face.id, 'bottom-right', 0));
     const br = overlayDestRect(faceTrack(bottomRight)!.layout, canvas, {
       width: 1280,
       height: 720,
     });
     expect(br.x + br.width).toBe(1920 - Math.round(0.03 * 1080));
-    expect(cornerOp(doc, 'trk_s', 'top-left')).toBeNull();
+    expect(cornerOp(doc, 'trk_s', 'top-left', 0)).toBeNull();
   });
 
   it('sizes, shapes, rounds, mirrors and crops', () => {
-    expect(faceTrack(run(doc, sizeOp(face.id, 0.9)))!.layout.width).toBe(0.5);
-    expect(faceTrack(run(doc, sizeOp(face.id, 0.01)))!.layout.width).toBe(0.05);
-    expect(faceTrack(run(doc, sizePresetOp(doc, face.id, 'large')))!.layout.width).toBe(0.3);
+    expect(faceTrack(run(doc, sizeOp(doc, face.id, 0.9, 0)))!.layout.width).toBe(0.5);
+    expect(faceTrack(run(doc, sizeOp(doc, face.id, 0.01, 0)))!.layout.width).toBe(0.05);
+    expect(faceTrack(run(doc, sizePresetOp(doc, face.id, 'large', 0)))!.layout.width).toBe(0.3);
     expect(faceTrack(run(doc, shapeOp(face.id, 'rounded')))!.layout.shape).toBe('rounded');
     expect(faceTrack(run(doc, radiusOp(face.id, 0.8)))!.layout.cornerRadius).toBe(0.5);
     expect(faceTrack(run(doc, mirrorOp(face.id, true)))!.layout.mirror).toBe(true);
@@ -106,7 +106,7 @@ describe('face overlay panel (R1.41)', () => {
   it('turns a dragged box back into a layout that stays inside the canvas', () => {
     const next = run(
       doc,
-      overlayRectOp(doc, face.id, { x: -500, y: 100, width: 300, height: 300 }),
+      overlayRectOp(doc, face.id, { x: -500, y: 100, width: 300, height: 300 }, 0),
     );
     const rect = overlayDestRect(faceTrack(next)!.layout, canvas, { width: 1280, height: 720 });
     expect(rect.x).toBe(0);

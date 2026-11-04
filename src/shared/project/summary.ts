@@ -6,7 +6,15 @@
  */
 import { formatTimecode, usToSeconds, type Us } from '../time';
 import { isTrackAudible } from './render-plan';
-import type { Component, Media, Project, ScreenLayout, OverlayLayout } from './schema';
+import type {
+  Component,
+  Easing,
+  FaceMode,
+  Media,
+  OverlayLayout,
+  Project,
+  ScreenLayout,
+} from './schema';
 import { clipDurationUs, clipEndUs, timelineDurationUs, trackFrameSize } from './timeline-ops';
 
 export interface TimeSummary {
@@ -36,6 +44,13 @@ export interface VideoTrackSummary extends TrackSummaryBase {
   type: 'video';
   hidden: boolean;
   layout: ScreenLayout | OverlayLayout;
+  /** Face layout keyframes (time, mode, easing to the next); absent when the layout is fixed. */
+  layoutKeyframes?: {
+    at: TimeSummary;
+    mode: FaceMode;
+    easing: Easing;
+    layout: OverlayLayout;
+  }[];
   /** The picture size of the track's media, in the pixels `layout.crop` uses. */
   sourceSize: { width: number; height: number };
 }
@@ -107,6 +122,16 @@ export function summarizeProject(doc: Project): ProjectSummary {
             type: 'video',
             hidden: track.hidden,
             layout: track.layout,
+            ...(track.layoutKeyframes
+              ? {
+                  layoutKeyframes: track.layoutKeyframes.map((k) => ({
+                    at: time(k.tUs),
+                    mode: k.mode,
+                    easing: k.easing,
+                    layout: k.layout,
+                  })),
+                }
+              : {}),
             sourceSize: trackFrameSize(doc, track),
           }
         : {

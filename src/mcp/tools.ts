@@ -269,8 +269,24 @@ export function registerTools(server: McpServer, app: AppApi): void {
     app,
     'set_face_layout',
     'faceLayout',
-    'Places and shapes the camera overlay: corner preset, size preset (small/medium/large), or exact centre and width; shape (rectangle/rounded/circle), corner radius, mirror. It always stays inside the frame.',
+    'Places and styles the camera overlay for the whole video: corner preset, size preset (small/medium/large), or exact centre and width; shape (rectangle/rounded/circle), corner radius, mirror, zoom inside the shape, border and drop shadow. It always stays inside the frame. With layout keyframes it changes every keyframe; use set_face_mode or set_face_keyframe for changes over time.',
     () => 'Change face layout',
+  );
+  stepTool(
+    server,
+    app,
+    'set_face_mode',
+    'faceMode',
+    'Shows the face differently for part of the video: full screen, side by side with the screen, hidden, or the normal overlay, from start to end, with an optional eased transition. Afterwards the face returns to what it was.',
+    (a) => `Face ${a.mode} ${show(a.start)}–${show(a.end)}`,
+  );
+  stepTool(
+    server,
+    app,
+    'set_face_keyframe',
+    'faceKeyframe',
+    'Sets or removes a face layout keyframe at a time: its mode, overlay position or width, and the easing to the next keyframe. get_project lists the keyframes.',
+    (a) => (a.remove ? `Remove face keyframe at ${show(a.at)}` : `Face keyframe at ${show(a.at)}`),
   );
   stepTool(
     server,
@@ -301,7 +317,7 @@ export function registerTools(server: McpServer, app: AppApi): void {
     'apply_edits',
     {
       description:
-        'Applies several edits together as ONE undo step, all or nothing. Steps run in order and each sees the timeline the earlier ones left. Step kinds: cut, trimEnds, split, deleteClips, trimClip, moveClip, track, faceLayout, screenCrop, syncNudge, marks (same fields as the single tools).',
+        'Applies several edits together as ONE undo step, all or nothing. Steps run in order and each sees the timeline the earlier ones left. Step kinds: cut, trimEnds, split, deleteClips, trimClip, moveClip, track, faceLayout, faceMode, faceKeyframe, screenCrop, syncNudge, marks (same fields as the single tools).',
       inputSchema: {
         project: ProjectRef,
         label: z
