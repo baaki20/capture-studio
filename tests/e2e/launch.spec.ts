@@ -20,12 +20,9 @@ async function closeWithin(app: ElectronApplication, userData: string, ms: numbe
   if (quit) return;
   const log = path.join(userData, 'logs', 'main.log');
   if (existsSync(log)) await test.info().attach('main.log', { path: log });
-  // Every Electron process with its parent and group: the main process may be gone while a
-  // helper (zygote, GPU, utility) still holds the stdio pipes Playwright waits on.
-  const tree = execFileSync('ps', ['-eo', 'pid,ppid,pgid,stat,etime,args'], { encoding: 'utf8' })
-    .split('\n')
-    .filter((line, i) => i === 0 || /electron|chrome-sandbox|capture-studio/.test(line))
-    .join('\n');
+  // Every process with its parent and group: the main process may be gone while something it
+  // started (a helper, or a program it launched) still holds the stdio pipes Playwright waits on.
+  const tree = execFileSync('ps', ['-eo', 'pid,ppid,pgid,stat,etime,args'], { encoding: 'utf8' });
   await test.info().attach('processes.txt', { body: `main pid ${String(pid)}\n${tree}` });
   app.process().kill('SIGKILL');
   throw new Error(
@@ -74,11 +71,23 @@ test('the shell window opens sandboxed, with its preload and worker working', as
     );
     expect(csp).toContain("default-src 'none'");
 
-    // Navigation away from the app is blocked.
+    // Navigation away from the app is blocked and the URL is handed to the system browser.
+    // The hand-off is recorded instead of performed: a real browser would inherit the app's
+    // stdio and keep Playwright waiting for the app to close.
+    await app.evaluate(({ shell }) => {
+      const opened: string[] = [];
+      (globalThis as { openedExternal?: string[] }).openedExternal = opened;
+      shell.openExternal = (url: string) => {
+        opened.push(url);
+        return Promise.resolve();
+      };
+    });
     await page.evaluate(() => {
       window.location.href = 'https://example.invalid/';
     });
-    await page.waitForTimeout(500);
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as { openedExternal?: string[] }).openedExternal))
+      .toEqual(['https://example.invalid/']);
     expect(page.url()).toContain('/shell/index.html');
 
     expect(errors).toEqual([]);
