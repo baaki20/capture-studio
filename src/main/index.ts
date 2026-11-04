@@ -8,7 +8,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
-import type { BrowserWindow } from 'electron';
+import type { BrowserWindow, MessagePortMain } from 'electron';
 import {
   app,
   BrowserWindow as ElectronWindow,
@@ -54,6 +54,7 @@ import { applyForceX11, DEV_ONLY_ENV, readLaunchEnv, x11Relaunch } from './launc
 import { forwardRendererConsole, initLogging } from './logging';
 import {
   createMediaHandler,
+  mediaUrl,
   MEDIA_SCHEME,
   MEDIA_SCHEME_PRIVILEGES,
   ProjectRootRegistry,
@@ -78,6 +79,7 @@ import { ControlsWindowHost } from './windows/controls';
 import { shouldMinimizeOnStart } from './windows/controls-policy';
 import { EditorWindowHost } from './windows/editor';
 import { EngineHost } from './windows/engine';
+import { openFrameRenderer } from './windows/render';
 import { RegionPickerHost } from './windows/picker';
 import { SourcePickerHost } from './windows/source-picker';
 import { createShellWindow, focusWindow, type RendererLocation } from './windows/shell';
@@ -661,7 +663,19 @@ async function start(): Promise<void> {
 
   exportService = registerExportHandlers({
     router,
-    runExport: (job, options) => utility.runJob(job, options),
+    runExport: (job, { ports, ...options }) =>
+      utility.runJob(job, {
+        ...options,
+        // Only `openFrameRenderer` below makes ports.
+        ...(ports ? { ports: ports as MessagePortMain[] } : {}),
+      }),
+    openFrameRenderer: ({ doc, spec }) => {
+      const mediaUrls: Record<string, string> = {};
+      for (const media of doc.media) {
+        if (media.kind === 'video') mediaUrls[media.id] = mediaUrl(doc.id, media.path);
+      }
+      return openFrameRenderer(renderer, { doc, mediaUrls, spec }, log);
+    },
     checkMedia: (root, doc) => markMediaPresence(root, doc),
     findRoot: (id) => library.findRoot(id),
     readProject: async (root) => (await store.read(root))?.doc ?? null,

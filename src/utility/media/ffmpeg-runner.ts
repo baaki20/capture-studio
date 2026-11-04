@@ -3,12 +3,14 @@
  *
  * - Progress comes from `-progress pipe:1` and is reported as `out_time_us / duration`.
  * - Cancel writes `q` to stdin (FFmpeg finishes the container cleanly), then SIGKILLs after 5 s.
+ *   When stdin carries an input (`stdin`), cancel sends SIGTERM instead.
  * - Output files named in `removeOnFailure` are deleted after a cancel or failure, so no partial
  *   file is left behind (R1.47).
  * - FFmpeg dies with this process, even when it is SIGKILLed (`child-processes.ts`).
  */
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import type { Writable } from 'node:stream';
 import { err, ok, type Result } from '../../shared/result';
 import { spawnChild } from './child-processes';
 
@@ -108,6 +110,11 @@ export interface RunFfmpegOptions {
   killTimeoutMs?: number;
   /** Files to delete when the run is cancelled or fails. */
   removeOnFailure?: readonly string[];
+  /**
+   * Feeds FFmpeg's stdin (an input read from `pipe:0`). Cancel then cannot send `q`, so it sends
+   * SIGTERM instead (FFmpeg still finishes the file it was writing) and SIGKILL after the timeout.
+   */
+  stdin?: (stdin: Writable) => void;
   /** For tests. */
   spawnImpl?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
 }
@@ -163,11 +170,15 @@ function runOnce(
     const onAbort = (): void => {
       if (cancelled || settled) return;
       cancelled = true;
-      child.stdin?.write('q');
-      child.stdin?.end();
+      if (options.stdin) child.kill('SIGTERM');
+      else {
+        child.stdin?.write('q');
+        child.stdin?.end();
+      }
       killTimer = setTimeout(() => child.kill('SIGKILL'), options.killTimeoutMs ?? 5000);
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
+    if (options.stdin && child.stdin) options.stdin(child.stdin);
 
     const finish = (value: Result<{ stderrTail: string }, FfmpegRunError>): void => {
       if (settled) return;

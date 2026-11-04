@@ -43,6 +43,8 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
   /**
    * Export a project snapshot to MP4 (§4.3.9). Main validated `doc` against the full schema;
    * `hardwareEncoder` is the probe-verified encoder for `encoder: 'auto'` (null = libx264).
+   * `video: 'frames'` is the frame-render path (D4): the job message carries the frame port of
+   * the render window (`render-port.ts`).
    */
   z.object({
     kind: z.literal('export'),
@@ -52,6 +54,7 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
     hardwareEncoder: z.string().nullable(),
     output: AbsPath,
     overwrite: z.boolean(),
+    video: z.enum(['graph', 'frames']).default('graph'),
   }),
 ]);
 export type JobSpec = z.infer<typeof JobSpecSchema>;

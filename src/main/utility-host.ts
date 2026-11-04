@@ -35,6 +35,8 @@ import type { FfmpegLocation } from './ffmpeg/locate';
 export interface RunJobOptions {
   onProgress?: (fraction: number | null) => void;
   signal?: AbortSignal;
+  /** Ports sent with the job (the frame port of a frame-render export). */
+  ports?: MessagePortMain[];
 }
 
 export interface MediaUtilityHandle {
@@ -177,7 +179,7 @@ export function startMediaUtility(
           options.signal?.removeEventListener('abort', onAbort);
         };
         options.signal?.addEventListener('abort', onAbort, { once: true });
-        handle.send({ type: 'job', jobId, job });
+        handle.send({ type: 'job', jobId, job }, options.ports);
       });
     },
 

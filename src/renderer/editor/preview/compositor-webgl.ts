@@ -12,19 +12,31 @@
  *
  * A layer without a decoded frame (still decoding, or offline media) is drawn as a flat
  * placeholder so the layout stays visible. The geometry helpers are pure and unit-tested.
+ *
+ * The frame-render export (`renderer/render`) draws with this same compositor into an offscreen
+ * target (`drawOffscreen`) and converts that to yuv420p on the GPU (`readYuv420`), so the export
+ * shows exactly what the preview draws.
  */
-import { MASK_COVERAGE_GLSL, type VideoLayer } from '../../../shared/project/render-plan';
-import { maskUniforms, parseHexColor, quadUvs, quadVertices, type Size } from './compositor-math';
+import {
+  unpackYuv,
+  yuvFrameBytes,
+  yuvTarget,
+  YUV709_GLSL,
+} from '../../../shared/export/frame-render';
+import { MASK_COVERAGE_GLSL } from '../../../shared/project/render-plan';
+import {
+  maskUniforms,
+  parseHexColor,
+  quadUvs,
+  quadVertices,
+  type CompositeItemOf,
+  type Size,
+} from './compositor-math';
 
 export type { Size } from './compositor-math';
 
-export interface CompositeItem {
-  layer: VideoLayer;
-  /** The decoded picture, or null for a placeholder. */
-  frame: TexImageSource | null;
-  /** The media's picture size (`Media.video`), the space of `layer.sourceRect`. */
-  mediaSize: Size;
-}
+/** One layer to draw (see `compositor-math.ts`), with a picture WebGL can upload. */
+export type CompositeItem = CompositeItemOf<TexImageSource>;
 
 const VERTEX_SHADER = `#version 300 es
 in vec2 a_pos;
@@ -45,17 +57,68 @@ uniform float u_radius;
 uniform float u_canvasHeight;
 uniform int u_solid;
 uniform vec4 u_color;
+uniform float u_opacity;
 out vec4 outColor;
 ${MASK_COVERAGE_GLSL}
 void main() {
   vec2 p = vec2(gl_FragCoord.x - u_rect.x, (u_canvasHeight - gl_FragCoord.y) - u_rect.y);
-  float coverage = csMaskCoverage(p, u_rect.zw, u_radius);
+  float coverage = csMaskCoverage(p, u_rect.zw, u_radius) * u_opacity;
   vec4 color = u_solid == 1 ? u_color : vec4(texture(u_tex, v_uv).rgb, 1.0);
   outColor = vec4(color.rgb * coverage, coverage);
 }
 `;
 
+/**
+ * Converts the composited picture (u_src, canvas size, bottom-up) to yuv420p packed four samples
+ * per texel (`yuvTarget` in `shared/export/frame-render.ts`). Each output sample is the source
+ * sampled at its pixel centre (Y) or at the centre of its 2×2 block (U, V), bilinearly, so at
+ * canvas size chroma is the mean of the four pixels.
+ */
+const YUV_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+// Output frame size; the source (canvas size) is sampled proportionally.
+uniform vec2 u_size;
+out vec4 outColor;
+${YUV709_GLSL}
+vec3 at(vec2 topDown) {
+  return texture(u_src, vec2(topDown.x / u_size.x, 1.0 - topDown.y / u_size.y)).rgb;
+}
+void main() {
+  vec2 texel = floor(gl_FragCoord.xy);
+  float w = u_size.x;
+  float h = u_size.y;
+  vec4 result = vec4(0.0);
+  for (int c = 0; c < 4; c++) {
+    float x = texel.x * 4.0 + float(c);
+    float value = 0.0;
+    if (texel.y < h) {
+      if (x < w) value = csYuv709(at(vec2(x + 0.5, texel.y + 0.5))).x;
+    } else {
+      bool isU = texel.y < h * 1.5;
+      float row = texel.y - (isU ? h : h * 1.5);
+      if (x < w * 0.5) {
+        vec3 yuv = csYuv709(at(vec2(2.0 * x + 1.0, 2.0 * row + 1.0)));
+        value = isU ? yuv.y : yuv.z;
+      }
+    }
+    result[c] = value;
+  }
+  outColor = result;
+}
+`;
+
+const FULLSCREEN_VERTICES = new Float32Array([-1, 1, 1, 1, -1, -1, 1, -1]);
+
 const PLACEHOLDER: [number, number, number, number] = [0.22, 0.24, 0.28, 1];
+
+/** A colour texture with its framebuffer. */
+interface Target {
+  framebuffer: WebGLFramebuffer;
+  texture: WebGLTexture;
+  width: number;
+  height: number;
+}
 
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -66,6 +129,17 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
     throw new Error(`compositor: shader error: ${gl.getShaderInfoLog(shader) ?? ''}`);
   }
   return shader;
+}
+
+function link(gl: WebGL2RenderingContext, vertex: string, fragment: string): WebGLProgram {
+  const program = gl.createProgram();
+  gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, vertex));
+  gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragment));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    throw new Error(`compositor: link error: ${gl.getProgramInfoLog(program) ?? ''}`);
+  }
+  return program;
 }
 
 export interface LumaProbe {
@@ -90,6 +164,10 @@ export class WebGlCompositor {
   private readonly textures: WebGLTexture[] = [];
   private readonly uniforms: Record<string, WebGLUniformLocation | null>;
   private size: Size;
+  /** Offscreen picture at canvas size, and the packed yuv420p target (export only). */
+  private picture: Target | null = null;
+  private yuv: Target | null = null;
+  private yuvProgram: WebGLProgram | null = null;
 
   constructor(private readonly canvas: OffscreenCanvas) {
     const gl = canvas.getContext('webgl2', {
@@ -101,21 +179,13 @@ export class WebGlCompositor {
     if (!gl) throw new Error('compositor: WebGL2 is not available');
     this.gl = gl;
     this.size = { width: canvas.width, height: canvas.height };
-    const program = gl.createProgram();
-    gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER));
-    gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER));
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      throw new Error(`compositor: link error: ${gl.getProgramInfoLog(program) ?? ''}`);
-    }
-    this.program = program;
+    this.program = link(gl, VERTEX_SHADER, FRAGMENT_SHADER);
     this.posBuffer = gl.createBuffer();
     this.uvBuffer = gl.createBuffer();
     this.uniforms = Object.fromEntries(
-      ['u_tex', 'u_rect', 'u_radius', 'u_canvasHeight', 'u_solid', 'u_color'].map((name) => [
-        name,
-        gl.getUniformLocation(program, name),
-      ]),
+      ['u_tex', 'u_rect', 'u_radius', 'u_canvasHeight', 'u_solid', 'u_color', 'u_opacity'].map(
+        (name) => [name, gl.getUniformLocation(this.program, name)],
+      ),
     );
   }
 
@@ -128,6 +198,54 @@ export class WebGlCompositor {
 
   /** Draws one frame: background, then the layers bottom to top. */
   draw(background: string, items: readonly CompositeItem[]): void {
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    this.drawBound(background, items);
+  }
+
+  /** Draws one frame into the offscreen picture (export); read it with `readYuv420`. */
+  drawOffscreen(background: string, items: readonly CompositeItem[]): void {
+    const { gl } = this;
+    const picture = this.target('picture', this.size.width, this.size.height);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, picture.framebuffer);
+    this.drawBound(background, items);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /**
+   * The offscreen picture as one yuv420p frame of `out` size (BT.709 limited range; see
+   * `shared/export/frame-render.ts`). Scales from the canvas size bilinearly when they differ.
+   */
+  readYuv420(out: Size, into?: Uint8Array): Uint8Array {
+    const { gl } = this;
+    const picture = this.picture;
+    if (!picture) throw new Error('compositor: nothing drawn offscreen');
+    const layout = yuvTarget(out.width, out.height);
+    const yuv = this.target('yuv', layout.width, layout.height);
+    this.yuvProgram ??= link(gl, VERTEX_SHADER, YUV_FRAGMENT_SHADER);
+    const program = this.yuvProgram;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, yuv.framebuffer);
+    gl.viewport(0, 0, layout.width, layout.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(program);
+    this.bindAttribute(this.posBuffer, 'a_pos', FULLSCREEN_VERTICES, program);
+    this.bindAttribute(this.uvBuffer, 'a_uv', FULLSCREEN_VERTICES, program);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, picture.texture);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_src'), 0);
+    gl.uniform2f(gl.getUniformLocation(program, 'u_size'), out.width, out.height);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const readback = new Uint8Array(layout.width * layout.height * 4);
+    gl.readPixels(0, 0, layout.width, layout.height, gl.RGBA, gl.UNSIGNED_BYTE, readback);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return unpackYuv(
+      readback,
+      out.width,
+      out.height,
+      into ?? new Uint8Array(yuvFrameBytes(out.width, out.height)),
+    );
+  }
+
+  private drawBound(background: string, items: readonly CompositeItem[]): void {
     const { gl } = this;
     gl.viewport(0, 0, this.size.width, this.size.height);
     const [r, g, b] = parseHexColor(background);
@@ -153,6 +271,7 @@ export class WebGlCompositor {
       const solid = item.frame === null || item.layer.offline;
       gl.uniform1i(this.uniforms.u_solid ?? null, solid ? 1 : 0);
       gl.uniform4f(this.uniforms.u_color ?? null, ...PLACEHOLDER);
+      gl.uniform1f(this.uniforms.u_opacity ?? null, item.layer.opacity ?? 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this.texture(index));
       if (!solid && item.frame) {
@@ -198,6 +317,12 @@ export class WebGlCompositor {
   dispose(): void {
     const { gl } = this;
     for (const t of this.textures) gl.deleteTexture(t);
+    for (const target of [this.picture, this.yuv]) {
+      if (!target) continue;
+      gl.deleteFramebuffer(target.framebuffer);
+      gl.deleteTexture(target.texture);
+    }
+    if (this.yuvProgram) gl.deleteProgram(this.yuvProgram);
     gl.deleteBuffer(this.posBuffer);
     gl.deleteBuffer(this.uvBuffer);
     gl.deleteProgram(this.program);
@@ -218,9 +343,44 @@ export class WebGlCompositor {
     return texture;
   }
 
-  private bindAttribute(buffer: WebGLBuffer, name: string, data: Float32Array): void {
+  /** The offscreen picture or yuv target, (re)created at `width × height`. */
+  private target(kind: 'picture' | 'yuv', width: number, height: number): Target {
+    const existing = this[kind];
+    if (existing?.width === width && existing.height === height) return existing;
     const { gl } = this;
-    const location = gl.getAttribLocation(this.program, name);
+    if (existing) {
+      gl.deleteFramebuffer(existing.framebuffer);
+      gl.deleteTexture(existing.texture);
+    }
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height);
+    const filter = kind === 'picture' ? gl.LINEAR : gl.NEAREST;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const framebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      throw new Error(`compositor: the ${kind} target is incomplete`);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const created = { framebuffer, texture, width, height };
+    this[kind] = created;
+    return created;
+  }
+
+  private bindAttribute(
+    buffer: WebGLBuffer,
+    name: string,
+    data: Float32Array,
+    program: WebGLProgram = this.program,
+  ): void {
+    const { gl } = this;
+    const location = gl.getAttribLocation(program, name);
+    if (location < 0) return;
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(location);

@@ -8,6 +8,11 @@
  *
  * A hardware encoder that fails is retried once with libx264; the result says so, so the user
  * can be told (§4.3.9, §9.4).
+ *
+ * With `frames` (the frame-render path, D4) the picture comes from the render window over the
+ * frame port, as raw yuv420p on FFmpeg's stdin; the graph then only carries the audio. Each
+ * attempt asks the renderer to start from frame 0. A renderer failure fails the export with the
+ * renderer's message and is not retried with another encoder.
  */
 import { randomBytes } from 'node:crypto';
 import { promises as fs, rmSync } from 'node:fs';
@@ -21,6 +26,7 @@ import { timelineDurationUs } from '../../../shared/project/timeline-ops';
 import type { Logger } from '../../../shared/logger';
 import { silentLogger } from '../../../shared/logger';
 import { runFfmpeg, type FfmpegRunError } from '../ffmpeg-runner';
+import { FrameFeedError, type FrameFeed } from './frame-feed';
 import { fileSize } from '../fs-utils';
 import { probeMedia } from '../probe';
 import {
@@ -53,6 +59,8 @@ export interface ExportJobOptions {
   stallTimeoutMs?: number;
   /** Parent of the private work folder (default `os.tmpdir()`). */
   tempDir?: string;
+  /** Frame-render path: the frame port's feed (see the header). */
+  frames?: FrameFeed;
   now?: () => number;
 }
 
@@ -182,6 +190,7 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
         audioScriptPath: path.join(work, 'audio.txt'),
         maskDir: work,
         ...(mediaColor ? { mediaColor } : {}),
+        video: options.frames ? 'pipe' : 'graph',
       });
       if (!built.ok) {
         throw new ExportError(
@@ -216,6 +225,11 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
       let stallTimer = setTimeout(() => stall.abort(), stallMs);
       let reachedUs = -1;
       let reachedFrame = -1;
+      // A renderer failure stops FFmpeg; its message is the export's error.
+      const rendering = new AbortController();
+      const failure: { render: FrameFeedError | null } = { render: null };
+      const frames = options.frames;
+      const signals = [stall.signal, rendering.signal, ...(options.signal ? [options.signal] : [])];
       try {
         const result = await runFfmpeg({
           ffmpegPath: options.ffmpegPath,
@@ -232,9 +246,24 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
             }
             options.onProgress?.(p.fraction);
           },
-          signal: options.signal ? AbortSignal.any([options.signal, stall.signal]) : stall.signal,
+          signal: AbortSignal.any(signals),
           removeOnFailure: [temp],
+          ...(frames
+            ? {
+                stdin: (stdin) => {
+                  frames.attempt(stdin).catch((error: unknown) => {
+                    if (error instanceof FrameFeedError && error.source !== 'renderer') return;
+                    failure.render =
+                      error instanceof FrameFeedError ? error : new FrameFeedError(String(error));
+                    rendering.abort();
+                  });
+                },
+              }
+            : {}),
         });
+        if (failure.render && !options.signal?.aborted) {
+          throw new ExportError('failed', `Rendering failed: ${failure.render.message}`);
+        }
         if (!result.ok && stall.signal.aborted && !options.signal?.aborted) {
           const seconds = String(Math.round(stallMs / 1000));
           return {

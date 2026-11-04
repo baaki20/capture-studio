@@ -1,6 +1,7 @@
 /**
  * The preview worker's core (§4.3.8): turns "show timeline time t" into decode requests and a
- * composited frame, using the render plan's `layersAt` (the same plan the export uses, R1.48).
+ * composited frame, using the scene at t (`sceneAt`, which is the render plan's `layersAt` for a
+ * Phase 1 project): the same scene both export paths show (R1.48).
  *
  * - Every visible layer asks its media's decoder for the layer's file time; while playing, the
  *   layers one second ahead are requested too, so the next clip is decoded before it is needed.
@@ -8,8 +9,10 @@
  * - When a render had to use a stand-in frame, the next decoded frame of that media triggers a
  *   re-render (`onInvalidate`), so a paused preview settles on the exact frame.
  */
-import { layersAt, type VideoLayer } from '../../../shared/project/render-plan';
+import type { VideoLayer } from '../../../shared/project/render-plan';
+import { sceneAt } from '../../../shared/project/scene';
 import type { Media, Project } from '../../../shared/project/schema';
+import { sceneBackgroundColor } from './compositor-math';
 import type { CompositeItem, LumaProbe, PixelCapture, Size } from './compositor-webgl';
 import type { DecoderPool } from './decoder-pool';
 import type { CacheableFrame } from './frame-cache';
@@ -65,7 +68,8 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
     const doc = this.doc;
     if (!doc) return false;
     this.lastT = tUs;
-    const layers = layersAt(doc, tUs);
+    const scene = sceneAt(doc, tUs);
+    const { layers } = scene;
     this.waitingFor.clear();
     const items: CompositeItem[] = [];
     let exact = true;
@@ -76,13 +80,13 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
     }
     if (playing) {
       const shown = new Set(layers.map((l) => l.mediaId));
-      for (const next of layersAt(doc, tUs + PREROLL_US)) {
+      for (const next of sceneAt(doc, tUs + PREROLL_US).layers) {
         if (!next.offline && !shown.has(next.mediaId)) {
           this.pool.request(next.mediaId, next.fileTimeUs);
         }
       }
     }
-    this.compositor.draw(doc.timeline.canvas.background.color, items);
+    this.compositor.draw(sceneBackgroundColor(scene), items);
     if (!exact) this.inexact += 1;
     return exact;
   }

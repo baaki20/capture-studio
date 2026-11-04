@@ -17,6 +17,9 @@ import { probeEncoders } from './encoder-probe';
 import { runExportJob } from './export/export-job';
 import { finalizeRecording } from './finalize';
 import { PcmIngest, SystemAudioMonitor } from './pcm-ingest';
+import { frameSpec } from '../../shared/export/frame-render';
+import { timelineDurationUs } from '../../shared/project/timeline-ops';
+import { FrameFeed } from './export/frame-feed';
 import { ffmpegTooOldError } from './ffmpeg-runner';
 import { generatePeaks } from './peaks';
 import { probeFfmpegVersion, type FfmpegVersion } from './probe';
@@ -134,7 +137,7 @@ export class MediaService {
         this.setMonitor(request.enabled);
         break;
       case 'job':
-        await this.runJob(request.jobId, request.job);
+        await this.runJob(request.jobId, request.job, ports[0]);
         break;
       case 'job.cancel':
         this.jobs.get(request.jobId)?.abort();
@@ -242,13 +245,16 @@ export class MediaService {
     this.emit({ type: 'system.started', captureId, path: ingest.path });
   }
 
-  private async runJob(jobId: string, job: JobSpec): Promise<void> {
+  /** `port`: the frame port of a frame-render export (`video: 'frames'`). */
+  private async runJob(jobId: string, job: JobSpec, port?: PortLike): Promise<void> {
     if (this.jobs.has(jobId)) {
+      port?.close();
       this.emit({ type: 'job.error', jobId, message: 'job id already running', cancelled: false });
       return;
     }
     const ffmpeg = this.ffmpeg;
     if (!ffmpeg) {
+      port?.close();
       this.emit({ type: 'job.error', jobId, message: 'FFmpeg is not available', cancelled: false });
       return;
     }
@@ -257,6 +263,7 @@ export class MediaService {
     const { signal } = controller;
     const progress = (fraction: number | null): void =>
       this.emit({ type: 'job.progress', jobId, fraction });
+    let frames: FrameFeed | null = null;
 
     try {
       let result: unknown;
@@ -297,6 +304,14 @@ export class MediaService {
           result = await probeEncoders({ ffmpegPath: ffmpeg.ffmpegPath, signal });
           break;
         case 'export':
+          if (job.video === 'frames') {
+            if (!port) throw new Error('A frame-render export needs its frame port.');
+            frames = new FrameFeed(
+              port,
+              frameSpec(job.doc, job.options, timelineDurationUs(job.doc)),
+              this.logger,
+            );
+          } else port?.close();
           result = await runExportJob({
             ffmpegPath: ffmpeg.ffmpegPath,
             ffprobePath: ffmpeg.ffprobePath,
@@ -309,6 +324,7 @@ export class MediaService {
             signal,
             onProgress: progress,
             logger: this.logger,
+            ...(frames ? { frames } : {}),
           });
           break;
       }
@@ -327,6 +343,7 @@ export class MediaService {
         cancelled: signal.aborted,
       });
     } finally {
+      frames?.stop();
       this.jobs.delete(jobId);
     }
   }

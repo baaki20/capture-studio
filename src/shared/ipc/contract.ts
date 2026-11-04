@@ -212,6 +212,12 @@ export const ExportOptionsSchema = z.strictObject({
   fps: z.union([z.literal(30), z.literal(60), z.literal('project')]),
   quality: z.enum(['draft', 'standard', 'high']),
   encoder: z.enum(['auto', 'software']),
+  /**
+   * How the picture is made: `auto` (default) renders frames with the shared compositor when the
+   * project uses a v2 visual feature and uses the FFmpeg filter graph otherwise (D4); `graph` and
+   * `frames` force one (`graph` cannot show v2 visuals).
+   */
+  videoPath: z.enum(['auto', 'graph', 'frames']).optional(),
 });
 export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
 

@@ -37,6 +37,10 @@
  * 6. Encoding: libx264 (preset and CRF from the quality), or a verified hardware encoder with
  *    equivalent settings; AAC-LC 192 kbps 48 kHz stereo, `+faststart`.
  *
+ * Frame-render path (`video: 'pipe'`, D4): the picture is rendered by the shared WebGL compositor
+ * and arrives as raw yuv420p frames of the export size on stdin (input 0). The video graph then
+ * only tags it BT.709; media are opened for their audio, whose graph is unchanged.
+ *
  * A track whose clips do not all share one geometry (possible once media of different sizes
  * share a track) is split into one stream per geometry, each with gaps where the others are.
  *
@@ -126,7 +130,8 @@ export function resolveExportSettings(
 export interface ExportInput {
   /** Index of the `-i`. */
   index: number;
-  kind: 'media' | 'mask';
+  /** `pipe`: the frame-render path's raw frames on stdin (`path` is `pipe:0`). */
+  kind: 'media' | 'mask' | 'pipe';
   path: string;
   /** Media id, for `kind: 'media'`. */
   mediaId: string | null;
@@ -226,6 +231,12 @@ export interface BuildExportGraphOptions {
   maskDir: string;
   /** Probed colour properties of video media; missing entries are taken as BT.709. */
   mediaColor?: ReadonlyMap<string, MediaColor>;
+  /**
+   * Where the picture comes from: this graph (default), or raw yuv420p frames of the export size
+   * on stdin, rendered by the shared compositor (frame-render path, D4). With `pipe` the video
+   * graph only tags the frames; media are opened for their audio only.
+   */
+  video?: 'graph' | 'pipe';
 }
 
 /** A video file's colour tags as ffprobe reports them (`color_space`, `color_range`). */
@@ -484,7 +495,10 @@ export function buildExportGraph(
     });
   }
 
-  const streams = plans.map((plan) => ({ plan, streams: trackStreams(plan.pieces, F) }));
+  const pipe = options.video === 'pipe';
+  const streams = pipe
+    ? []
+    : plans.map((plan) => ({ plan, streams: trackStreams(plan.pieces, F) }));
   const allStreams = streams.flatMap((s) => s.streams);
 
   // Uses of each media, in the order the graph consumes them, then grouped into runs that one
@@ -568,6 +582,7 @@ export function buildExportGraph(
   // Inputs: media in document order, each once; then further runs (document order, video
   // before audio, run order), each opened at a keyframe before its first clip.
   const inputs: ExportInput[] = [];
+  if (pipe) inputs.push({ index: 0, kind: 'pipe', path: 'pipe:0', mediaId: null, seek: null });
   const inputIndex = new Map<string, number>();
   for (const media of doc.media) {
     if (!videoUses.has(media.id) && !audioUses.has(media.id)) continue;
@@ -747,8 +762,10 @@ export function buildExportGraph(
     });
   }
 
-  // Composition (BT.709 YUV throughout; every source was converted above).
-  if (base === null) {
+  // Composition (BT.709 YUV throughout; every source was converted above). Rendered frames are
+  // composed already, at the export size.
+  if (pipe) base = '0:v:0';
+  else if (base === null) {
     // One background frame, converted once and repeated.
     base = labels.next('b');
     lines.push(
@@ -763,7 +780,7 @@ export function buildExportGraph(
     base = next;
   }
   const tail: string[] = [];
-  if (settings.width !== canvas.width || settings.height !== canvas.height) {
+  if (!pipe && (settings.width !== canvas.width || settings.height !== canvas.height)) {
     tail.push(`scale=${String(settings.width)}:${String(settings.height)}:flags=bicubic`);
   }
   tail.push(
@@ -815,6 +832,18 @@ export function buildExportGraph(
   const args: string[] = ['-y', '-loglevel', 'warning'];
   if (settings.encoder === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE);
   for (const input of inputs) {
+    if (input.kind === 'pipe') {
+      args.push(
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'yuv420p',
+        '-video_size',
+        `${String(settings.width)}x${String(settings.height)}`,
+        '-framerate',
+        String(F),
+      );
+    }
     if (input.seek) args.push('-noaccurate_seek', '-ss', sec(input.seek.startUs));
     args.push('-i', input.path);
   }

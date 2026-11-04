@@ -12,6 +12,10 @@
  *   saved project (R1.49). Offline media block it with a message (R1.29).
  * - Auto uses the probe-verified hardware encoder; the utility falls back to libx264 once and the
  *   `export.done` notice says so (§4.3.9, §9.4).
+ * - The picture is made by the FFmpeg filter graph, or for projects that use v2 visuals by the
+ *   frame-render path (D4, `shared/export/frame-render.ts`): a hidden render window draws each
+ *   frame with the shared compositor and streams it to the utility over a frame port. The window
+ *   lives exactly as long as the export.
  * - No temp output outlives its export (R1.47): the utility deletes it on cancel, failure and
  *   exit; when an export ends any other way (the utility crashed or was killed) its temp files
  *   are deleted here, quitting deletes those of running exports, and startup sweeps the exports
@@ -21,6 +25,7 @@
 import { promises as fs, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { FfmpegEncoderReport } from '../../shared/capabilities/types';
+import { frameSpec, needsFrameRender, type FrameSpec } from '../../shared/export/frame-render';
 import { exportTempOwner } from '../../shared/export/temp-name';
 import { newId } from '../../shared/ids';
 import type { ExportOptions, InvokeResponse } from '../../shared/ipc/contract';
@@ -28,9 +33,13 @@ import type { JobResult } from '../../shared/ipc/media-utility';
 import type { Logger } from '../../shared/logger';
 import { audioSegments, videoTrackPlans } from '../../shared/project/render-plan';
 import type { Project } from '../../shared/project/schema';
+import { timelineDurationUs } from '../../shared/project/timeline-ops';
 import type { Settings } from '../../shared/settings/schema';
 import type { RunJobOptions } from '../utility-host';
 import type { IpcRouter } from './router';
+
+/** Job options; `ports` carries the frame port of a frame-render export. */
+export type ExportRunOptions = Omit<RunJobOptions, 'ports'> & { ports?: unknown[] };
 
 export interface ExportHandlerDeps {
   router: Pick<IpcRouter, 'handle' | 'broadcast'>;
@@ -44,9 +53,18 @@ export interface ExportHandlerDeps {
       hardwareEncoder: string | null;
       output: string;
       overwrite: boolean;
+      video: VideoPath;
     },
-    options: RunJobOptions,
+    options: ExportRunOptions,
   ) => Promise<JobResult<'export'>>;
+  /**
+   * Opens the hidden render window of a frame-render export for this snapshot; resolves with the
+   * utility's end of its frame port. Absent: only filter-graph exports are possible.
+   */
+  openFrameRenderer?: (start: { doc: Project; spec: FrameSpec }) => Promise<{
+    port: unknown;
+    close(): void;
+  }>;
   /** The project's folder, or null for an unknown id. */
   findRoot: (projectId: string) => Promise<string | null>;
   /** The saved document of a project folder, or null when unreadable. */
@@ -69,6 +87,15 @@ export interface ExportHandlerDeps {
   now?: () => number;
   /** When this process started (epoch ms); older temp files are stale. */
   processStartMs?: number;
+}
+
+export type VideoPath = 'graph' | 'frames';
+
+/** The export's picture path (D4): the option, or by what the project uses. */
+export function chooseVideoPath(doc: Project, options: ExportOptions): VideoPath {
+  const requested = options.videoPath ?? 'auto';
+  if (requested !== 'auto') return requested;
+  return needsFrameRender(doc) ? 'frames' : 'graph';
 }
 
 interface ChosenTarget {
@@ -334,6 +361,11 @@ export class ExportService {
       return reply('exists', `${path.basename(output)} already exists.`);
     }
 
+    const video = chooseVideoPath(doc, request.options);
+    if (video === 'frames' && !this.deps.openFrameRenderer) {
+      return reply('blocked', 'This export needs the frame renderer, which is not available.');
+    }
+
     let hardwareEncoder: string | null = null;
     if (request.options.encoder === 'auto') {
       try {
@@ -354,6 +386,7 @@ export class ExportService {
       hardwareEncoder,
       output,
       overwrite,
+      video,
     });
     return { jobId, status: 'started', path: output, message: null };
   }
@@ -387,8 +420,18 @@ export class ExportService {
     let startedAt = this.now();
     let last = 0;
     let succeeded = false;
+    let renderer: { port: unknown; close(): void } | null = null;
     try {
+      if (job.video === 'frames' && this.deps.openFrameRenderer) {
+        const spec = frameSpec(job.doc, job.options, timelineDurationUs(job.doc));
+        renderer = await this.deps.openFrameRenderer({ doc: job.doc, spec });
+        logger.info(
+          `export ${jobId}: rendering ${String(spec.frames)} frames at ${String(spec.width)}x${String(spec.height)}`,
+        );
+      }
+      if (controller.signal.aborted) throw new Error('cancelled');
       const result = await this.deps.runExport(job, {
+        ...(renderer ? { ports: [renderer.port] } : {}),
         signal: controller.signal,
         onProgress: (fraction) => {
           // A hardware fallback restarts from 0: restart the ETA clock too.
@@ -429,6 +472,7 @@ export class ExportService {
       router.broadcast('export.error', { jobId, message, cancelled });
       this.emit({ type: 'error', jobId, message, cancelled });
     } finally {
+      renderer?.close();
       // The utility deletes its temp output itself unless it died first (crash, kill). Still
       // listed as running meanwhile, so a new export to the same file cannot start and lose its
       // temp file to this cleanup.

@@ -13,8 +13,10 @@ import type { EventChannel, EventPayload, ExportOptions } from '../../src/shared
 import type { JobResult } from '../../src/shared/ipc/media-utility';
 import { silentLogger } from '../../src/shared/logger';
 import type { Project } from '../../src/shared/project/schema';
+import { timelineDurationUs } from '../../src/shared/project/timeline-ops';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import {
+  chooseVideoPath,
   estimateEtaSec,
   ExportService,
   exportFileName,
@@ -22,8 +24,8 @@ import {
   sweepStaleExportTemps,
   withMp4Extension,
   type ExportHandlerDeps,
+  type ExportRunOptions,
 } from '../../src/main/ipc/export-handlers';
-import type { RunJobOptions } from '../../src/main/utility-host';
 import { recordedProject } from '../fixtures/editor-project';
 
 const OPTIONS: ExportOptions = {
@@ -52,7 +54,7 @@ function setup(overrides: Partial<ExportHandlerDeps> = {}) {
   const files = new Set<string>();
   const jobs: {
     job: Job;
-    options: RunJobOptions;
+    options: ExportRunOptions;
     result: ReturnType<typeof deferred<JobResult<'export'>>>;
   }[] = [];
   let clock = 0;
@@ -346,6 +348,90 @@ describe('export handlers', () => {
       channel: 'export.error',
       payload: { jobId, message: 'Export failed: disk full', cancelled: false },
     });
+  });
+});
+
+describe('export picture path (D4)', () => {
+  /** A doc that uses a v2 visual (camera zoom). */
+  function zoomed(doc: Project): Project {
+    return {
+      ...doc,
+      timeline: {
+        ...doc.timeline,
+        camera: [{ tUs: 0, rect: { x: 0, y: 0, width: 0.5, height: 0.5 }, easing: 'linear' }],
+      },
+    };
+  }
+
+  it('chooses frames for v2 visuals, the graph otherwise, unless forced', () => {
+    const doc = recordedProject();
+    expect(chooseVideoPath(doc, OPTIONS)).toBe('graph');
+    expect(chooseVideoPath(zoomed(doc), OPTIONS)).toBe('frames');
+    expect(chooseVideoPath(doc, { ...OPTIONS, videoPath: 'frames' })).toBe('frames');
+    expect(chooseVideoPath(zoomed(doc), { ...OPTIONS, videoPath: 'graph' })).toBe('graph');
+  });
+
+  it('runs a Phase 1 project on the filter graph without a render window', async () => {
+    const openFrameRenderer = vi.fn();
+    const { doc, call, jobs } = setup({ openFrameRenderer });
+    await call('export.start', { projectId: doc.id, options: OPTIONS });
+    await flush();
+    expect(jobs[0]?.job.video).toBe('graph');
+    expect(jobs[0]?.options.ports).toBeUndefined();
+    expect(openFrameRenderer).not.toHaveBeenCalled();
+  });
+
+  it('opens a render window for frames, hands its port to the job, and closes it after', async () => {
+    const close = vi.fn();
+    const port = { name: 'utility end' };
+    const openFrameRenderer = vi.fn(() => Promise.resolve({ port, close }));
+    const { doc, call, jobs } = setup({ openFrameRenderer });
+    const snapshot = zoomed(doc);
+    await call('export.start', { projectId: doc.id, options: OPTIONS, doc: snapshot });
+    await flush();
+    expect(openFrameRenderer).toHaveBeenCalledWith({
+      doc: snapshot,
+      // The default recording has a pause, so the timeline is shorter than the recording.
+      spec: {
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        frames: (timelineDurationUs(snapshot) * 30) / 1e6,
+      },
+    });
+    expect(jobs[0]?.job.video).toBe('frames');
+    expect(jobs[0]?.options.ports).toEqual([port]);
+    expect(close).not.toHaveBeenCalled();
+    jobs[0]?.result.reject(new Error('Rendering failed: x'));
+    await flush();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a render window that cannot open as the export’s error', async () => {
+    const openFrameRenderer = vi.fn(() =>
+      Promise.reject(new Error('The render window did not load.')),
+    );
+    const { doc, call, jobs, events } = setup({ openFrameRenderer });
+    await call('export.start', {
+      projectId: doc.id,
+      options: { ...OPTIONS, videoPath: 'frames' },
+    });
+    await flush();
+    expect(jobs).toHaveLength(0);
+    expect(events.at(-1)).toMatchObject({
+      channel: 'export.error',
+      payload: { message: 'The render window did not load.', cancelled: false },
+    });
+  });
+
+  it('blocks a frame-render export when no renderer is available', async () => {
+    const { doc, call, jobs } = setup();
+    const reply = await call('export.start', {
+      projectId: doc.id,
+      options: { ...OPTIONS, videoPath: 'frames' },
+    });
+    expect(reply).toMatchObject({ jobId: null, status: 'blocked' });
+    expect(jobs).toHaveLength(0);
   });
 });
 

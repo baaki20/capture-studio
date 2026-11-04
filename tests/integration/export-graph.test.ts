@@ -49,6 +49,7 @@ function graph(
   options: Partial<ExportOptions> = {},
   hardware: string | null = null,
   mediaColor: Map<string, MediaColor> = bt601(doc),
+  video: 'graph' | 'pipe' = 'graph',
 ): ExportGraph {
   const settings = resolveExportSettings(doc, { ...STANDARD, ...options }, hardware);
   return unwrap(
@@ -61,6 +62,7 @@ function graph(
       audioScriptPath: '/tmp/cs-export/audio.txt',
       maskDir: '/tmp/cs-export',
       mediaColor,
+      video,
     }),
   );
 }
@@ -282,6 +284,55 @@ describe('export graph rules (§4.3.9)', () => {
     expect(g.videoScriptText).not.toMatch(/:a:0\]|\[aout\]/);
     expect(g.audioScriptText).toMatch(/\[aout\]\n$/);
     expect(g.audioScriptText).not.toMatch(/:v:0\]|\[vout\]/);
+  });
+
+  it('takes rendered frames from stdin on the frame-render path (D4)', () => {
+    const doc = edit(recordedProject(), {
+      type: 'setLayout',
+      trackId: trackByName(recordedProject(), 'Face').id,
+      layout: { shape: 'circle' },
+    });
+    const g = graph(doc, { resolution: '720p' }, null, bt601(doc), 'pipe');
+    // Input 0 is raw yuv420p at the export size and rate; media follow for their audio only.
+    expect(g.inputs[0]).toEqual({
+      index: 0,
+      kind: 'pipe',
+      path: 'pipe:0',
+      mediaId: null,
+      seek: null,
+    });
+    const pipe = g.args.indexOf('pipe:0');
+    expect(g.args.slice(pipe - 9, pipe + 1)).toEqual([
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'yuv420p',
+      '-video_size',
+      '1280x720',
+      '-framerate',
+      '30',
+      '-i',
+      'pipe:0',
+    ]);
+    const audioMedia = new Set(
+      doc.media.filter((m) => m.kind === 'audio').map((m) => `/projects/Lesson.cstudio/${m.path}`),
+    );
+    const mediaInputs = g.inputs.filter((i) => i.kind === 'media');
+    expect(mediaInputs.length).toBeGreaterThan(0);
+    for (const input of mediaInputs) expect(audioMedia.has(input.path)).toBe(true);
+    // No masks or scaling: the frames are composed already. Only tags (BT.709) are set.
+    expect(g.masks).toEqual([]);
+    expect(g.videoScriptText).toBe(
+      '[0:v:0]format=yuv420p,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709:range=tv[vout]\n',
+    );
+    // The audio graph is the filter-graph path's; only input numbers and labels differ.
+    const normalize = (text: string) =>
+      text.replace(/\[\d+:a:0\]/g, '[N:a:0]').replace(/\[[sa]\d+\]/g, '[x]');
+    const plain = graph(doc, { resolution: '720p' });
+    expect(normalize(g.audioScriptText)).toBe(normalize(plain.audioScriptText));
+    for (const match of g.audioScriptText.matchAll(/\[(\d+):a:0\]/g)) {
+      expect(g.inputs[Number(match[1])]?.kind).toBe('media');
+    }
   });
 
   it('gives every track exactly the timeline frame count', () => {

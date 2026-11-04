@@ -5,10 +5,33 @@
  */
 import type { NRect } from '../../../shared/project/schema';
 import { maskRadius, type PixelRect, type VideoLayer } from '../../../shared/project/render-plan';
+import type { Scene } from '../../../shared/project/scene';
 
 export interface Size {
   width: number;
   height: number;
+}
+
+/**
+ * One layer to draw. Generic in the picture type so code that only arranges layers (the export
+ * render loop) needs no DOM types; the WebGL compositor takes `TexImageSource` pictures.
+ */
+export interface CompositeItemOf<F> {
+  /** `opacity` (scene layers) multiplies the layer; 1 when absent. */
+  layer: VideoLayer & { opacity?: number };
+  /** The decoded picture, or null for a placeholder. */
+  frame: F | null;
+  /** The media's picture size (`Media.video`), the space of `layer.sourceRect`. */
+  mediaSize: Size;
+}
+
+/**
+ * The colour cleared under every layer. A gradient background (beautify) is drawn by its own
+ * pass from step 4; until then its first colour stands in.
+ */
+export function sceneBackgroundColor(scene: Pick<Scene, 'background'>): string {
+  const bg = scene.background;
+  return bg.type === 'color' ? bg.color : bg.from;
 }
 
 /** `#RRGGBB` or `#RRGGBBAA` as 0–1 RGBA (black when malformed). */
