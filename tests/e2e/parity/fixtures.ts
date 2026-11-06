@@ -12,9 +12,10 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { frameTimeUs } from '../../../src/shared/export/frame-render';
 import { cameraRect } from '../../../src/shared/project/camera-keyframes';
+import { TEXT_PRESETS, newObject, type ObjectKind } from '../../../src/shared/project/objects';
 import type { RectF } from '../../../src/shared/project/scene';
 import { sceneAt } from '../../../src/shared/project/scene';
-import type { Project } from '../../../src/shared/project/schema';
+import type { FRect, Project, TimelineObject } from '../../../src/shared/project/schema';
 import { applyOp } from '../../../src/shared/project/timeline-ops';
 import { unwrap } from '../../../src/shared/result';
 import { counterIds, recordedProject, trackByName } from '../../fixtures/editor-project';
@@ -419,11 +420,181 @@ const beautifyCamera: ParityFixture = {
   },
 };
 
+/** A recorded project with the face hidden and `items` on an object track. */
+function withObjects(serial: string, name: string, seconds: number, items: TimelineObject[]) {
+  const doc = recorded(seconds, serial, name);
+  const face = trackByName(doc, 'Face');
+  if (face.type === 'video') face.hidden = true;
+  doc.timeline.objectTracks = [
+    {
+      id: 'trk_01JBQ4ZJ4X6V3K8N2M7P5R9OBJ',
+      name: 'Annotations',
+      locked: false,
+      hidden: false,
+      items,
+    },
+  ];
+  return doc;
+}
+
+const S = 1_000_000;
+const objectId = (n: number) => `obj_01JBQ4ZJ4X6V3K8N2M7P5R9T${String(n).padStart(2, '0')}`;
+
+/** Phase 2: text in the four bundled fonts, with a background, an outline and fades (R2.5). */
+const textObjects: ParityFixture = {
+  name: 'p2-text',
+  frames: [5, 12, 20, 40, 70, 95, 110, 130, 150, 172],
+  minSsim: 0.98,
+  regions: [],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    const text = (n: number, preset: keyof typeof TEXT_PRESETS, value: string, box: FRect) => ({
+      ...newObject('text', objectId(n), 0, seconds * S, box),
+      text: value,
+      preset,
+      style: { ...TEXT_PRESETS[preset] },
+    });
+    const items: TimelineObject[] = [
+      {
+        ...text(1, 'title', 'Capture Studio — Ångström', {
+          x: 0.1,
+          y: 0.05,
+          width: 0.8,
+          height: 0.16,
+        }),
+        fadeInUs: 600_000,
+        fadeOutUs: 600_000,
+        inUs: 0,
+        outUs: 5 * S,
+      },
+      text(2, 'caption', 'A caption on a background that wraps onto a second line', {
+        x: 0.05,
+        y: 0.62,
+        width: 0.42,
+        height: 0.2,
+      }),
+      text(3, 'code', 'npm run test:e2e', { x: 0.55, y: 0.66, width: 0.4, height: 0.1 }),
+      {
+        ...text(4, 'label', 'Look here!', { x: 0.6, y: 0.3, width: 0.3, height: 0.12 }),
+        inUs: 2 * S,
+      },
+      {
+        ...text(5, 'subtitle', 'Serif italic', { x: 0.2, y: 0.84, width: 0.6, height: 0.1 }),
+        style: { ...TEXT_PRESETS.subtitle, font: 'serif', italic: true },
+      },
+    ];
+    return save(projectsDir, withObjects('5', 'Parity text', seconds, items), seconds);
+  },
+};
+
+const red = (r: number, g: number, b: number) => r > 200 && g < 70 && b < 70;
+
+/** The red rectangle callout's box, while no spotlight dims it. */
+const RED_RECTANGLE: KeyedRegion = {
+  name: 'rectangle callout',
+  key: red,
+  rectAt: (doc, tUs) => {
+    const objects = sceneAt(doc, tUs).objects;
+    if (objects.some((o) => o.item.kind === 'spotlight')) return null;
+    return objects.find((o) => o.item.kind === 'rectangle')?.rectPx ?? null;
+  },
+};
+
+/** Phase 2: every callout kind, an arrow moving on keyframes, a spotlight fading in (R2.6). */
+const callouts: ParityFixture = {
+  name: 'p2-callouts',
+  frames: [5, 30, 45, 60, 90, 105, 112, 125, 150, 172],
+  minSsim: 0.98,
+  regions: [RED_RECTANGLE],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    const all = <K extends ObjectKind>(kind: K, n: number, box: FRect) =>
+      newObject(kind, objectId(n), 0, seconds * S, box);
+    const arrowBox = { x: 0.45, y: 0.5, width: 0.15, height: 0.2 };
+    const items: TimelineObject[] = [
+      {
+        ...all('rectangle', 1, { x: 0.08, y: 0.1, width: 0.3, height: 0.25 }),
+        stroke: { color: '#FF0000', width: 0.008 },
+      },
+      {
+        ...all('ellipse', 2, { x: 0.5, y: 0.08, width: 0.25, height: 0.3 }),
+        stroke: { color: '#00C8FF', width: 0.006 },
+        fill: '#00C8FF33',
+      },
+      {
+        ...all('arrow', 3, arrowBox),
+        stroke: { color: '#00FF00', width: 0.008 },
+        keyframes: [
+          { tUs: S, box: arrowBox, easing: 'ease-in-out' },
+          { tUs: 4 * S, box: { ...arrowBox, x: 0.6, y: 0.55 }, easing: 'linear' },
+        ],
+      },
+      {
+        ...all('step', 4, { x: 0.1, y: 0.6, width: 0.07, height: 0.12 }),
+        value: 2,
+        fill: '#0000FF',
+      },
+      {
+        ...all('step', 5, { x: 0.2, y: 0.6, width: 0.07, height: 0.12 }),
+        value: 4,
+        format: 'I',
+      },
+      all('highlight', 6, { x: 0.25, y: 0.78, width: 0.3, height: 0.06 }),
+      {
+        ...all('spotlight', 7, { x: 0.55, y: 0.1, width: 0.3, height: 0.4 }),
+        inUs: 3.5 * S,
+        outUs: 5.5 * S,
+        fadeInUs: 300_000,
+        dim: 0.5,
+      },
+    ];
+    return save(projectsDir, withObjects('6', 'Parity callouts', seconds, items), seconds);
+  },
+};
+
+/** Phase 2: a static blur and a pixelate region moving on keyframes (R2.7). */
+const privacy: ParityFixture = {
+  name: 'p2-privacy',
+  frames: [5, 22, 39, 56, 73, 90, 107, 124, 141, 158],
+  minSsim: 0.98,
+  regions: [],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    const pixBox = { x: 0.1, y: 0.55, width: 0.25, height: 0.2 };
+    const items: TimelineObject[] = [
+      {
+        ...newObject('blur', objectId(1), 0, seconds * S, {
+          x: 0.05,
+          y: 0.05,
+          width: 0.4,
+          height: 0.35,
+        }),
+        radius: 0.02,
+      },
+      {
+        ...newObject('pixelate', objectId(2), 0, seconds * S, pixBox),
+        blockSize: 0.03,
+        keyframes: [
+          { tUs: 0, box: pixBox, easing: 'linear' },
+          { tUs: 5 * S, box: { ...pixBox, x: 0.6, y: 0.4 }, easing: 'linear' },
+        ],
+      },
+    ];
+    return save(projectsDir, withObjects('7', 'Parity privacy', seconds, items), seconds);
+  },
+};
+
 export const FIXTURES: readonly ParityFixture[] = [
   roundedFace,
   faceKeyframes,
   faceStyle,
   beautifyCamera,
+  textObjects,
+  callouts,
+  privacy,
 ];
 
 /** Timeline time of an output frame. */

@@ -7,15 +7,18 @@
 import { formatTimecode, usToSeconds, type Us } from '../time';
 import { isTrackAudible } from './render-plan';
 import { cameraView } from './camera-keyframes';
+import { objectLabel } from './objects';
 import type {
   Beautify,
   Component,
   Easing,
   FaceMode,
+  FRect,
   Media,
   OverlayLayout,
   Project,
   ScreenLayout,
+  TimelineObject,
 } from './schema';
 import { clipDurationUs, clipEndUs, timelineDurationUs, trackFrameSize } from './timeline-ops';
 
@@ -85,6 +88,17 @@ export interface ProjectSummary {
   /** Video tracks render bottom to top in this order. */
   tracks: TrackSummary[];
   components: ComponentSummary[];
+  /** Text, callouts and privacy regions over the video, bottom to top. */
+  annotations?: {
+    id: string;
+    kind: TimelineObject['kind'];
+    label: string;
+    track: string;
+    start: TimeSummary;
+    end: TimeSummary;
+    box: FRect;
+    moves: boolean;
+  }[];
   /** Background, padding, corners and shadow around the screen; absent when plain. */
   background?: Beautify;
   /** Camera zoom keyframes (zoom 1 = the full frame, centre in canvas fractions). */
@@ -165,6 +179,22 @@ export function summarizeProject(doc: Project): ProjectSummary {
           : [];
       }),
     })),
+    ...(doc.timeline.objectTracks?.some((t) => t.items.length > 0)
+      ? {
+          annotations: doc.timeline.objectTracks.flatMap((track) =>
+            track.items.map((item) => ({
+              id: item.id,
+              kind: item.kind,
+              label: objectLabel(item),
+              track: track.name,
+              start: time(item.inUs),
+              end: time(item.outUs),
+              box: item.box,
+              moves: (item.keyframes?.length ?? 0) > 0,
+            })),
+          ),
+        }
+      : {}),
     ...(doc.timeline.beautify ? { background: doc.timeline.beautify } : {}),
     ...(doc.timeline.camera
       ? {

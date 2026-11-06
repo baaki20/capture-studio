@@ -9,7 +9,11 @@
  * - the mask (rectangle, rounded radius in px, circle) is the render plan's anti-aliased
  *   coverage function (`MASK_COVERAGE_GLSL`) evaluated per fragment at pixel centres, the same
  *   function the export rasterizes into its mask PNG;
- * - layers blend with premultiplied alpha.
+ * - layers blend with premultiplied alpha;
+ * - objects follow (R2.5–R2.7): canvas-2D pictures (text, callouts) as premultiplied quads,
+ *   uploaded once per picture key; blur and pixelate regions as passes over what is drawn so
+ *   far: a copy of the frame, then a separable Gaussian (horizontal into a scratch target,
+ *   vertical back) or one sample per block, both anti-aliased at the region's edge.
  *
  * A layer without a decoded frame (still decoding, or offline media) is drawn as a flat
  * placeholder so the layout stays visible. The geometry helpers are pure and unit-tested.
@@ -27,6 +31,7 @@ import {
 import { MASK_COVERAGE_GLSL } from '../../../shared/project/render-plan';
 import {
   GRADIENT_GLSL,
+  MAX_BLUR_PX,
   gradientAxis,
   maskUniforms,
   parseHexColor,
@@ -34,11 +39,16 @@ import {
   quadVertices,
   shadowGeometry,
   type CompositeItemOf,
+  type CompositeObjectOf,
   type SceneBackground,
   type Size,
 } from './compositor-math';
+import type { RectF } from '../../../shared/project/scene';
 
 export type { SceneBackground, Size } from './compositor-math';
+
+/** One object to draw above the layers, with a picture WebGL can upload. */
+export type CompositeObject = CompositeObjectOf<TexImageSource>;
 
 /** One layer to draw (see `compositor-math.ts`), with a picture WebGL can upload. */
 export type CompositeItem = CompositeItemOf<TexImageSource>;
@@ -61,6 +71,8 @@ uniform vec4 u_rect;
 uniform float u_radius;
 uniform float u_canvasHeight;
 uniform int u_solid;
+// 1: the texture is a premultiplied picture with alpha (objects); 0: an opaque video frame.
+uniform int u_alpha;
 uniform vec4 u_color;
 uniform float u_opacity;
 // 0: the layer (border inside its edge); 1: its drop shadow (u_color, edge blurred by u_blur).
@@ -79,12 +91,14 @@ void main() {
     return;
   }
   float coverage = (1.0 - smoothstep(-0.5, 0.5, d)) * u_opacity;
-  vec4 color = u_solid == 1 ? u_color : vec4(texture(u_tex, v_uv).rgb, 1.0);
+  vec4 color = u_solid == 1
+    ? u_color
+    : u_alpha == 1 ? texture(u_tex, v_uv) : vec4(texture(u_tex, v_uv).rgb, 1.0);
   if (u_border > 0.0) {
     float inner = 1.0 - smoothstep(-0.5, 0.5, d + u_border);
     color.rgb = mix(color.rgb, u_borderColor.rgb, (1.0 - inner) * u_borderColor.a);
   }
-  outColor = vec4(color.rgb * coverage, coverage);
+  outColor = color * coverage;
 }
 `;
 
@@ -105,6 +119,62 @@ void main() {
   float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   vec3 color = mix(u_from.rgb, u_to.rgb, t) + (noise - 0.5) / 255.0;
   outColor = vec4(color, 1.0);
+}
+`;
+
+/**
+ * Blur and pixelate regions. Pass 0: horizontal Gaussian of u_src into a scratch target (no
+ * blending). Pass 1: vertical Gaussian of u_src, covered by the region's anti-aliased edge and the
+ * object's opacity. Pass 2: pixelate, one sample of u_src per block, covered the same way.
+ * Samples are whole pixels (texelFetch), clamped to the frame.
+ */
+const EFFECT_FRAGMENT_SHADER = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+uniform int u_pass;
+uniform vec2 u_size;
+uniform vec4 u_rect;
+uniform float u_radius;
+uniform float u_block;
+uniform float u_opacity;
+out vec4 outColor;
+${MASK_COVERAGE_GLSL}
+vec4 at(ivec2 p) {
+  return texelFetch(u_src, clamp(p, ivec2(0), ivec2(u_size) - 1), 0);
+}
+vec4 gaussian(ivec2 p, ivec2 step) {
+  int n = int(min(ceil(u_radius), ${String(MAX_BLUR_PX)}.0));
+  float sigma = max(u_radius / 3.0, 0.5);
+  vec4 sum = at(p);
+  float total = 1.0;
+  for (int i = 1; i <= ${String(MAX_BLUR_PX)}; i++) {
+    if (i > n) break;
+    float w = exp(-float(i * i) / (2.0 * sigma * sigma));
+    sum += w * (at(p + step * i) + at(p - step * i));
+    total += 2.0 * w;
+  }
+  return sum / total;
+}
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  if (u_pass == 0) {
+    outColor = gaussian(p, ivec2(1, 0));
+    return;
+  }
+  vec2 topDown = vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y);
+  float coverage = csMaskCoverage(topDown - u_rect.xy, u_rect.zw, 0.0) * u_opacity;
+  vec4 color;
+  if (u_pass == 1) {
+    color = gaussian(p, ivec2(0, 1));
+  } else {
+    // The block's centre, inside the region (top-down), then back to GL rows.
+    vec2 cell = floor((floor(topDown) + 0.5 - u_rect.xy) / u_block);
+    vec2 centre = clamp(u_rect.xy + (cell + 0.5) * u_block, u_rect.xy + 0.5,
+      u_rect.xy + u_rect.zw - 0.5);
+    ivec2 q = clamp(ivec2(floor(centre)), ivec2(0), ivec2(u_size) - 1);
+    color = at(ivec2(q.x, int(u_size.y) - 1 - q.y));
+  }
+  outColor = vec4(color.rgb, 1.0) * coverage;
 }
 `;
 
@@ -152,6 +222,9 @@ const FULLSCREEN_VERTICES = new Float32Array([-1, 1, 1, 1, -1, -1, 1, -1]);
 
 const PLACEHOLDER: [number, number, number, number] = [0.22, 0.24, 0.28, 1];
 const NO_COLOR: [number, number, number, number] = [0, 0, 0, 0];
+
+/** Frames an object picture stays uploaded without being drawn. */
+const OBJECT_TEXTURE_TTL = 120;
 
 /** A colour texture with its framebuffer. */
 interface Target {
@@ -205,11 +278,17 @@ export class WebGlCompositor {
   private readonly textures: WebGLTexture[] = [];
   private readonly uniforms: Record<string, WebGLUniformLocation | null>;
   private size: Size;
-  /** Offscreen picture at canvas size, and the packed yuv420p target (export only). */
-  private picture: Target | null = null;
-  private yuv: Target | null = null;
+  /**
+   * Render targets: `picture` (offscreen frame, export), `yuv` (packed yuv420p, export), `copy`
+   * and `scratch` (blur and pixelate regions).
+   */
+  private readonly targets = new Map<string, Target>();
   private yuvProgram: WebGLProgram | null = null;
   private gradientProgram: WebGLProgram | null = null;
+  private effectProgram: WebGLProgram | null = null;
+  /** Uploaded object pictures by key, with the frame each was last drawn in. */
+  private readonly objectTextures = new Map<string, { texture: WebGLTexture; used: number }>();
+  private frameNumber = 0;
 
   constructor(private readonly canvas: OffscreenCanvas) {
     const gl = canvas.getContext('webgl2', {
@@ -231,6 +310,7 @@ export class WebGlCompositor {
         'u_radius',
         'u_canvasHeight',
         'u_solid',
+        'u_alpha',
         'u_color',
         'u_opacity',
         'u_pass',
@@ -248,18 +328,26 @@ export class WebGlCompositor {
     this.size = { ...size };
   }
 
-  /** Draws one frame: background, then the layers bottom to top. */
-  draw(background: SceneBackground, items: readonly CompositeItem[]): void {
+  /** Draws one frame: background, then the layers bottom to top, then the objects. */
+  draw(
+    background: SceneBackground,
+    items: readonly CompositeItem[],
+    objects: readonly CompositeObject[] = [],
+  ): void {
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-    this.drawBound(background, items);
+    this.drawBound(background, items, objects, null);
   }
 
   /** Draws one frame into the offscreen picture (export); read it with `readYuv420`. */
-  drawOffscreen(background: SceneBackground, items: readonly CompositeItem[]): void {
+  drawOffscreen(
+    background: SceneBackground,
+    items: readonly CompositeItem[],
+    objects: readonly CompositeObject[] = [],
+  ): void {
     const { gl } = this;
     const picture = this.target('picture', this.size.width, this.size.height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, picture.framebuffer);
-    this.drawBound(background, items);
+    this.drawBound(background, items, objects, picture.framebuffer);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
@@ -269,7 +357,7 @@ export class WebGlCompositor {
    */
   readYuv420(out: Size, into?: Uint8Array): Uint8Array {
     const { gl } = this;
-    const picture = this.picture;
+    const picture = this.targets.get('picture');
     if (!picture) throw new Error('compositor: nothing drawn offscreen');
     const layout = yuvTarget(out.width, out.height);
     const yuv = this.target('yuv', layout.width, layout.height);
@@ -297,8 +385,14 @@ export class WebGlCompositor {
     );
   }
 
-  private drawBound(background: SceneBackground, items: readonly CompositeItem[]): void {
+  private drawBound(
+    background: SceneBackground,
+    items: readonly CompositeItem[],
+    objects: readonly CompositeObject[],
+    framebuffer: WebGLFramebuffer | null,
+  ): void {
     const { gl } = this;
+    this.frameNumber += 1;
     gl.viewport(0, 0, this.size.width, this.size.height);
     const [r, g, b] = parseHexColor(
       background.type === 'color' ? background.color : background.from,
@@ -312,6 +406,7 @@ export class WebGlCompositor {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1f(this.uniforms.u_canvasHeight ?? null, this.size.height);
     gl.uniform1i(this.uniforms.u_tex ?? null, 0);
+    gl.uniform1i(this.uniforms.u_alpha ?? null, 0);
 
     items.forEach((item, index) => {
       const { rect, radius } = maskUniforms(item.layer);
@@ -351,6 +446,131 @@ export class WebGlCompositor {
       }
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     });
+    for (const object of objects) {
+      if (object.opacity <= 0) continue;
+      if (object.kind === 'image') this.drawImageObject(object);
+      else this.drawEffect(object, framebuffer);
+    }
+    this.evictObjectTextures();
+  }
+
+  /** A canvas-2D picture (premultiplied), 1:1 at its rect. */
+  private drawImageObject(object: Extract<CompositeObject, { kind: 'image' }>): void {
+    const { gl } = this;
+    gl.useProgram(this.program);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    let entry = this.objectTextures.get(object.key);
+    gl.activeTexture(gl.TEXTURE0);
+    if (!entry) {
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      for (const [name, value] of [
+        [gl.TEXTURE_MIN_FILTER, gl.LINEAR],
+        [gl.TEXTURE_MAG_FILTER, gl.LINEAR],
+        [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE],
+        [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE],
+      ] as const) {
+        gl.texParameteri(gl.TEXTURE_2D, name, value);
+      }
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, object.image);
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      entry = { texture, used: this.frameNumber };
+      this.objectTextures.set(object.key, entry);
+    }
+    entry.used = this.frameNumber;
+    gl.bindTexture(gl.TEXTURE_2D, entry.texture);
+    const { x, y, width, height } = object.rect;
+    this.bindAttribute(this.posBuffer, 'a_pos', quadVertices(object.rect, this.size));
+    this.bindAttribute(
+      this.uvBuffer,
+      'a_uv',
+      quadUvs({ x: 0, y: 0, width: 1, height: 1 }, { width: 1, height: 1 }, false),
+    );
+    gl.uniform4f(this.uniforms.u_rect ?? null, x, y, width, height);
+    gl.uniform1f(this.uniforms.u_radius ?? null, 0);
+    gl.uniform1f(this.uniforms.u_opacity ?? null, object.opacity);
+    gl.uniform1i(this.uniforms.u_pass ?? null, 0);
+    gl.uniform1f(this.uniforms.u_border ?? null, 0);
+    gl.uniform1i(this.uniforms.u_solid ?? null, 0);
+    gl.uniform1i(this.uniforms.u_alpha ?? null, 1);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.uniform1i(this.uniforms.u_alpha ?? null, 0);
+  }
+
+  /**
+   * A blur or pixelate region over what `framebuffer` holds so far: copy the frame, then draw the
+   * region back from the copy (blur through a horizontal pass into the scratch target).
+   */
+  private drawEffect(
+    object: Exclude<CompositeObject, { kind: 'image' }>,
+    framebuffer: WebGLFramebuffer | null,
+  ): void {
+    const { gl } = this;
+    const { width, height } = this.size;
+    const region = clipRect(object.rect, this.size);
+    if (!region) return;
+    const copy = this.target('copy', width, height);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, copy.framebuffer);
+    gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    this.effectProgram ??= link(gl, VERTEX_SHADER, EFFECT_FRAGMENT_SHADER);
+    const program = this.effectProgram;
+    gl.useProgram(program);
+    const at = (name: string) => gl.getUniformLocation(program, name);
+    gl.uniform1i(at('u_src'), 0);
+    gl.uniform2f(at('u_size'), width, height);
+    gl.uniform4f(at('u_rect'), object.rect.x, object.rect.y, object.rect.width, object.rect.height);
+    gl.uniform1f(at('u_opacity'), object.opacity);
+    gl.activeTexture(gl.TEXTURE0);
+    let source = copy.texture;
+    if (object.kind === 'blur') {
+      const reach = Math.min(MAX_BLUR_PX, Math.ceil(object.radiusPx));
+      const scratch = this.target('scratch', width, height);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, scratch.framebuffer);
+      gl.disable(gl.BLEND);
+      gl.uniform1i(at('u_pass'), 0);
+      gl.uniform1f(at('u_radius'), object.radiusPx);
+      gl.bindTexture(gl.TEXTURE_2D, copy.texture);
+      const band = clipRect(
+        {
+          x: region.x,
+          y: region.y - reach,
+          width: region.width,
+          height: region.height + 2 * reach,
+        },
+        this.size,
+      );
+      if (band) {
+        this.bindAttribute(this.posBuffer, 'a_pos', quadVertices(band, this.size), program);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+      source = scratch.texture;
+      gl.uniform1i(at('u_pass'), 1);
+    } else {
+      gl.uniform1i(at('u_pass'), 2);
+      gl.uniform1f(at('u_block'), object.blockPx);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+    gl.viewport(0, 0, width, height);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindTexture(gl.TEXTURE_2D, source);
+    this.bindAttribute(this.posBuffer, 'a_pos', quadVertices(region, this.size), program);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.useProgram(this.program);
+  }
+
+  /** Deletes object pictures not drawn for a while. */
+  private evictObjectTextures(): void {
+    for (const [key, entry] of this.objectTextures) {
+      if (this.frameNumber - entry.used > OBJECT_TEXTURE_TTL) {
+        this.gl.deleteTexture(entry.texture);
+        this.objectTextures.delete(key);
+      }
+    }
   }
 
   private drawGradient(gradient: Extract<SceneBackground, { type: 'gradient' }>): void {
@@ -404,11 +624,12 @@ export class WebGlCompositor {
   dispose(): void {
     const { gl } = this;
     for (const t of this.textures) gl.deleteTexture(t);
-    for (const target of [this.picture, this.yuv]) {
-      if (!target) continue;
+    for (const target of this.targets.values()) {
       gl.deleteFramebuffer(target.framebuffer);
       gl.deleteTexture(target.texture);
     }
+    for (const entry of this.objectTextures.values()) gl.deleteTexture(entry.texture);
+    if (this.effectProgram) gl.deleteProgram(this.effectProgram);
     if (this.yuvProgram) gl.deleteProgram(this.yuvProgram);
     if (this.gradientProgram) gl.deleteProgram(this.gradientProgram);
     gl.deleteBuffer(this.posBuffer);
@@ -431,9 +652,13 @@ export class WebGlCompositor {
     return texture;
   }
 
-  /** The offscreen picture or yuv target, (re)created at `width × height`. */
-  private target(kind: 'picture' | 'yuv', width: number, height: number): Target {
-    const existing = this[kind];
+  /** A render target, (re)created at `width × height`. */
+  private target(
+    kind: 'picture' | 'yuv' | 'copy' | 'scratch',
+    width: number,
+    height: number,
+  ): Target {
+    const existing = this.targets.get(kind);
     if (existing?.width === width && existing.height === height) return existing;
     const { gl } = this;
     if (existing) {
@@ -443,7 +668,7 @@ export class WebGlCompositor {
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, width, height);
-    const filter = kind === 'picture' ? gl.LINEAR : gl.NEAREST;
+    const filter = kind === 'yuv' ? gl.NEAREST : gl.LINEAR;
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -456,7 +681,7 @@ export class WebGlCompositor {
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const created = { framebuffer, texture, width, height };
-    this[kind] = created;
+    this.targets.set(kind, created);
     return created;
   }
 
@@ -474,4 +699,13 @@ export class WebGlCompositor {
     gl.enableVertexAttribArray(location);
     gl.vertexAttribPointer(location, 2, gl.FLOAT, false, 0, 0);
   }
+}
+
+/** `rect` clipped to the frame (whole pixels), or null when nothing is left. */
+function clipRect(rect: RectF, size: Size): RectF | null {
+  const x0 = Math.max(0, Math.floor(rect.x));
+  const y0 = Math.max(0, Math.floor(rect.y));
+  const x1 = Math.min(size.width, Math.ceil(rect.x + rect.width));
+  const y1 = Math.min(size.height, Math.ceil(rect.y + rect.height));
+  return x1 > x0 && y1 > y0 ? { x: x0, y: y0, width: x1 - x0, height: y1 - y0 } : null;
 }

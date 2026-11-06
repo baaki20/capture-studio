@@ -4,7 +4,8 @@
  * (`draw.ts`). Pointer handling on the canvas: scrub on the ruler, select, move and trim clips
  * (one undo step per drag), select a keyframe (jumping to it) and drag it along its lane (face
  * layout keyframes on the face row, R2.1; zoom keyframes on the screen row, R2.9; snapped to
- * frames, one undo step), Ctrl+wheel zoom, wheel
+ * frames, one undo step), select, move and trim annotation objects on their rows (R2.8),
+ * Ctrl+wheel zoom, wheel
  * scroll. Hit testing and drawing share `geometry.ts`.
  */
 import {
@@ -15,7 +16,11 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { Track } from '../../../shared/project/schema';
-import { linkedClips, timelineDurationUs } from '../../../shared/project/timeline-ops';
+import {
+  linkedClips,
+  timelineDurationUs,
+  type TimelineOp,
+} from '../../../shared/project/timeline-ops';
 import { frameToUs, usToFrame } from '../../../shared/time';
 import { useEditor } from '../EditorContext';
 import styles from '../Editor.module.css';
@@ -35,13 +40,25 @@ import {
   xToTime,
   zoomAround,
   type LaneKeyframe,
+  type ObjectRow,
   type Row,
 } from './geometry';
 
 type Session =
   | { kind: 'scrub' }
   | { kind: 'clip'; drag: ClipDrag; startX: number; started: boolean }
-  | { kind: 'keyframe'; key: LaneKeyframe; startX: number; started: boolean };
+  | { kind: 'keyframe'; key: LaneKeyframe; startX: number; started: boolean }
+  | {
+      kind: 'object';
+      objectId: string;
+      zone: 'body' | 'start' | 'end';
+      /** Pointer time and the object's times when the drag began. */
+      fromUs: number;
+      inUs: number;
+      outUs: number;
+      startX: number;
+      started: boolean;
+    };
 
 const DRAG_START_PX = 3;
 
@@ -55,7 +72,10 @@ export function Timeline() {
   const fitted = useRef(false);
   const redraw = useRef<() => void>(() => undefined);
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const layout = useMemo(() => (doc ? layoutRows(doc) : { rows: [], height: 0 }), [doc]);
+  const layout = useMemo(
+    () => (doc ? layoutRows(doc) : { rows: [], objectRows: [], height: 0 }),
+    [doc],
+  );
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -97,9 +117,12 @@ export function Timeline() {
       for (const id of state.selection) {
         for (const loc of linkedClips(d, id)) if (loc.clip.id !== id) linked.add(loc.clip.id);
       }
+      const rows = layoutRows(d);
       drawTimeline(ctx, {
         doc: d,
-        rows: layoutRows(d).rows,
+        rows: rows.rows,
+        objectRows: rows.objectRows,
+        selectedObject: state.selectedObject,
         view: state.view,
         width: size.width,
         height,
@@ -175,7 +198,8 @@ export function Timeline() {
     if (!d || event.button !== 0) return;
     const { x, y } = local(event);
     const state = ui.getState();
-    const hit = hitTest(layoutRows(d).rows, state.view, x, y);
+    const rows = layoutRows(d);
+    const hit = hitTest(rows.rows, state.view, x, y, rows.objectRows);
     event.currentTarget.setPointerCapture(event.pointerId);
     state.setOverlaySelected(false);
     if (hit.kind === 'ruler') {
@@ -188,6 +212,23 @@ export function Timeline() {
       state.selectKeyframe(key);
       playback.seek(hit.keyUs);
       session.current = { kind: 'keyframe', key, startX: x, started: false };
+      return;
+    }
+    if (hit.kind === 'object') {
+      const item = rows.objectRows.flatMap((r) => r.track.items).find((i) => i.id === hit.objectId);
+      state.selectObject(hit.objectId);
+      session.current = item
+        ? {
+            kind: 'object',
+            objectId: item.id,
+            zone: hit.zone,
+            fromUs: hit.tUs,
+            inUs: item.inUs,
+            outUs: item.outUs,
+            startX: x,
+            started: false,
+          }
+        : null;
       return;
     }
     if (hit.kind !== 'clip') {
@@ -208,11 +249,12 @@ export function Timeline() {
     const state = ui.getState();
     const current = session.current;
     if (!current) {
-      const hit = hitTest(layoutRows(d).rows, state.view, x, y);
+      const rows = layoutRows(d);
+      const hit = hitTest(rows.rows, state.view, x, y, rows.objectRows);
       event.currentTarget.style.cursor =
         hit.kind === 'keyframe'
           ? 'ew-resize'
-          : hit.kind === 'clip'
+          : hit.kind === 'clip' || hit.kind === 'object'
             ? hit.zone === 'body'
               ? 'grab'
               : 'ew-resize'
@@ -242,6 +284,33 @@ export function Timeline() {
       playback.seek(toUs);
       return;
     }
+    if (current.kind === 'object') {
+      if (!current.started) {
+        if (Math.abs(x - current.startX) < DRAG_START_PX) return;
+        current.started = true;
+        docStore.getState().beginGesture();
+      }
+      const fps = d.timeline.frameRate;
+      const snap = (t: number) => frameToUs(usToFrame(Math.max(0, t), fps), fps);
+      const delta = xToTime(state.view, x) - current.fromUs;
+      const frame = frameToUs(1, fps);
+      const op: TimelineOp =
+        current.zone === 'body'
+          ? { type: 'moveObject', objectId: current.objectId, toInUs: snap(current.inUs + delta) }
+          : current.zone === 'start'
+            ? {
+                type: 'updateObject',
+                objectId: current.objectId,
+                patch: { inUs: Math.min(snap(current.inUs + delta), current.outUs - frame) },
+              }
+            : {
+                type: 'updateObject',
+                objectId: current.objectId,
+                patch: { outUs: Math.max(snap(current.outUs + delta), current.inUs + frame) },
+              };
+      docStore.getState().apply(op);
+      return;
+    }
     if (!current.started) {
       if (Math.abs(x - current.startX) < DRAG_START_PX) return;
       current.started = true;
@@ -262,7 +331,10 @@ export function Timeline() {
   const endSession = () => {
     const current = session.current;
     session.current = null;
-    if ((current?.kind === 'clip' || current?.kind === 'keyframe') && current.started) {
+    if (
+      (current?.kind === 'clip' || current?.kind === 'keyframe' || current?.kind === 'object') &&
+      current.started
+    ) {
       docStore.getState().endGesture();
     }
     if (snapUs.current !== null) {
@@ -274,7 +346,7 @@ export function Timeline() {
   if (!doc) return null;
   return (
     <div className={styles.timeline} data-testid="timeline">
-      <TrackHeaders rows={layout.rows} />
+      <TrackHeaders rows={layout.rows} objectRows={layout.objectRows} />
       <div className={styles.canvasWrap} ref={wrapRef}>
         <canvas
           ref={canvasRef}
@@ -291,16 +363,23 @@ export function Timeline() {
   );
 }
 
-function TrackHeaders({ rows }: { rows: readonly Row[] }) {
+function TrackHeaders({
+  rows,
+  objectRows,
+}: {
+  rows: readonly Row[];
+  objectRows: readonly ObjectRow[];
+}) {
   const { docStore, ui } = useEditor();
   const doc = useDocumentStore(docStore, (s) => s.doc);
   if (!doc) return null;
-  const toggle = (track: Track, what: 'mute' | 'solo' | 'hide' | 'lock') => {
-    const op = toggleOp(track, what);
+  const apply = (op: TimelineOp | null) => {
     if (!op) return;
     const result = docStore.getState().apply(op);
     ui.getState().setStatus(result.ok ? null : errorText(result.error));
   };
+  const toggle = (track: Track, what: 'mute' | 'solo' | 'hide' | 'lock') =>
+    apply(toggleOp(track, what));
   // Face + Voice: rows sharing a face-voice component form one linked header group (R1.31).
   const faceVoice = doc.components.find((c) => c.type === 'face-voice');
   const groupRows = faceVoice ? rows.filter((r) => r.track.componentId === faceVoice.id) : [];
@@ -318,6 +397,40 @@ function TrackHeaders({ rows }: { rows: readonly Row[] }) {
           <span className={styles.linkBadge}>Face + Voice · linked</span>
         </div>
       ) : null}
+      {objectRows.map(({ track, top, height }) => (
+        <div
+          key={track.id}
+          className={styles.trackHeader}
+          style={{ top, height }}
+          data-testid={`track-header-${track.name}`}
+        >
+          <span className={styles.trackName} title={track.name}>
+            {track.name}
+          </span>
+          <button
+            type="button"
+            aria-pressed={track.hidden}
+            aria-label={`Hide ${track.name}`}
+            title="Hide"
+            onClick={() =>
+              apply({ type: 'setObjectTrack', trackId: track.id, hidden: !track.hidden })
+            }
+          >
+            Hide
+          </button>
+          <button
+            type="button"
+            aria-pressed={track.locked}
+            aria-label={`Lock ${track.name}`}
+            title="Lock"
+            onClick={() =>
+              apply({ type: 'setObjectTrack', trackId: track.id, locked: !track.locked })
+            }
+          >
+            Lock
+          </button>
+        </div>
+      ))}
       {rows.map(({ track, top, height }) => (
         <div
           key={track.id}

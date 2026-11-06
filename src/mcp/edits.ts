@@ -13,7 +13,16 @@ import {
   applySizePreset,
   type FaceSizePreset,
 } from '../shared/project/face-layout';
+import { newId } from '../shared/ids';
 import { mergeBeautify } from '../shared/project/beautify';
+import type { ObjectPatch } from '../shared/project/object-patch';
+import {
+  DEFAULT_OBJECT_US,
+  OBJECT_KINDS,
+  TEXT_PRESETS,
+  newObject,
+  type TextPreset,
+} from '../shared/project/objects';
 import { cameraAt, cameraRect, cameraView } from '../shared/project/camera-keyframes';
 import type { ExternalOp } from '../shared/project/op-schema';
 import {
@@ -21,6 +30,7 @@ import {
   FACE_MODES,
   type OverlayLayout,
   type Project,
+  type TimelineObject,
   type Track,
   type VideoTrack,
 } from '../shared/project/schema';
@@ -33,6 +43,37 @@ import { opFailure, ToolInputError } from './errors';
 import { TimeInput, toUs } from './units';
 
 const ClipId = z.string().min(1).describe('A clip ID from get_project (clp_…)');
+const ObjectId = z.string().min(1).describe('An annotation ID from get_project (obj_…)');
+const Box = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().min(0.01).max(1),
+    height: z.number().min(0.01).max(1),
+  })
+  .describe(
+    'Fractions of the frame from its top-left corner, e.g. {x:0.1,y:0.1,width:0.3,height:0.2}',
+  );
+/** Fields an annotation's look takes, when adding or editing. */
+const ANNOTATION_LOOK = {
+  text: z.string().max(2000).optional().describe('Text annotations: the words; \\n breaks lines'),
+  preset: z
+    .enum(Object.keys(TEXT_PRESETS) as [TextPreset, ...TextPreset[]])
+    .optional()
+    .describe('Text annotations: title, subtitle, caption, label or code style'),
+  color: z
+    .string()
+    .optional()
+    .describe('#RRGGBB(AA): text colour, line colour, step colour or highlight colour'),
+  number: z.int().min(1).max(999).optional().describe('Steps: the number shown'),
+  strength: z
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .describe('Blur, pixelate and spotlight: how strong (0–1)'),
+  fadeSeconds: z.number().min(0).max(5).optional().describe('Fade in and out, seconds'),
+};
 const TrackRef = z.string().min(1).describe('A track name from get_project ("Voice") or its ID');
 const IncludeLinked = z
   .boolean()
@@ -223,6 +264,33 @@ export const SHAPES = {
       .optional()
       .describe('How it changes to the next keyframe; hold keeps it, then cuts'),
   },
+  annotation: {
+    type: z
+      .enum(OBJECT_KINDS)
+      .describe(
+        'text; callouts arrow, rectangle, ellipse, step (a numbered circle), highlight, spotlight (darkens the rest); privacy regions blur, pixelate',
+      ),
+    start: TimeInput,
+    end: TimeInput.optional().describe('Default: 3 s after the start'),
+    box: Box.optional().describe('Where it goes; default centred (an arrow points across it)'),
+    ...ANNOTATION_LOOK,
+  },
+  annotationEdit: {
+    id: ObjectId,
+    start: TimeInput.optional(),
+    end: TimeInput.optional(),
+    box: Box.optional(),
+    moveTo: z
+      .object({ at: TimeInput, box: Box })
+      .optional()
+      .describe(
+        'Moves it over time: the box at this time (a keyframe; it glides from the previous one)',
+      ),
+    ...ANNOTATION_LOOK,
+  },
+  annotationRemove: {
+    ids: z.array(ObjectId).min(1),
+  },
   screenCrop: {
     track: TrackRef.optional().describe('Default: the screen track'),
     crop: z
@@ -268,6 +336,9 @@ export const EditStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('background'), ...SHAPES.background }),
   z.object({ kind: z.literal('zoom'), ...SHAPES.zoom }),
   z.object({ kind: z.literal('zoomKeyframe'), ...SHAPES.zoomKeyframe }),
+  z.object({ kind: z.literal('annotation'), ...SHAPES.annotation }),
+  z.object({ kind: z.literal('annotationEdit'), ...SHAPES.annotationEdit }),
+  z.object({ kind: z.literal('annotationRemove'), ...SHAPES.annotationRemove }),
   z.object({ kind: z.literal('screenCrop'), ...SHAPES.screenCrop }),
   z.object({ kind: z.literal('syncNudge'), ...SHAPES.syncNudge }),
   z.object({ kind: z.literal('marks'), ...SHAPES.marks }),
@@ -366,6 +437,73 @@ function faceLayoutOps(
       },
     },
   ];
+}
+
+type AnnotationLook = {
+  [K in keyof typeof ANNOTATION_LOOK]?: z.infer<(typeof ANNOTATION_LOOK)[K]>;
+};
+
+/** The patch of an annotation's look (colour, number, strength, fades) for its kind. */
+function lookPatch(item: TimelineObject, look: AnnotationLook): ObjectPatch {
+  const patch: ObjectPatch = {};
+  const refuse = (field: string) => {
+    throw new ToolInputError(`${field} does not apply to a ${item.kind} annotation.`);
+  };
+  if (look.text !== undefined) {
+    if (item.kind !== 'text') refuse('text');
+    patch.text = look.text;
+  }
+  if (look.preset !== undefined) {
+    if (item.kind !== 'text') refuse('preset');
+    patch.preset = look.preset;
+    patch.style = { background: null, outline: null, ...TEXT_PRESETS[look.preset] };
+  }
+  if (look.color !== undefined) {
+    const color = look.color;
+    switch (item.kind) {
+      case 'text':
+        patch.style = { ...patch.style, color };
+        break;
+      case 'arrow':
+      case 'rectangle':
+      case 'ellipse':
+        patch.stroke = { ...item.stroke, color };
+        break;
+      case 'step':
+        patch.fill = color;
+        break;
+      case 'highlight':
+        patch.color = color;
+        break;
+      default:
+        refuse('color');
+    }
+  }
+  if (look.number !== undefined) {
+    if (item.kind !== 'step') refuse('number');
+    patch.value = look.number;
+  }
+  if (look.strength !== undefined) {
+    const s = look.strength;
+    if (item.kind === 'blur') patch.radius = 0.002 + 0.048 * s;
+    else if (item.kind === 'pixelate') patch.blockSize = 0.005 + 0.075 * s;
+    else if (item.kind === 'spotlight') patch.dim = Math.max(0.05, s);
+    else refuse('strength');
+  }
+  if (look.fadeSeconds !== undefined) {
+    const us = Math.round(look.fadeSeconds * 1e6);
+    patch.fadeInUs = us > 0 ? us : null;
+    patch.fadeOutUs = us > 0 ? us : null;
+  }
+  return patch;
+}
+
+function requireObject(doc: Project, id: string): TimelineObject {
+  for (const track of doc.timeline.objectTracks ?? []) {
+    const item = track.items.find((i) => i.id === id);
+    if (item) return item;
+  }
+  throw new ToolInputError(`No annotation "${id}". get_project lists them under annotations.`);
 }
 
 /** The operations for one step against `doc`. */
@@ -544,6 +682,45 @@ export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
         },
       ];
     }
+    case 'annotation': {
+      const inUs = time(step.start);
+      const outUs = step.end === undefined ? inUs + DEFAULT_OBJECT_US : time(step.end);
+      if (outUs <= inUs) throw new ToolInputError('The annotation must end after it starts.');
+      const item = newObject(step.type, newId('object'), inUs, outUs, step.box);
+      const look = lookPatch(item, step);
+      return [
+        { type: 'addObject', item },
+        ...(Object.keys(look).length > 0
+          ? [{ type: 'updateObject' as const, objectId: item.id, patch: look }]
+          : []),
+      ];
+    }
+    case 'annotationEdit': {
+      const item = requireObject(doc, step.id);
+      const patch: ObjectPatch = {
+        ...lookPatch(item, step),
+        ...(step.start !== undefined ? { inUs: time(step.start) } : {}),
+        ...(step.end !== undefined ? { outUs: time(step.end) } : {}),
+        ...(step.box ? { box: step.box } : {}),
+      };
+      const ops: ExternalOp[] = [];
+      if (Object.keys(patch).length > 0) {
+        ops.push({ type: 'updateObject', objectId: item.id, patch });
+      }
+      if (step.moveTo) {
+        ops.push({
+          type: 'setObjectKeyframe',
+          objectId: item.id,
+          tUs: time(step.moveTo.at),
+          box: step.moveTo.box,
+        });
+      }
+      if (ops.length === 0) throw new ToolInputError('Give at least one thing to change.');
+      return ops;
+    }
+    case 'annotationRemove':
+      for (const id of step.ids) requireObject(doc, id);
+      return [{ type: 'removeObjects', objectIds: step.ids }];
     case 'screenCrop': {
       const track = videoTrack(doc, step.track, 'screen');
       return [{ type: 'setLayout', trackId: track.id, layout: { crop: step.crop } }];

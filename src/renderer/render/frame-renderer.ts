@@ -16,15 +16,19 @@
  */
 import { frameTimeUs, pickTimeUs, type FrameSpec } from '../../shared/export/frame-render';
 import type { Media, Project } from '../../shared/project/schema';
-import { sceneAt, type SceneLayer } from '../../shared/project/scene';
+import { sceneAt, type Scene, type SceneLayer } from '../../shared/project/scene';
 import type { SceneBackground } from '../editor/preview/compositor-math';
-import type { CompositeItemOf, Size } from '../editor/preview/compositor-math';
+import type { CompositeItemOf, CompositeObjectOf, Size } from '../editor/preview/compositor-math';
 import type { DecoderPool } from '../editor/preview/decoder-pool';
 import type { CacheableFrame } from '../editor/preview/frame-cache';
 
-export interface OffscreenCompositor<F> {
+export interface OffscreenCompositor<F, I = never> {
   resize(size: Size): void;
-  drawOffscreen(background: SceneBackground, items: readonly CompositeItemOf<F>[]): void;
+  drawOffscreen(
+    background: SceneBackground,
+    items: readonly CompositeItemOf<F>[],
+    objects?: readonly CompositeObjectOf<I>[],
+  ): void;
   readYuv420(out: Size, into?: Uint8Array): Uint8Array;
 }
 
@@ -40,6 +44,13 @@ export interface FrameRendererOptions {
   stallMs?: number;
 }
 
+/** Objects (text, callouts, privacy regions) of a scene, and what they need first. */
+export interface ObjectSource<I> {
+  /** Resolves when objects can be drawn (the bundled fonts are loaded). */
+  ready(): Promise<void>;
+  objects(scene: Scene): readonly CompositeObjectOf<I>[];
+}
+
 export interface RenderStats {
   frames: number;
   /** Layer frames drawn with the nearest decoded frame instead of the exact one. */
@@ -53,7 +64,7 @@ export class RenderError extends Error {
   }
 }
 
-export class ExportFrameRenderer<F extends CacheableFrame> {
+export class ExportFrameRenderer<F extends CacheableFrame, I = never> {
   private readonly media: Map<string, Media>;
   private readonly settleMs: number;
   private readonly stallMs: number;
@@ -62,8 +73,9 @@ export class ExportFrameRenderer<F extends CacheableFrame> {
   constructor(
     private readonly doc: Project,
     private readonly pool: DecoderPool<F>,
-    private readonly compositor: OffscreenCompositor<F>,
+    private readonly compositor: OffscreenCompositor<F, I>,
     options: FrameRendererOptions = {},
+    private readonly objectSource: ObjectSource<I> | null = null,
   ) {
     this.media = new Map(doc.media.map((m) => [m.id, m]));
     this.settleMs = options.settleMs ?? 2000;
@@ -75,11 +87,14 @@ export class ExportFrameRenderer<F extends CacheableFrame> {
   async render(spec: FrameSpec, sink: FrameSink, signal?: AbortSignal): Promise<RenderStats> {
     const out = { width: spec.width, height: spec.height };
     this.inexact = 0;
+    await this.objectSource?.ready();
     for (let k = 0; k < spec.frames; k++) {
       if (signal?.aborted) throw new RenderError('cancelled');
       const scene = sceneAt(this.doc, frameTimeUs(k, spec.fps));
       const items = await this.settle(scene.layers, spec.fps, signal);
-      this.compositor.drawOffscreen(scene.background, items);
+      const objects =
+        this.objectSource && scene.objects.length > 0 ? this.objectSource.objects(scene) : [];
+      this.compositor.drawOffscreen(scene.background, items, objects);
       await sink.write(k, this.compositor.readYuv420(out));
     }
     return { frames: spec.frames, inexact: this.inexact };

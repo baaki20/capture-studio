@@ -232,10 +232,16 @@ async function checkFixture(
   return results;
 }
 
+/** `CS_PARITY_ONLY=p2-text,p2-callouts` runs only the fixtures whose names contain one of these. */
+const ONLY = process.env.CS_PARITY_ONLY?.split(',').filter(Boolean) ?? [];
+const SELECTED = ONLY.length
+  ? FIXTURES.filter((f) => ONLY.some((o) => f.name.includes(o)))
+  : FIXTURES;
+
 test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
 
 test('preview and frame-render export agree for every parity fixture (R1.48, P2 a)', async () => {
-  test.setTimeout(120_000 * FIXTURES.length);
+  test.setTimeout(120_000 * SELECTED.length);
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-parity-'));
   const projects = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-parity-projects-'));
   mkdirSync(path.join(projects, 'Exports'), { recursive: true });
@@ -268,7 +274,7 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
   try {
     await app.firstWindow();
     const report: Record<string, FrameResult[]> = {};
-    for (const fixture of FIXTURES) {
+    for (const fixture of SELECTED) {
       report[fixture.name] = await checkFixture(fixture, app, channel, projects);
       console.info(`parity ${fixture.name}: ${JSON.stringify(report[fixture.name])}`);
     }
@@ -276,7 +282,7 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
       body: JSON.stringify(report, null, 2),
       contentType: 'application/json',
     });
-    for (const fixture of FIXTURES) {
+    for (const fixture of SELECTED) {
       for (const r of report[fixture.name] ?? []) {
         const at = `${fixture.name} frame ${String(r.n)}`;
         expect(r.ssim, `SSIM at ${at}`).toBeGreaterThanOrEqual(fixture.minSsim);

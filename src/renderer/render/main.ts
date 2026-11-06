@@ -13,6 +13,9 @@ import { WebGlCompositor } from '../editor/preview/compositor-webgl';
 import { DecoderPool } from '../editor/preview/decoder-pool';
 import { FrameCache } from '../editor/preview/frame-cache';
 import { webCodecsBackend } from '../editor/preview/media-backend';
+import { loadObjectFonts } from '../editor/preview/object-fonts';
+import { ObjectRasterizer } from '../editor/preview/object-raster';
+import { sceneObjectPlans } from '../../shared/project/objects';
 import { ExportFrameRenderer } from './frame-renderer';
 import { RenderSession } from './render-session';
 
@@ -42,7 +45,21 @@ window.addEventListener('message', (event: MessageEvent) => {
       return m.kind === 'video' && url ? [{ mediaId: m.id, url }] : [];
     }),
   );
-  const renderer = new ExportFrameRenderer<VideoFrame>(doc, pool, compositor);
+  const rasterizer = new ObjectRasterizer();
+  const renderer = new ExportFrameRenderer<VideoFrame, OffscreenCanvas>(
+    doc,
+    pool,
+    compositor,
+    {},
+    {
+      ready: loadObjectFonts,
+      objects: (scene) => {
+        const drawn = rasterizer.objects(sceneObjectPlans(scene));
+        if (!drawn.complete) throw new Error('an object could not be drawn');
+        return drawn.objects;
+      },
+    },
+  );
   session = new RenderSession(
     port,
     renderer,

@@ -28,6 +28,53 @@ export interface CompositeItemOf<F> {
   mediaSize: Size;
 }
 
+/**
+ * One object to draw above the layers (`objectDrawPlan` in `shared/project/objects.ts`), generic
+ * in the picture type like `CompositeItemOf`:
+ * - `image`: a picture drawn with canvas 2D (text, callouts), premultiplied, placed 1:1 at
+ *   `rect`; `key` identifies the picture, so the compositor uploads it once;
+ * - `blur` / `pixelate`: a region of what is drawn so far, blurred or in blocks.
+ */
+export type CompositeObjectOf<I> =
+  | { kind: 'image'; key: string; image: I; rect: RectF; opacity: number }
+  | { kind: 'blur'; rect: RectF; radiusPx: number; opacity: number }
+  | { kind: 'pixelate'; rect: RectF; blockPx: number; opacity: number };
+
+/** Largest blur reach in pixels the shader samples (taps on each side). */
+export const MAX_BLUR_PX = 128;
+
+/**
+ * Normalised Gaussian weights for taps 0…n of a blur reaching `radiusPx` (σ = radius / 3), as the
+ * blur shader computes them.
+ */
+export function blurWeights(radiusPx: number): number[] {
+  const n = Math.min(MAX_BLUR_PX, Math.ceil(radiusPx));
+  const sigma = Math.max(radiusPx / 3, 0.5);
+  const raw = Array.from({ length: n + 1 }, (_, i) => Math.exp(-(i * i) / (2 * sigma * sigma)));
+  const total = raw.reduce((sum, w, i) => sum + (i === 0 ? w : 2 * w), 0);
+  return raw.map((w) => w / total);
+}
+
+/**
+ * The pixel a pixelate block samples for output pixel (`x`, `y`) (top-down, whole pixels): the
+ * centre of its block, blocks of `blockPx` starting at the region's top-left corner.
+ */
+export function pixelateSample(
+  rect: RectF,
+  blockPx: number,
+  x: number,
+  y: number,
+  canvas: Size,
+): [number, number] {
+  const at = (p: number, origin: number, size: number, limit: number) => {
+    const cell = Math.floor((p + 0.5 - origin) / blockPx);
+    const centre = origin + (cell + 0.5) * blockPx;
+    const inside = Math.min(origin + size - 0.5, Math.max(origin + 0.5, centre));
+    return Math.min(limit - 1, Math.max(0, Math.floor(inside)));
+  };
+  return [at(x, rect.x, rect.width, canvas.width), at(y, rect.y, rect.height, canvas.height)];
+}
+
 /** What is drawn under every layer: a colour, or a beautify gradient. */
 export type SceneBackground = Scene['background'];
 

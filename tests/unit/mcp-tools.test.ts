@@ -42,6 +42,9 @@ describe('Capture Studio MCP tools', () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
       [
+        'add_annotation',
+        'edit_annotation',
+        'remove_annotations',
         'apply_edits',
         'cancel_export',
         'cut_range',
@@ -264,6 +267,80 @@ describe('Capture Studio MCP tools', () => {
       gradient: { from: '#000000', to: '#FFFFFF' },
     });
     expect(both).toMatchObject({ isError: true });
+  });
+
+  it('adds, edits and removes annotations (R2.5–R2.7)', async () => {
+    const { call, doc, fake } = await setup();
+    const title = await call('add_annotation', {
+      project: doc.id,
+      type: 'text',
+      start: 1,
+      end: 4,
+      text: 'Welcome',
+      preset: 'subtitle',
+      fadeSeconds: 0.5,
+    });
+    expect(title.text).toMatch(/^Applied "Add text at 1 s"/);
+    const blur = await call('add_annotation', {
+      project: doc.id,
+      type: 'blur',
+      start: 2,
+      box: { x: 0.1, y: 0.1, width: 0.2, height: 0.1 },
+      strength: 0.5,
+    });
+    expect(blur.isError).toBe(false);
+    const wrong = await call('add_annotation', {
+      project: doc.id,
+      type: 'arrow',
+      start: 1,
+      number: 3,
+    });
+    expect(wrong).toMatchObject({ isError: true });
+    expect(wrong.text).toContain('number does not apply to a arrow');
+
+    const summary = () =>
+      call('get_project', { project: doc.id }).then(
+        (r) =>
+          JSON.parse(r.text) as {
+            annotations?: { id: string; kind: string; label: string; moves: boolean }[];
+          },
+      );
+    const listed = (await summary()).annotations ?? [];
+    expect(listed.map((a) => [a.kind, a.label])).toEqual([
+      ['text', 'Welcome'],
+      ['blur', 'Blur'],
+    ]);
+    const [text, region] = listed;
+    const timeline = () => fake.editor()!.getState().doc!.timeline;
+    const items = () => timeline().objectTracks?.[0]?.items ?? [];
+    expect(items()[0]).toMatchObject({
+      inUs: S,
+      outUs: 4 * S,
+      fadeInUs: 500_000,
+      style: { background: '#000000A6' },
+    });
+    expect(items()[1]).toMatchObject({ inUs: 2 * S, outUs: 5 * S });
+    const region1 = items()[1];
+    expect(region1?.kind === 'blur' ? region1.radius : null).toBeCloseTo(0.026, 9);
+
+    const moved = await call('edit_annotation', {
+      project: doc.id,
+      id: region!.id,
+      moveTo: { at: 4, box: { x: 0.5, y: 0.5, width: 0.2, height: 0.1 } },
+    });
+    expect(moved.isError).toBe(false);
+    expect(items()[1]?.keyframes?.map((k) => [k.tUs / S, k.box.x])).toEqual([
+      [2, 0.1],
+      [4, 0.5],
+    ]);
+    expect((await summary()).annotations?.[1]?.moves).toBe(true);
+    await call('edit_annotation', { project: doc.id, id: text!.id, text: 'Hi', color: '#FF0000' });
+    expect(items()[0]).toMatchObject({ text: 'Hi', style: { color: '#FF0000' } });
+    const removed = await call('remove_annotations', { project: doc.id, ids: [text!.id] });
+    expect(removed.text).toMatch(/Remove 1 annotation"/);
+    expect(items().map((i) => i.kind)).toEqual(['blur']);
+    const unknown = await call('edit_annotation', { project: doc.id, id: 'obj_nope', text: 'x' });
+    expect(unknown).toMatchObject({ isError: true });
   });
 
   it('explains mistakes and refusals', async () => {

@@ -8,18 +8,23 @@
  * - Offline media (R1.29) and media whose decoder failed draw as placeholders.
  * - When a render had to use a stand-in frame, the next decoded frame of that media triggers a
  *   re-render (`onInvalidate`), so a paused preview settles on the exact frame.
+ * - Objects (text, callouts, blur and pixelate) are drawn from their draw plans; until the
+ *   bundled fonts load, text is left out and the render is not exact.
  */
 import type { VideoLayer } from '../../../shared/project/render-plan';
+import { sceneObjectPlans } from '../../../shared/project/objects';
 import { sceneAt } from '../../../shared/project/scene';
 import type { Media, Project } from '../../../shared/project/schema';
 import type {
   CompositeItem,
+  CompositeObject,
   LumaProbe,
   PixelCapture,
   SceneBackground,
   Size,
 } from './compositor-webgl';
 import type { DecoderPool } from './decoder-pool';
+import { ObjectRasterizer } from './object-raster';
 import type { CacheableFrame } from './frame-cache';
 import type { PreviewStats } from './protocol';
 
@@ -27,7 +32,11 @@ export const PREROLL_US = 1_000_000;
 
 export interface CompositorLike {
   resize(size: Size): void;
-  draw(background: SceneBackground, items: readonly CompositeItem[]): void;
+  draw(
+    background: SceneBackground,
+    items: readonly CompositeItem[],
+    objects?: readonly CompositeObject[],
+  ): void;
   probe(): LumaProbe;
   /** Reads the frame just drawn (parity test); optional for test doubles. */
   capture?(): PixelCapture;
@@ -44,6 +53,7 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
     private readonly pool: DecoderPool<F>,
     private readonly compositor: CompositorLike,
     private readonly onInvalidate: () => void,
+    private readonly rasterizer = new ObjectRasterizer(),
   ) {
     pool.onFrame((mediaId) => {
       if (this.waitingFor.has(mediaId)) this.onInvalidate();
@@ -91,7 +101,13 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
         }
       }
     }
-    this.compositor.draw(scene.background, items);
+    // Text waits for the bundled fonts; the worker draws again when they are loaded.
+    const { objects, complete } =
+      scene.objects.length > 0
+        ? this.rasterizer.objects(sceneObjectPlans(scene))
+        : { objects: [], complete: true };
+    exact &&= complete;
+    this.compositor.draw(scene.background, items, objects);
     if (!exact) this.inexact += 1;
     return exact;
   }

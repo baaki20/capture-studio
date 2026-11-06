@@ -3,6 +3,8 @@
  * Screen, Face + Voice (linked) and System audio, with pauses as separate clips. IDs are
  * deterministic (`clp_T0001`, …), so tests can compare documents.
  */
+import type { ObjectPatch } from '../../src/shared/project/object-patch';
+import { newObject } from '../../src/shared/project/objects';
 import fc from 'fast-check';
 import {
   projectFromRecording,
@@ -201,6 +203,12 @@ const OP_KINDS = [
   'camera-key-remove',
   'camera-key-move',
   'camera-zoom',
+  'object-add',
+  'object-update',
+  'object-remove',
+  'object-move',
+  'object-key',
+  'object-track',
   'nudge',
   'unlink',
   'relink',
@@ -252,6 +260,19 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
   const pick = <T>(list: readonly T[], f: number): T => list[Math.floor(f * list.length)] as T;
   const cameraKeys = doc.timeline.camera ?? [];
   const cameraTime = (f: number) => cameraKeys[Math.floor(f * cameraKeys.length)]?.tUs ?? time(f);
+  const objects = (doc.timeline.objectTracks ?? []).flatMap((track) => track.items);
+  const objectOf = (f: number) => objects[Math.floor(f * objects.length)]?.id ?? 'obj_none';
+  const kinds = [
+    'text',
+    'arrow',
+    'rectangle',
+    'ellipse',
+    'step',
+    'highlight',
+    'spotlight',
+    'blur',
+    'pixelate',
+  ] as const;
   // Camera rects partly outside the canvas or too small (the operations clamp them).
   const cameraRect = (f: number, g: number) => ({
     x: f * 1.2 - 0.1,
@@ -383,6 +404,55 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
         endUs: y === x ? x + 1 : y,
         rect: cameraRect(t.a, t.b),
         easeUs: t.flag ? 0 : Math.round(t.c * 2_500_000),
+      };
+    }
+    case 'object-add': {
+      const inUs = time(t.b);
+      return {
+        type: 'addObject',
+        item: newObject(
+          pick(kinds, t.a),
+          `obj_F${String(Math.round(t.a * 1e9))}${String(Math.round(t.c * 1e6))}`,
+          inUs,
+          inUs + Math.round(t.c * 4_000_000),
+          { x: t.c * 0.8, y: t.b * 0.8, width: 0.05 + t.a * 0.2, height: 0.05 + t.b * 0.2 },
+        ),
+      };
+    }
+    case 'object-update': {
+      const patches: ObjectPatch[] = [
+        { inUs: time(t.b) },
+        { outUs: time(t.c) },
+        { box: { x: t.b, y: t.c, width: 0.1, height: 0.1 } },
+        { opacity: t.flag ? null : t.c },
+        { fadeInUs: t.flag ? null : Math.round(t.c * 1e6) },
+        { text: 'Hello', style: { size: t.c * 0.6, background: t.flag ? null : '#000000' } },
+        { stroke: { color: '#FF0000', width: t.c * 0.06 } },
+        { radius: t.c * 0.06 },
+        { value: Math.round(t.c * 1200) },
+        { dim: t.c },
+      ];
+      return { type: 'updateObject', objectId: objectOf(t.a), patch: pick(patches, t.b) };
+    }
+    case 'object-remove':
+      return { type: 'removeObjects', objectIds: [objectOf(t.a)] };
+    case 'object-move':
+      return { type: 'moveObject', objectId: objectOf(t.a), toInUs: time(t.b) };
+    case 'object-key':
+      return {
+        type: 'setObjectKeyframe',
+        objectId: objectOf(t.a),
+        tUs: time(t.b),
+        ...(t.flag ? { box: { x: t.c * 0.5, y: 0.2, width: 0.2, height: 0.2 } } : {}),
+      };
+    case 'object-track': {
+      const track = doc.timeline.objectTracks?.[0];
+      return {
+        type: 'setObjectTrack',
+        trackId: track?.id ?? 'trk_none',
+        // Mostly unlocked, so edits keep reaching the objects.
+        locked: t.flag && t.c < 0.3,
+        hidden: t.b < 0.3,
       };
     }
     case 'crop':

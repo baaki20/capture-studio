@@ -135,6 +135,13 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   removeCameraKeyframe: 'Delete zoom keyframe',
   moveCameraKeyframe: 'Move zoom keyframe',
   setCameraZoom: 'Zoom range',
+  addObject: 'Add annotation',
+  updateObject: 'Change annotation',
+  removeObjects: 'Delete annotation',
+  moveObject: 'Move annotation',
+  setObjectKeyframe: 'Change annotation keyframe',
+  removeObjectKeyframe: 'Delete annotation keyframe',
+  setObjectTrack: 'Change annotation track',
   nudge: 'Sync nudge',
   unlink: 'Unlink',
   relink: 'Link',
@@ -159,6 +166,12 @@ export function defaultCoalesceKey(op: TimelineOp): string | null {
       return 'beautify';
     case 'setCameraKeyframe':
       return `camera-key:${String(op.tUs)}`;
+    case 'updateObject':
+      return `object:${op.objectId}:${Object.keys(op.patch).sort().join(',')}`;
+    case 'moveObject':
+      return `object-move:${op.objectId}`;
+    case 'setObjectKeyframe':
+      return `object-key:${op.objectId}:${String(op.tUs)}`;
     case 'nudge':
       return `nudge:${JSON.stringify(op.target)}`;
     case 'setMarks':

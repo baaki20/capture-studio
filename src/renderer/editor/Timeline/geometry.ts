@@ -4,10 +4,11 @@
  * is what is hit.
  *
  * x is in CSS pixels from the left edge of the timeline canvas; y from its top (the ruler is the
- * first `RULER_HEIGHT` pixels). Rows follow `timeline.tracks` order (Screen, Face, Voice,
+ * first `RULER_HEIGHT` pixels). Object tracks (annotations, R2.5–R2.8) come first, top to bottom
+ * as they draw (topmost first); then rows follow `timeline.tracks` order (Screen, Face, Voice,
  * System audio).
  */
-import type { Project, Track } from '../../../shared/project/schema';
+import type { ObjectTrack, Project, Track } from '../../../shared/project/schema';
 import { clipEndUs, type TimelineOp } from '../../../shared/project/timeline-ops';
 
 export interface TimelineView {
@@ -20,6 +21,10 @@ export interface TimelineView {
 export const RULER_HEIGHT = 28;
 export const VIDEO_ROW_HEIGHT = 56;
 export const AUDIO_ROW_HEIGHT = 44;
+/** One lane of an object row; objects overlapping in time stack in lanes. */
+export const OBJECT_LANE_PX = 22;
+/** Height of an object row with one lane. */
+export const OBJECT_ROW_HEIGHT = OBJECT_LANE_PX + 6;
 export const ROW_GAP = 2;
 /** Zoom range: a 2-hour timeline fits ~1000 px; a 30 fps frame is ~50 px at the top. */
 export const MIN_PX_PER_SEC = 0.12;
@@ -94,6 +99,38 @@ export interface Row {
   cameraKeys?: readonly number[];
 }
 
+/** A row of an object track (text, callouts, privacy regions). */
+export interface ObjectRow {
+  track: ObjectTrack;
+  top: number;
+  height: number;
+  /** Each object's lane (0 = top), so overlapping objects stay apart and clickable. */
+  lanes: ReadonlyMap<string, number>;
+}
+
+/**
+ * Lanes for objects that may overlap in time: each takes the first lane free at its start (in
+ * start order), so no two objects in a lane overlap.
+ */
+export function objectLanes(
+  items: readonly { id: string; inUs: number; outUs: number }[],
+): Map<string, number> {
+  const ends: number[] = [];
+  const lanes = new Map<string, number>();
+  for (const item of [...items].sort((a, b) => a.inUs - b.inUs || a.outUs - b.outUs)) {
+    let lane = ends.findIndex((end) => end <= item.inUs);
+    if (lane < 0) lane = ends.length;
+    ends[lane] = item.outUs;
+    lanes.set(item.id, lane);
+  }
+  return lanes;
+}
+
+/** The y of an object's bar (its lane's top) in a row. */
+export function objectBarTop(row: ObjectRow, objectId: string): number {
+  return row.top + 3 + (row.lanes.get(objectId) ?? 0) * OBJECT_LANE_PX;
+}
+
 export type KeyframeLane = 'layout' | 'camera';
 
 /** A keyframe in a lane: the face track's layout keyframe, or a camera keyframe. */
@@ -107,8 +144,21 @@ export function rowHeight(track: Track): number {
   return track.type === 'video' ? VIDEO_ROW_HEIGHT : AUDIO_ROW_HEIGHT;
 }
 
-export function layoutRows(doc: Project): { rows: Row[]; height: number } {
+export function layoutRows(doc: Project): {
+  rows: Row[];
+  objectRows: ObjectRow[];
+  height: number;
+} {
   let top = RULER_HEIGHT + ROW_GAP;
+  // Objects draw above every video track, the last object track on top: list it first.
+  const objectRows = [...(doc.timeline.objectTracks ?? [])].reverse().map((track) => {
+    const lanes = objectLanes(track.items);
+    const count = Math.max(1, ...[...lanes.values()].map((l) => l + 1));
+    const height = OBJECT_ROW_HEIGHT + (count - 1) * OBJECT_LANE_PX;
+    const row = { track, top, height, lanes };
+    top += height + ROW_GAP;
+    return row;
+  });
   const screen = doc.timeline.tracks.find((t) => t.type === 'video' && t.layout.kind === 'screen');
   const cameraKeys = (doc.timeline.camera ?? []).map((k) => k.tUs);
   const rows = doc.timeline.tracks.map((track, trackIndex): Row => {
@@ -117,20 +167,81 @@ export function layoutRows(doc: Project): { rows: Row[]; height: number } {
     top += height + ROW_GAP;
     return row;
   });
-  return { rows, height: top };
+  return { rows, objectRows, height: top };
 }
 
 export type Hit =
   | { kind: 'ruler'; tUs: number }
   | { kind: 'keyframe'; lane: KeyframeLane; trackId: string; keyUs: number; tUs: number }
+  | {
+      kind: 'object';
+      trackId: string;
+      objectId: string;
+      zone: 'body' | 'start' | 'end';
+      tUs: number;
+    }
   | { kind: 'clip'; trackId: string; clipId: string; zone: 'body' | 'start' | 'end'; tUs: number }
   | { kind: 'track'; trackId: string; tUs: number }
   | { kind: 'none'; tUs: number };
 
+/**
+ * Where on a span from x0 to x1 the pointer is, with its distance for picking the nearest of
+ * several spans; null when outside. Very narrow spans: the nearer edge wins; otherwise an edge
+ * only within its grab zone. Between two touching spans, the one the pointer is inside wins.
+ */
+function spanZone(
+  x0: number,
+  x1: number,
+  x: number,
+): { zone: 'body' | 'start' | 'end'; distance: number } | null {
+  if (x < x0 - EDGE_GRAB_PX || x > x1 + EDGE_GRAB_PX) return null;
+  const dStart = Math.abs(x - x0);
+  const dEnd = Math.abs(x - x1);
+  const zone: 'body' | 'start' | 'end' =
+    x1 - x0 < EDGE_GRAB_PX * 2
+      ? dStart <= dEnd
+        ? 'start'
+        : 'end'
+      : dStart <= EDGE_GRAB_PX
+        ? 'start'
+        : dEnd <= EDGE_GRAB_PX
+          ? 'end'
+          : 'body';
+  if (zone === 'body' && (x < x0 || x > x1)) return null;
+  const inside = x >= x0 && x <= x1 ? 0 : 0.5;
+  return { zone, distance: (zone === 'start' ? dStart : zone === 'end' ? dEnd : 0) + inside };
+}
+
 /** What is under a pointer at (x, y). Edges win over the body within `EDGE_GRAB_PX`. */
-export function hitTest(rows: readonly Row[], view: TimelineView, x: number, y: number): Hit {
+export function hitTest(
+  rows: readonly Row[],
+  view: TimelineView,
+  x: number,
+  y: number,
+  objectRows: readonly ObjectRow[] = [],
+): Hit {
   const tUs = xToTime(view, x);
   if (y < RULER_HEIGHT) return { kind: 'ruler', tUs };
+  const objectRow = objectRows.find((r) => y >= r.top && y < r.top + r.height);
+  if (objectRow) {
+    let found: { objectId: string; zone: 'body' | 'start' | 'end'; distance: number } | null = null;
+    // Only the objects in the lane under the pointer.
+    const lane = Math.floor((y - objectRow.top - 3) / OBJECT_LANE_PX);
+    for (const item of objectRow.track.items) {
+      if ((objectRow.lanes.get(item.id) ?? 0) !== lane) continue;
+      const hit = spanZone(timeToX(view, item.inUs), timeToX(view, item.outUs), x);
+      if (hit && (!found || hit.distance <= found.distance)) found = { objectId: item.id, ...hit };
+    }
+    return found
+      ? {
+          kind: 'object',
+          trackId: objectRow.track.id,
+          objectId: found.objectId,
+          zone: found.zone,
+          tUs,
+        }
+      : { kind: 'track', trackId: objectRow.track.id, tUs };
+  }
   const row = rows.find((r) => y >= r.top && y < r.top + r.height);
   if (!row) return { kind: 'none', tUs };
   const key = keyframeAt(row, view, x, y);
@@ -140,27 +251,8 @@ export function hitTest(rows: readonly Row[], view: TimelineView, x: number, y: 
   }
   let best: { clipId: string; zone: 'body' | 'start' | 'end'; distance: number } | null = null;
   for (const clip of row.track.clips) {
-    const x0 = timeToX(view, clip.timelineStartUs);
-    const x1 = timeToX(view, clipEndUs(clip));
-    if (x < x0 - EDGE_GRAB_PX || x > x1 + EDGE_GRAB_PX) continue;
-    // Very narrow clips: the nearer edge wins; otherwise an edge only within its grab zone.
-    const dStart = Math.abs(x - x0);
-    const dEnd = Math.abs(x - x1);
-    const zone: 'body' | 'start' | 'end' =
-      x1 - x0 < EDGE_GRAB_PX * 2
-        ? dStart <= dEnd
-          ? 'start'
-          : 'end'
-        : dStart <= EDGE_GRAB_PX
-          ? 'start'
-          : dEnd <= EDGE_GRAB_PX
-            ? 'end'
-            : 'body';
-    if (zone === 'body' && (x < x0 || x > x1)) continue;
-    // Between two touching clips, the clip the pointer is inside wins the shared edge.
-    const inside = x >= x0 && x <= x1 ? 0 : 0.5;
-    const distance = (zone === 'start' ? dStart : zone === 'end' ? dEnd : 0) + inside;
-    if (!best || distance < best.distance) best = { clipId: clip.id, zone, distance };
+    const hit = spanZone(timeToX(view, clip.timelineStartUs), timeToX(view, clipEndUs(clip)), x);
+    if (hit && (!best || hit.distance < best.distance)) best = { clipId: clip.id, ...hit };
   }
   if (best)
     return { kind: 'clip', trackId: row.track.id, clipId: best.clipId, zone: best.zone, tUs };

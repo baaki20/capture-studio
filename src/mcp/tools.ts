@@ -315,6 +315,30 @@ export function registerTools(server: McpServer, app: AppApi): void {
   stepTool(
     server,
     app,
+    'add_annotation',
+    'annotation',
+    'Adds an annotation over the video from start to end: text (titles, captions, labels, code), a callout (arrow, rectangle, ellipse, numbered step, highlight, spotlight) or a privacy region (blur, pixelate) to hide something. Boxes are fractions of the frame. get_project lists annotations with their IDs.',
+    (a) => `Add ${a.type} at ${show(a.start)}`,
+  );
+  stepTool(
+    server,
+    app,
+    'edit_annotation',
+    'annotationEdit',
+    'Changes an annotation: its times, box, text, style preset, colour, step number, strength or fades; moveTo makes it glide to a box by a time (e.g. a blur that follows a moving window).',
+    (a) => `Edit annotation ${a.id}`,
+  );
+  stepTool(
+    server,
+    app,
+    'remove_annotations',
+    'annotationRemove',
+    'Removes annotations by ID.',
+    (a) => `Remove ${String(a.ids.length)} annotation${a.ids.length === 1 ? '' : 's'}`,
+  );
+  stepTool(
+    server,
+    app,
     'set_screen_crop',
     'screenCrop',
     'Crops the screen recording to a rectangle in its own pixels, or removes the crop (null).',

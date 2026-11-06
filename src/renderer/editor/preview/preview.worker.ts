@@ -3,6 +3,7 @@
  * compositor on the `OffscreenCanvas` the editor transferred. The page drives it with `render`
  * messages at the audio clock's pace (`playback.ts`); see `protocol.ts`.
  */
+import { loadObjectFonts } from './object-fonts';
 import { WebGlCompositor } from './compositor-webgl';
 import { DecoderPool } from './decoder-pool';
 import { FrameCache } from './frame-cache';
@@ -54,6 +55,9 @@ scope.onmessage = (event) => {
           invalidate();
         });
         renderer = new PreviewRenderer(pool, compositor, invalidate);
+        void loadObjectFonts().then(invalidate, (error: unknown) => {
+          post({ type: 'error', message: `Fonts did not load: ${String(error)}` });
+        });
         post({ type: 'ready' });
         return;
       }

@@ -7,13 +7,16 @@
  * every edit passes the same per-operation checks as a user's.
  */
 import { z } from 'zod';
+import { ObjectPatchSchema } from './object-patch';
 import {
   BeautifySchema,
   BorderSchema,
   EASINGS,
   FACE_MODES,
+  FRectSchema,
   NRectSchema,
   ShadowSchema,
+  TimelineObjectSchema,
   prefixedId,
 } from './schema';
 import type { TimelineOp } from './timeline-ops';
@@ -26,6 +29,7 @@ const NonNegativeUs = z.int().nonnegative();
 const ClipId = prefixedId('clp');
 const ClipIds = z.array(ClipId).min(1);
 const TrackId = prefixedId('trk');
+const ObjectId = prefixedId('obj');
 
 const LayoutPatchSchema = z.strictObject({
   centerX: z.number().optional(),
@@ -134,6 +138,32 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
     endUs: NonNegativeUs,
     rect: CameraRect,
     easeUs: NonNegativeUs.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('addObject'),
+    item: TimelineObjectSchema,
+    trackId: TrackId.optional(),
+  }),
+  z.strictObject({ type: z.literal('updateObject'), objectId: ObjectId, patch: ObjectPatchSchema }),
+  z.strictObject({ type: z.literal('removeObjects'), objectIds: z.array(ObjectId).min(1) }),
+  z.strictObject({ type: z.literal('moveObject'), objectId: ObjectId, toInUs: NonNegativeUs }),
+  z.strictObject({
+    type: z.literal('setObjectKeyframe'),
+    objectId: ObjectId,
+    tUs: NonNegativeUs,
+    box: FRectSchema.optional(),
+    easing: Easing.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('removeObjectKeyframe'),
+    objectId: ObjectId,
+    tUs: NonNegativeUs,
+  }),
+  z.strictObject({
+    type: z.literal('setObjectTrack'),
+    trackId: TrackId,
+    hidden: z.boolean().optional(),
+    locked: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal('nudge'), target: NudgeTargetSchema, syncAdjustUs: Us }),
   z.strictObject({ type: z.literal('unlink'), clipIds: ClipIds }),

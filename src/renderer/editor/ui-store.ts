@@ -21,6 +21,8 @@ export interface UiState {
   overlaySelected: boolean;
   /** The selected layout or camera keyframe in the timeline (R2.1, R2.9); Delete removes it. */
   selectedKeyframe: LaneKeyframe | null;
+  /** The selected annotation object (R2.8); the inspector and preview edit it. */
+  selectedObject: string | null;
   /** One-line status ("Nothing to split", errors). */
   status: string | null;
 }
@@ -34,6 +36,7 @@ export interface UiActions {
   setSnapping(on: boolean): void;
   setOverlaySelected(on: boolean): void;
   selectKeyframe(key: LaneKeyframe | null): void;
+  selectObject(objectId: string | null): void;
   setStatus(status: string | null): void;
 }
 
@@ -52,15 +55,27 @@ export function createUiStore(initial: Partial<UiState> = {}): UiStore {
     snapping: true,
     overlaySelected: false,
     selectedKeyframe: null,
+    selectedObject: null,
     status: null,
     ...initial,
     setPlayhead: (us) => {
       if (us !== get().playheadUs) set({ playheadUs: Math.max(0, Math.round(us)) });
     },
     setTransport: (playing, rate) => set({ playing, rate }),
-    select: (clipIds) => set({ selection: [...new Set(clipIds)], selectedKeyframe: null }),
+    select: (clipIds) =>
+      set({ selection: [...new Set(clipIds)], selectedKeyframe: null, selectedObject: null }),
     selectKeyframe: (key) =>
-      set(key ? { selectedKeyframe: key, selection: [] } : { selectedKeyframe: null }),
+      set(
+        key
+          ? { selectedKeyframe: key, selection: [], selectedObject: null }
+          : { selectedKeyframe: null },
+      ),
+    selectObject: (objectId) =>
+      set(
+        objectId
+          ? { selectedObject: objectId, selection: [], selectedKeyframe: null }
+          : { selectedObject: null },
+      ),
     toggleSelected: (clipId) => {
       const current = get().selection;
       set({

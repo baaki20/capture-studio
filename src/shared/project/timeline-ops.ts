@@ -54,6 +54,8 @@ import {
   clipWithStart,
 } from './clip-time';
 import { mediaEditBounds } from './media-time';
+import type { ObjectPatch } from './object-patch';
+import { upsertBoxKeyframe } from './objects';
 import {
   CAMERA_EASE_MAX_US,
   cameraZoomRange,
@@ -69,6 +71,16 @@ import {
   removeKeyframe,
   upsertKeyframe,
 } from './layout-keyframes';
+import {
+  ArrowObjectSchema,
+  BlurObjectSchema,
+  HighlightObjectSchema,
+  PixelateObjectSchema,
+  ShapeObjectSchema,
+  SpotlightObjectSchema,
+  StepObjectSchema,
+  TextObjectSchema,
+} from './schema';
 import type {
   AudioTrack,
   Beautify,
@@ -80,12 +92,16 @@ import type {
   FRect,
   LayoutKeyframe,
   Media,
+  ObjectTrack,
   OverlayLayout,
   Project,
   Shadow,
+  TimelineObject,
   Track,
   VideoTrack,
 } from './schema';
+
+export type { ObjectPatch } from './object-patch';
 
 enablePatches();
 
@@ -179,6 +195,13 @@ export type TimelineOp =
   | { type: 'removeCameraKeyframe'; tUs: Us }
   | { type: 'moveCameraKeyframe'; fromUs: Us; toUs: Us }
   | { type: 'setCameraZoom'; startUs: Us; endUs: Us; rect: FRect; easeUs?: Us }
+  | { type: 'addObject'; item: TimelineObject; trackId?: string }
+  | { type: 'updateObject'; objectId: string; patch: ObjectPatch }
+  | { type: 'removeObjects'; objectIds: string[] }
+  | { type: 'moveObject'; objectId: string; toInUs: Us }
+  | { type: 'setObjectKeyframe'; objectId: string; tUs: Us; box?: FRect; easing?: Easing }
+  | { type: 'removeObjectKeyframe'; objectId: string; tUs: Us }
+  | { type: 'setObjectTrack'; trackId: string; hidden?: boolean; locked?: boolean }
   | { type: 'nudge'; target: NudgeTarget; syncAdjustUs: Us }
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
@@ -478,6 +501,21 @@ export const removeCameraKeyframe = opFn('removeCameraKeyframe');
 export const moveCameraKeyframe = opFn('moveCameraKeyframe');
 /** The camera on one rect over a time range, eased in and out (a zoomed range). */
 export const setCameraZoom = opFn('setCameraZoom');
+/**
+ * Adds a text, callout or privacy object (R2.5–R2.7) with the ID it carries, to `trackId` or to
+ * the first object track (an "Annotations" track is made when there is none).
+ */
+export const addObject = opFn('addObject');
+/** Changes an object's times, box, look or style; checked against the project schema. */
+export const updateObject = opFn('updateObject');
+export const removeObjects = opFn('removeObjects');
+/** Moves an object in time (its box keyframes move with it). */
+export const moveObject = opFn('moveObject');
+/** Sets a box keyframe of an object (a moving region, R2.7); see `objects.ts`. */
+export const setObjectKeyframe = opFn('setObjectKeyframe');
+export const removeObjectKeyframe = opFn('removeObjectKeyframe');
+/** Hides or locks an object track. */
+export const setObjectTrack = opFn('setObjectTrack');
 /** Sets `syncAdjustUs` of a component's (or explicit) media; clip positions do not change. */
 export const nudge = opFn('nudge');
 export const unlink = opFn('unlink');
@@ -543,6 +581,15 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
     case 'moveCameraKeyframe':
     case 'setCameraZoom':
       cameraDraft(draft, op);
+      return;
+    case 'addObject':
+    case 'updateObject':
+    case 'removeObjects':
+    case 'moveObject':
+    case 'setObjectKeyframe':
+    case 'removeObjectKeyframe':
+    case 'setObjectTrack':
+      objectDraft(draft, op, ctx);
       return;
     case 'nudge':
       nudgeDraft(draft, op);
@@ -909,6 +956,10 @@ function cutDraft(draft: Project, a: Us, b: Us, ctx: Ctx): void {
       setKeyframes(track, keyframesThroughCut(plain(track.layoutKeyframes), a, b));
     }
   }
+  for (const track of draft.timeline.objectTracks ?? []) {
+    if (track.locked) continue;
+    track.items = plain(track.items).flatMap((item) => objectThroughCut(item, a, b, ctx.minUs));
+  }
   // The camera follows the screen, so it moves with the content unless every video track is
   // locked (then the picture under it does not move either).
   const screenMoves = tracks.some((t) => t.type === 'video' && !t.locked);
@@ -1184,6 +1235,208 @@ function cameraDraft(
       }
       const ease = Math.min(easeUs, Math.floor((op.endUs - op.startUs) / 2));
       setCamera(draft, cameraZoomRange(keys, op.startUs, op.endUs, cameraRectOf(op.rect), ease));
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Objects
+
+const OBJECT_SCHEMAS = {
+  text: TextObjectSchema,
+  rectangle: ShapeObjectSchema,
+  ellipse: ShapeObjectSchema,
+  arrow: ArrowObjectSchema,
+  step: StepObjectSchema,
+  highlight: HighlightObjectSchema,
+  spotlight: SpotlightObjectSchema,
+  blur: BlurObjectSchema,
+  pixelate: PixelateObjectSchema,
+} as const;
+
+/** Patch fields each kind has (besides the common times, box, opacity and fades). */
+const KIND_FIELDS: Record<TimelineObject['kind'], readonly string[]> = {
+  text: ['text', 'preset', 'style'],
+  rectangle: ['stroke', 'fill'],
+  ellipse: ['stroke', 'fill'],
+  arrow: ['tail', 'stroke', 'head'],
+  step: ['value', 'format', 'fill', 'textColor'],
+  highlight: ['color'],
+  spotlight: ['shape', 'dim'],
+  blur: ['radius'],
+  pixelate: ['blockSize'],
+};
+const COMMON_FIELDS = ['inUs', 'outUs', 'box', 'opacity', 'fadeInUs', 'fadeOutUs'];
+
+/** The object checked against its kind's schema (sizes, colours, ranges). */
+function checkedObject(item: TimelineObject, minUs: Us): TimelineObject {
+  const parsed = OBJECT_SCHEMAS[item.kind].safeParse(item);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const where = issue?.path.join('.') ?? '';
+    fail(
+      'invalid-value',
+      `${item.kind} ${where ? `${where} ` : ''}${issue?.message ?? 'is invalid'}`,
+    );
+  }
+  if (item.outUs - item.inUs < minUs) {
+    fail('invalid-value', 'an object must last at least one frame');
+  }
+  return parsed.data;
+}
+
+/** Keyframes kept inside the object's times; undefined when none are left. */
+function keyframesInside(item: TimelineObject): TimelineObject['keyframes'] {
+  const keys = item.keyframes?.filter((k) => k.tUs >= item.inUs && k.tUs <= item.outUs);
+  return keys && keys.length > 0 ? keys : undefined;
+}
+
+function withKeyframes(item: TimelineObject, keys: TimelineObject['keyframes']): TimelineObject {
+  const { keyframes: _old, ...rest } = item;
+  return keys && keys.length > 0 ? { ...rest, keyframes: keys } : rest;
+}
+
+/** `patch` applied to `item` (null removes a field; nested text style merges). */
+function patchedObject(item: TimelineObject, patch: ObjectPatch): TimelineObject {
+  const allowed = new Set([...COMMON_FIELDS, ...KIND_FIELDS[item.kind]]);
+  for (const key of Object.keys(patch)) {
+    if (!allowed.has(key)) fail('invalid-value', `${key} does not apply to a ${item.kind}`);
+  }
+  // Undefined leaves a field as it is; null removes it (after the patch is merged over it).
+  const merge = (base: object, change: object) =>
+    Object.fromEntries(
+      Object.entries({
+        ...base,
+        ...Object.fromEntries(Object.entries(change).filter(([, v]) => v !== undefined)),
+      }).filter(([, v]) => v !== null),
+    );
+  const next = merge(item, {
+    ...patch,
+    ...(item.kind === 'text' && patch.style ? { style: merge(item.style, patch.style) } : {}),
+  });
+  const merged = next as TimelineObject;
+  return withKeyframes(merged, keyframesInside(merged));
+}
+
+function findObject(
+  draft: Project,
+  objectId: string,
+): { track: ObjectTrack; index: number; item: TimelineObject } {
+  for (const track of draft.timeline.objectTracks ?? []) {
+    const index = track.items.findIndex((i) => i.id === objectId);
+    const item = track.items[index];
+    if (item) {
+      if (track.locked) fail('track-locked', `track ${track.name} is locked`);
+      return { track, index, item: plain(item) };
+    }
+  }
+  return fail('unknown-clip', `unknown object ${objectId}`);
+}
+
+/** An object after removing `[a, b)` from the timeline; none when it was inside. */
+function objectThroughCut(item: TimelineObject, a: Us, b: Us, minUs: Us): TimelineObject[] {
+  const inUs = mapTimeThroughCut(item.inUs, a, b);
+  const outUs = mapTimeThroughCut(item.outUs, a, b);
+  if (outUs - inUs < minUs) return [];
+  const moved = { ...item, inUs, outUs };
+  const keys = keyframesThroughCut(item.keyframes, a, b)?.filter(
+    (k) => k.tUs >= inUs && k.tUs <= outUs,
+  );
+  return [withKeyframes(moved, keys)];
+}
+
+function objectDraft(
+  draft: Project,
+  op: OpOf<
+    | 'addObject'
+    | 'updateObject'
+    | 'removeObjects'
+    | 'moveObject'
+    | 'setObjectKeyframe'
+    | 'removeObjectKeyframe'
+    | 'setObjectTrack'
+  >,
+  ctx: Ctx,
+): void {
+  switch (op.type) {
+    case 'addObject': {
+      // Check everything before making a track, so a refused add changes and uses up nothing.
+      requireTime(op.item.inUs, 'the start');
+      const item = checkedObject(plain(op.item), ctx.minUs);
+      const existing = draft.timeline.objectTracks ?? [];
+      if (existing.some((t) => t.items.some((i) => i.id === item.id))) {
+        fail('invalid-value', `object ${item.id} already exists`);
+      }
+      let track = op.trackId ? existing.find((t) => t.id === op.trackId) : existing[0];
+      if (op.trackId && !track) fail('unknown-track', `unknown object track ${op.trackId}`);
+      if (track?.locked) fail('track-locked', `track ${track.name} is locked`);
+      if (!track) {
+        track = {
+          id: ctx.id('track'),
+          name: 'Annotations',
+          locked: false,
+          hidden: false,
+          items: [],
+        };
+        (draft.timeline.objectTracks ??= []).push(track);
+      }
+      track.items.push(withKeyframes(item, keyframesInside(item)));
+      return;
+    }
+    case 'updateObject': {
+      const { track, index, item } = findObject(draft, op.objectId);
+      track.items[index] = checkedObject(patchedObject(item, op.patch), ctx.minUs);
+      return;
+    }
+    case 'removeObjects': {
+      if (op.objectIds.length === 0) fail('nothing-to-do', 'no objects to remove');
+      for (const id of new Set(op.objectIds)) {
+        const { track, index } = findObject(draft, id);
+        track.items.splice(index, 1);
+      }
+      return;
+    }
+    case 'moveObject': {
+      requireTime(op.toInUs, 'the start');
+      const { track, index, item } = findObject(draft, op.objectId);
+      const delta = op.toInUs - item.inUs;
+      if (delta === 0) return;
+      track.items[index] = {
+        ...item,
+        inUs: item.inUs + delta,
+        outUs: item.outUs + delta,
+        ...(item.keyframes
+          ? { keyframes: item.keyframes.map((k) => ({ ...k, tUs: k.tUs + delta })) }
+          : {}),
+      };
+      return;
+    }
+    case 'setObjectKeyframe': {
+      const { track, index, item } = findObject(draft, op.objectId);
+      if (!isTime(op.tUs) || op.tUs < item.inUs || op.tUs > item.outUs) {
+        fail('invalid-value', 'a box keyframe must be inside the object’s times');
+      }
+      const keys = upsertBoxKeyframe(item, op.tUs, {
+        ...(op.box ? { box: op.box } : {}),
+        ...(op.easing ? { easing: op.easing } : {}),
+      });
+      track.items[index] = checkedObject(withKeyframes(item, keys), ctx.minUs);
+      return;
+    }
+    case 'removeObjectKeyframe': {
+      const { track, index, item } = findObject(draft, op.objectId);
+      const next = removeKeyframe(item.keyframes, op.tUs);
+      if (next === null) fail('nothing-to-do', `no box keyframe at ${String(op.tUs)} µs`);
+      track.items[index] = withKeyframes(item, next);
+      return;
+    }
+    case 'setObjectTrack': {
+      const track =
+        draft.timeline.objectTracks?.find((t) => t.id === op.trackId) ??
+        fail('unknown-track', `unknown object track ${op.trackId}`);
+      if (op.hidden !== undefined) track.hidden = op.hidden;
+      if (op.locked !== undefined) track.locked = op.locked;
       return;
     }
   }

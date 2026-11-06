@@ -2,21 +2,26 @@
  * Draws the timeline on a 2D canvas (§4.2 "canvas renderer + React chrome"): ruler with
  * timecodes, In/Out marks, clips with thumbnails (video) or waveforms (audio), selection and
  * link highlights, offline clips, parts a sync nudge left uncovered, face layout keyframes
- * (diamonds in the face row's lane), the snap guide and the playhead. Geometry comes from `geometry.ts`, so drawing and hit testing agree.
+ * (diamonds in the face row's lane), annotation objects (bars on the object rows, coloured by
+ * family), the snap guide and the playhead. Geometry comes from `geometry.ts`, so drawing and hit testing agree.
  */
 import { clipRefAtExact } from '../../../shared/project/clip-time';
 import { clipCoverage } from '../../../shared/project/render-plan';
-import type { Clip, Media, Project } from '../../../shared/project/schema';
+import { objectLabel } from '../../../shared/project/objects';
+import type { Clip, Media, Project, TimelineObject } from '../../../shared/project/schema';
 import { clipEndUs } from '../../../shared/project/timeline-ops';
 import { formatTimecode } from '../../../shared/time';
 import { refToFileUsExact } from '../../../shared/project/media-time';
 import {
   KEYFRAME_LANE_PX,
+  OBJECT_LANE_PX,
   RULER_HEIGHT,
+  objectBarTop,
   keyframeLaneY,
   rowKeyframes,
   rowLane,
   type LaneKeyframe,
+  type ObjectRow,
   rulerTicks,
   timeToX,
   type Row,
@@ -46,6 +51,10 @@ export interface TimelinePalette {
   snap: string;
   keyframe: string;
   keyframeLane: string;
+  /** Object bars: text, callouts, privacy regions. */
+  objectText: string;
+  objectCallout: string;
+  objectPrivacy: string;
 }
 
 export const DARK_PALETTE: TimelinePalette = {
@@ -68,6 +77,9 @@ export const DARK_PALETTE: TimelinePalette = {
   snap: '#7fd1ff',
   keyframe: '#e8e9ee',
   keyframeLane: 'rgba(0, 0, 0, 0.35)',
+  objectText: '#6b4fa3',
+  objectCallout: '#a3593a',
+  objectPrivacy: '#4a5563',
 };
 
 export interface DrawInput {
@@ -81,6 +93,10 @@ export interface DrawInput {
   linkedToSelection: ReadonlySet<string>;
   playheadUs: number;
   snapUs: number | null;
+  /** Object track rows (above the video rows); none when absent. */
+  objectRows?: readonly ObjectRow[];
+  /** The selected annotation object, if any. */
+  selectedObject?: string | null;
   /** The selected lane keyframe, if any. */
   selectedKeyframe?: LaneKeyframe | null;
   assets: MediaAssets | null;
@@ -165,6 +181,17 @@ export function drawTimeline(ctx: CanvasRenderingContext2D, input: DrawInput): v
     drawKeyframes(ctx, input, p, row);
   }
 
+  for (const row of input.objectRows ?? []) {
+    ctx.fillStyle = row.track.locked ? p.rowLocked : p.row;
+    ctx.fillRect(0, row.top, width, row.height);
+    for (const item of row.track.items) {
+      const x0 = timeToX(view, item.inUs);
+      const x1 = timeToX(view, item.outUs);
+      if (x1 < 0 || x0 > width) continue;
+      drawObjectBar(ctx, input, p, row, item, x0, x1);
+    }
+  }
+
   // In/Out marks.
   const { inUs, outUs } = doc.timeline.marks;
   if (inUs !== null || outUs !== null) {
@@ -215,6 +242,48 @@ export function drawTimeline(ctx: CanvasRenderingContext2D, input: DrawInput): v
     ctx.lineTo(px + 6, 0);
     ctx.lineTo(px, 8);
     ctx.fill();
+  }
+}
+
+function objectColor(p: TimelinePalette, item: TimelineObject): string {
+  if (item.kind === 'text') return p.objectText;
+  if (item.kind === 'blur' || item.kind === 'pixelate') return p.objectPrivacy;
+  return p.objectCallout;
+}
+
+function drawObjectBar(
+  ctx: CanvasRenderingContext2D,
+  input: DrawInput,
+  p: TimelinePalette,
+  row: ObjectRow,
+  item: TimelineObject,
+  x0: number,
+  x1: number,
+): void {
+  const top = objectBarTop(row, item.id);
+  const h = OBJECT_LANE_PX - 2;
+  const left = Math.max(x0, -4);
+  const right = Math.min(x1, input.width + 4);
+  const w = Math.max(1, right - left);
+  ctx.save();
+  roundRect(ctx, left, top, w, h);
+  ctx.fillStyle = objectColor(p, item);
+  ctx.globalAlpha = row.track.hidden ? 0.45 : 1;
+  ctx.fill();
+  ctx.clip();
+  if (w > 24) {
+    ctx.fillStyle = '#f3f4f6';
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(objectLabel(item), Math.max(left, 0) + 6, top + h / 2);
+  }
+  ctx.restore();
+  if (input.selectedObject === item.id) {
+    ctx.strokeStyle = p.selected;
+    ctx.lineWidth = 2;
+    roundRect(ctx, left + 1, top + 1, w - 2, h - 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
   }
 }
 

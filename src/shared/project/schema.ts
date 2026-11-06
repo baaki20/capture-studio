@@ -294,7 +294,7 @@ export const TrackSchema = z.discriminatedUnion('type', [VideoTrackSchema, Audio
 /** v2: fonts bundled with the app, so preview and export draw identical glyphs. */
 export const OBJECT_FONTS = ['sans', 'serif', 'mono', 'handwriting'] as const;
 
-const StrokeSchema = z.object({
+export const StrokeSchema = z.object({
   color: HexColor,
   width: z.number().min(0).max(0.05).describe('Fraction of the canvas short side'),
 });

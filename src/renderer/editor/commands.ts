@@ -127,6 +127,12 @@ export function runCommand(command: EditorCommand, ctx: CommandContext): void {
       return;
     case 'delete':
     case 'ripple-delete': {
+      if (ui.selectedObject && selection.length === 0) {
+        if (apply(ctx, { type: 'removeObjects', objectIds: [ui.selectedObject] }, command)) {
+          ui.selectObject(null);
+        }
+        return;
+      }
       const key = ui.selectedKeyframe;
       if (key && selection.length === 0) {
         if (apply(ctx, removeKeyframeOp(key), command)) {

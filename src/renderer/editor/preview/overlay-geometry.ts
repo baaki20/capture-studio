@@ -98,3 +98,29 @@ export function dragOverlayRect(
   const y = sy > 0 ? start.y : start.y + start.height - height;
   return { x, y, width, height };
 }
+
+/** Smallest annotation side while resizing, in canvas px. */
+export const MIN_OBJECT_PX = 8;
+
+/**
+ * An annotation's box after dragging `handle` by (dx, dy) canvas px from `start`: a move, or a
+ * corner resize with the opposite corner fixed and the aspect free.
+ */
+export function dragFreeRect(
+  start: PixelRect,
+  handle: OverlayHandle,
+  dx: number,
+  dy: number,
+): PixelRect {
+  if (handle === 'move') return { ...start, x: start.x + dx, y: start.y + dy };
+  const right = handle === 'ne' || handle === 'se';
+  const bottom = handle === 'sw' || handle === 'se';
+  const width = Math.max(MIN_OBJECT_PX, start.width + (right ? dx : -dx));
+  const height = Math.max(MIN_OBJECT_PX, start.height + (bottom ? dy : -dy));
+  return {
+    x: right ? start.x : start.x + start.width - width,
+    y: bottom ? start.y : start.y + start.height - height,
+    width,
+    height,
+  };
+}
