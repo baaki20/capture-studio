@@ -5,7 +5,8 @@
  * store (and so with `cs-media://`).
  *
  * Actions: rename (folder and name), move to the OS trash, reveal in the file manager, open the
- * projects folder, and import an existing `.cstudio` folder. Imported folders stay where they are
+ * projects folder, import an existing `.cstudio` folder, and Pack/Unpack (a zip without `cache/`,
+ * `pack.ts`; R2.34). Imported folders stay where they are
  * and are remembered in settings (`library.importedRoots`); one that disappears is skipped (and
  * kept, in case its drive comes back). Folders that belong to a running recording are left alone.
  */
@@ -15,10 +16,12 @@ import type { z } from 'zod';
 import type { COMPONENT_BADGES, LibraryEntrySchema } from '../../shared/ipc/contract';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
+import { newId } from '../../shared/ids';
 import { sanitizeFileName, uniqueName } from '../../shared/naming/name-pattern';
 import { PROJECT_EXTENSION, type Project } from '../../shared/project/schema';
 import { clipTimelineDurationUs } from '../../shared/project/clip-time';
 import { mediaUrl } from './media-protocol';
+import { packProject, unpackProject } from './pack';
 import {
   isProjectFolderName,
   projectFilePath,
@@ -181,6 +184,46 @@ export class Library {
     }
     const doc = await this.options.store.update(id, (d) => ({ ...d, name: displayName }));
     return this.entry(doc, target);
+  }
+
+  /** Packs a project into the zip `output` (R2.34): its folder without `cache/`. */
+  async pack(id: string, output: string): Promise<{ path: string; files: number; bytes: number }> {
+    const root = await this.requireRoot(id);
+    this.assertNotBusy(root);
+    const packed = await packProject(root, output);
+    this.logger.info(`library: packed ${String(packed.files)} files of ${path.basename(root)}`);
+    return { path: output, ...packed };
+  }
+
+  /**
+   * Unpacks a pack into the projects folder (a unique folder name) and lists it. A copy of a
+   * project the library already has gets a new id, so both can be opened.
+   */
+  async unpack(zipFile: string): Promise<LibraryEntry> {
+    const dir = this.options.projectsDir();
+    await fs.mkdir(dir, { recursive: true });
+    await this.list();
+    const root = await unpackProject(zipFile, dir, async (packed) => {
+      const taken = new Set((await fs.readdir(dir)).map((n) => n.toLowerCase()));
+      const base = sanitizeFileName(packed.slice(0, -PROJECT_EXTENSION.length)) || 'Unpacked';
+      return uniqueName(base, PROJECT_EXTENSION, (c) => taken.has(c.toLowerCase()));
+    });
+    try {
+      const loaded = await this.options.store.read(root);
+      if (!loaded) throw new ImportError('The pack has no readable project.json.');
+      const known = this.options.store.rootOf(loaded.doc.id);
+      if (
+        known &&
+        !samePath(known, root) &&
+        (await fs.stat(projectFilePath(known)).catch(() => null))
+      ) {
+        await this.options.store.write(root, { ...loaded.doc, id: newId('project') });
+      }
+      return await this.importFolder(root);
+    } catch (error) {
+      await fs.rm(root, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   /** Moves the project folder to the OS trash (the UI confirms first). */

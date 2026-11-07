@@ -42,6 +42,8 @@ const api: ShellPreloadApi = {
     reveal: (id) => invoke('library.reveal', { id }),
     import: () => invoke('library.import'),
     openFolder: () => invoke('library.openFolder'),
+    pack: (id) => invoke('library.pack', { id }),
+    unpack: () => invoke('library.unpack'),
     onChanged: (listener) => subscribe('library.changed', () => listener()),
   },
   project: {

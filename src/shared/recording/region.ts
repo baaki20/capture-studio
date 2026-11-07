@@ -214,3 +214,33 @@ export function matchingLastRegion(
   if (last.sourceWidth !== source.width || last.sourceHeight !== source.height) return null;
   return finalizeRegion(last.rect, source);
 }
+
+/**
+ * Where a source picture of `source` size goes in a frame of `frame` size: as large as fits,
+ * centred, the rest black (letterbox or pillarbox). Used when a recorded window is resized
+ * (P2, acceptance f) and for crop at record time. Within a pixel of the full frame it is the
+ * full frame, so a scaled monitor never gets a hairline bar.
+ */
+export function letterboxRect(source: Size, frame: Size): NRect {
+  const scale = Math.min(frame.width / source.width, frame.height / source.height);
+  const width = Math.round(source.width * scale);
+  const height = Math.round(source.height * scale);
+  if (Math.abs(width - frame.width) <= 1 && Math.abs(height - frame.height) <= 1) {
+    return { x: 0, y: 0, width: frame.width, height: frame.height };
+  }
+  return {
+    x: Math.round((frame.width - width) / 2),
+    y: Math.round((frame.height - height) / 2),
+    width: Math.max(1, width),
+    height: Math.max(1, height),
+  };
+}
+
+/** `crop` limited to a frame of `source` size (a window may shrink below the region). */
+export function clampCrop(crop: NRect, source: Size): NRect | null {
+  const x = Math.min(crop.x, source.width - 1);
+  const y = Math.min(crop.y, source.height - 1);
+  const width = Math.min(crop.width, source.width - x);
+  const height = Math.min(crop.height, source.height - y);
+  return width >= 2 && height >= 2 ? { x, y, width, height } : null;
+}

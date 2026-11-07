@@ -1054,3 +1054,112 @@ describe('session manager', () => {
     expect(doc.recording?.pauses).toEqual([{ startUs: 2 * S, endUs: 3 * S }]);
   });
 });
+
+describe('P2 recorder modes (R2.29–R2.33)', () => {
+  it('records one window: the picker asks for windows and the project says so', async () => {
+    const kinds: string[] = [];
+    const h = harness({
+      selectScreen: (kind) => {
+        kinds.push(kind);
+        return Promise.resolve({
+          sourceId: 'window:7',
+          label: 'Editor',
+          maxWidth: 3840,
+          maxHeight: 2160,
+        });
+      },
+    });
+    const root = await startRecording(h, { ...CONFIG, captureMode: 'window' });
+    expect(kinds).toEqual(['window']);
+    h.clock.us = 2 * S;
+    await h.manager.stop();
+    expect((await readProject(root)).recording?.source).toMatchObject({
+      kind: 'window',
+      label: 'Editor',
+    });
+  });
+
+  it('records audio only: no portal, no screen stream, a project without a screen track', async () => {
+    let asked = 0;
+    const h = harness({
+      selectScreen: () => {
+        asked += 1;
+        return Promise.resolve(null);
+      },
+    });
+    h.engine.respond['engine.acquire'] = (payload) => {
+      expect(payload.screen).toBeNull();
+      return {
+        status: 'ready',
+        screen: null,
+        camera: null,
+        mic: { label: 'Built-in Mic', sampleRate: 48_000, channels: 1 },
+      };
+    };
+    // The camera choice is ignored: audio only records no picture at all.
+    const root = await startRecording(h, { ...CONFIG, captureMode: 'audio-only' });
+    expect(h.engine.calls[0]?.payload).toMatchObject({ screen: null, camera: null });
+    expect(asked).toBe(0);
+    expect(h.engine.ports[0]!.payload.streams.map((s) => s.kind)).toEqual(['mic']);
+    h.clock.us = 3 * S;
+    await h.manager.stop();
+    const doc = await readProject(root);
+    expect(doc.media.map((m) => m.role).sort()).toEqual(['microphone', 'system-audio']);
+    expect(doc.timeline.tracks.some((t) => t.type === 'video')).toBe(false);
+  });
+
+  it('refuses audio only without a microphone or system audio', async () => {
+    const h = harness({ systemAudio: false });
+    await h.manager.configure({ ...CONFIG, captureMode: 'audio-only', micId: null });
+    const result = await h.manager.record();
+    expect(result).toEqual({
+      status: 'failed',
+      message: 'Audio only needs a microphone or system audio.',
+    });
+    expect(await projectDirs(h)).toEqual([]);
+  });
+
+  it('stops by itself after a fixed duration (pauses excluded)', async () => {
+    const h = harness();
+    const root = await startRecording(h, { ...CONFIG, durationLimitSec: 2 });
+    expect(h.states.at(-1)?.limitUs).toBe(2 * S);
+    h.clock.us = 1.5 * S;
+    await new Promise((r) => setTimeout(r, 250));
+    expect(h.manager.state).toBe('recording');
+    h.clock.us = 2.05 * S;
+    await waitFor(() => h.ready.length === 1, 3000);
+    expect(h.notices.map((n) => n.message)).toContain('The recording stopped after 2 s.');
+    expect((await readProject(root)).recording?.state).toBe('complete');
+  });
+
+  it('crops at record time: the engine encodes the region and the project has no crop', async () => {
+    const region = { x: 100, y: 50, width: 640, height: 360 };
+    const h = harness({ pickRegion: () => Promise.resolve({ rect: region }) });
+    const root = await startRecording(h, {
+      ...CONFIG,
+      captureMode: 'region',
+      cropAtRecord: true,
+      requireHardware: true,
+    });
+    const start = h.engine.calls.find((c) => c.channel === 'engine.start')!;
+    expect(start.payload).toMatchObject({ region, cropToRegion: true, requireHardware: true });
+    h.clock.us = 2 * S;
+    await h.manager.stop();
+    const doc = await readProject(root);
+    expect(doc.recording?.source).toMatchObject({ widthPx: 640, heightPx: 360, region: null });
+    const screen = doc.timeline.tracks.find(
+      (t) => t.type === 'video' && t.layout.kind === 'screen',
+    );
+    expect(screen).toMatchObject({ layout: { crop: null } });
+  });
+
+  it('keeps the crop in the project when the region is not cropped at record time', async () => {
+    const region = { x: 100, y: 50, width: 640, height: 360 };
+    const h = harness({ pickRegion: () => Promise.resolve({ rect: region }) });
+    await startRecording(h, { ...CONFIG, captureMode: 'region' });
+    const start = h.engine.calls.find((c) => c.channel === 'engine.start')!;
+    expect(start.payload).not.toHaveProperty('cropToRegion');
+    expect(start.payload).not.toHaveProperty('requireHardware');
+    await h.manager.abort();
+  });
+});

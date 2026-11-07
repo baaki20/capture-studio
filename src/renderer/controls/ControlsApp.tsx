@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useState } from 'react';
 import { Meter } from '../common/Meter';
-import { formatElapsed, formatPercent } from '../common/recorder-format';
+import { formatPercent, formatTimer } from '../common/recorder-format';
 import styles from './ControlsApp.module.css';
 import {
   controlsReducer,
@@ -160,8 +160,12 @@ export function ControlsApp() {
         <span className={styles.status} data-testid="rec-status">
           {paused ? 'Paused' : 'Recording'}
         </span>
-        <span className={styles.elapsed} data-testid="elapsed" aria-label="Elapsed time">
-          {formatElapsed(elapsedNow(state, now))}
+        <span
+          className={styles.elapsed}
+          data-testid="elapsed"
+          aria-label={state.rec.limitUs ? 'Time left' : 'Elapsed time'}
+        >
+          {formatTimer(elapsedNow(state, now), state.rec.limitUs)}
         </span>
         <span
           className={`${styles.drops ?? ''} ${styles[drops.level] ?? ''}`}

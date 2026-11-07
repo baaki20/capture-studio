@@ -38,3 +38,17 @@ which microphone you will unplug in W4 (the USB headset); the choices are rememb
 
 Not automated: controls-window input latency (R1.22; the main-process event-loop delay is
 reported as a proxy) and whether the TTS phrase is audible in W2 (listen to the mic track).
+
+## Phase 2 additions (by hand; not in the harness yet)
+
+These need the real portal or a real display, so CI covers only their logic (unit tests) and the
+X11 paths (E2E under Xvfb). Do them before tagging 0.2.0 and note the result in
+`docs/verification/`.
+
+| #   | You do                                                                                                                                                                                                              | Expect                                                                                                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W11 | Setup: Window. Record; in the portal's Window tab pick a text editor. Resize it narrower, then wider and shorter, 5 s each. Stop.                                                                                   | Acceptance (f): the recording keeps its first size; after each resize the window is whole, centred, with black bars, never stretched or cut. No errors. |
+| W12 | Setup: Audio only, microphone and system audio on, Stop after 10 s. Record; play a sound.                                                                                                                           | No portal appears; it stops by itself at 10 s; the project has Voice and System audio tracks and no screen; the editor and an MP3 export play it.       |
+| W13 | Setup: Region, "Record only the region", When done: Export a small GIF. Record a 5 s region.                                                                                                                        | `media/screen.*` is the region's size; the GIF appears in the exports folder and the file manager shows it.                                             |
+| W14 | On a machine with VA-API: setup "Require a hardware encoder". Record 5 s. Then the same on a machine without one.                                                                                                   | With: `project.json` names a hardware encoder. Without: the recording does not start and the notice says no hardware encoder works.                     |
+| G   | Open a 4K project once its proxy is ready, on a real display. In the editor's DevTools run `csEditorDebug.resetPlaybackCounters(); csEditorDebug.play(0)`, wait 5 minutes, then `csEditorDebug.playbackCounters()`. | Acceptance (g): `video.late / video.requested` under 1 %. Under Xvfb this cannot be measured.                                                           |

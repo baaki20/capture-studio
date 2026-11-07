@@ -115,6 +115,7 @@ export function Settings() {
           >
             <option value="open-editor">Open the editor</option>
             <option value="show-in-library">Show in the library</option>
+            <option value="export-gif">Export a small GIF (quick GIF)</option>
           </select>
         </Field>
         <Field

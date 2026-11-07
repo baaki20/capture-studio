@@ -28,7 +28,8 @@ function errorText(e: unknown): string {
 
 /**
  * The project library (R1.27): list, open in the editor, rename, move to trash, reveal, open the
- * folder, and import an existing `.cstudio` folder (main shows the folder dialog).
+ * folder, import an existing `.cstudio` folder (main shows the folder dialog), and Pack (a zip
+ * without `cache/`) / Unpack (R2.34).
  */
 export function Library() {
   const api = window.captureStudio;
@@ -36,6 +37,8 @@ export function Library() {
   const [error, setError] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [imported, setImported] = useState<string | null>(null);
+  const [packing, setPacking] = useState<string | null>(null);
+  const [packed, setPacked] = useState<string | null>(null);
 
   const load = useCallback(() => {
     api.library.list().then(
@@ -69,6 +72,36 @@ export function Library() {
     );
   };
 
+  const unpackProject = () => {
+    setImported(null);
+    setPacked(null);
+    api.library.unpack().then(
+      (entry) => {
+        if (!entry) return;
+        setError(null);
+        setImported(entry.name);
+        load();
+      },
+      (e: unknown) => setError(ipcErrorMessage(e)),
+    );
+  };
+
+  const packProject = (id: string) => {
+    setPacked(null);
+    setPacking(id);
+    api.library
+      .pack(id)
+      .then(
+        (result) => {
+          if (!result) return;
+          setError(null);
+          setPacked(result.path.split(/[\\/]/).pop() ?? result.path);
+        },
+        (e: unknown) => setError(ipcErrorMessage(e)),
+      )
+      .finally(() => setPacking(null));
+  };
+
   const submitRename = () => {
     if (!renaming) return;
     const name = renaming.name.trim();
@@ -84,6 +117,9 @@ export function Library() {
           <button type="button" onClick={importProject} data-testid="library-import">
             Import…
           </button>
+          <button type="button" onClick={unpackProject} data-testid="library-unpack">
+            Unpack…
+          </button>
           <button type="button" onClick={() => act(api.library.openFolder())}>
             Open folder
           </button>
@@ -93,6 +129,11 @@ export function Library() {
       {imported ? (
         <p role="status" className={styles.muted}>
           Imported “{imported}”.
+        </p>
+      ) : null}
+      {packed ? (
+        <p role="status" className={styles.muted}>
+          Packed “{packed}”.
         </p>
       ) : null}
       {!entries ? (
@@ -158,6 +199,15 @@ export function Library() {
                 </button>
                 <button type="button" onClick={() => act(api.library.reveal(entry.id))}>
                   Reveal
+                </button>
+                <button
+                  type="button"
+                  disabled={
+                    packing !== null || entry.state === 'recording' || entry.state === 'finalizing'
+                  }
+                  onClick={() => packProject(entry.id)}
+                >
+                  {packing === entry.id ? 'Packing…' : 'Pack…'}
                 </button>
                 <button
                   type="button"

@@ -89,6 +89,10 @@ export interface ShellPreloadApi extends PreloadBase {
     /** Main's folder dialog; adds an existing `.cstudio` project. Null when cancelled. */
     import(): Promise<InvokeResponse<'library.import'>>;
     openFolder(): Promise<void>;
+    /** Main's save dialog, then a zip of the project; null when cancelled. */
+    pack(id: string): Promise<InvokeResponse<'library.pack'>>;
+    /** Main's open dialog, then the pack added to the library; null when cancelled. */
+    unpack(): Promise<InvokeResponse<'library.unpack'>>;
     onChanged(listener: () => void): Unsubscribe;
   };
   readonly project: {

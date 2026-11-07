@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 /**
  * Recorder UI end to end (step 11; R1.5–R1.12, R1.18, R1.27 thumbnails): the real app with the
  * setup panel, the controls window, the region picker and the whole recording pipeline.
@@ -375,6 +376,126 @@ test('region mode: the picker shows the frozen frame, selects in stream pixels, 
       .toEqual([]);
     const log = readFileSync(path.join(run.userData, 'logs', 'main.log'), 'utf8');
     expect(log).toContain('picking-region → countdown');
+  } finally {
+    await run.cleanup();
+  }
+});
+
+/** Codec and size of each stream of `file` ("h264 640x360", "opus"). */
+function probeStreams(file: string): string[] {
+  return execFileSync(
+    path.join(FFMPEG_DIR, 'ffprobe'),
+    ['-v', 'error', '-show_entries', 'stream=codec_name,width,height', '-of', 'csv=p=0', file],
+    { encoding: 'utf8' },
+  )
+    .trim()
+    .split('\n')
+    .map((line) =>
+      line
+        .split(',')
+        .filter(Boolean)
+        .join(' ')
+        .replace(/ (\d+) (\d+)$/, ' $1x$2'),
+    );
+}
+
+test('audio only with a fixed duration: no screen asked, stops by itself (R2.30, R2.32)', async () => {
+  test.setTimeout(120_000);
+  const run = await launch({ captureMode: 'audio-only', countdownSec: 0, durationLimitSec: 3 });
+  try {
+    const { app, shell } = run;
+    await chooseFakeDevices(shell);
+    await shell.getByTestId('record-button').click();
+    const controls = await windowFor(app, 'controls/index.html');
+    await expect(controls.getByTestId('elapsed')).toHaveAttribute('aria-label', 'Time left');
+    await expect(controls.getByTestId('elapsed')).toHaveText(/^−00:0[0-3]$/);
+    // Nobody presses Stop.
+    await expect(shell.getByTestId('completion-notice')).toBeVisible({ timeout: 60_000 });
+    const [folder] = readdirSync(run.projects).filter((n) => n.endsWith('.cstudio'));
+    const media = path.join(run.projects, folder!, 'media');
+    expect(readdirSync(media).filter((n) => n.endsWith('.mp4') || n.endsWith('.webm'))).toEqual([
+      expect.stringMatching(/^mic\./),
+    ]);
+    const doc = JSON.parse(
+      readFileSync(path.join(run.projects, folder!, 'project.json'), 'utf8'),
+    ) as {
+      recording: { durationUs: number };
+      media: { role: string }[];
+    };
+    expect(doc.media.map((m) => m.role)).toEqual(['microphone']);
+    expect(doc.recording.durationUs / 1e6).toBeGreaterThanOrEqual(2.9);
+    expect(doc.recording.durationUs / 1e6).toBeLessThan(5);
+  } finally {
+    await run.cleanup();
+  }
+});
+
+test('region cropped at record time, then a quick GIF (R2.31, R2.33)', async () => {
+  test.setTimeout(150_000);
+  const run = await launch({
+    captureMode: 'region',
+    cropAtRecord: true,
+    countdownSec: 0,
+    durationLimitSec: 2,
+    afterRecording: 'export-gif',
+  });
+  try {
+    const { app, shell } = run;
+    await app.evaluate(({ shell: s }) => {
+      // No file manager in the test: record what would be shown.
+      (globalThis as { shown?: string[] }).shown = [];
+      s.showItemInFolder = (p: string) => (globalThis as { shown?: string[] }).shown?.push(p);
+    });
+    await shell.getByTestId('record-button').click();
+    await waitPastAcquiring(shell);
+    const picker = await windowFor(app, 'picker/index.html');
+    const frame = picker.getByRole('img', { name: /frozen frame/ });
+    await expect
+      .poll(() => frame.evaluate((img: HTMLImageElement) => img.naturalWidth), { timeout: 15_000 })
+      .toBeGreaterThan(0);
+    const view = await picker.evaluate(() => ({
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    const x0 = Math.round(view.width * 0.25);
+    const y0 = Math.round(view.height * 0.25);
+    await picker.mouse.move(x0, y0);
+    await picker.mouse.down();
+    await picker.mouse.move(x0 + 240, y0 + 160, { steps: 6 });
+    await picker.mouse.up();
+    const [w, h] = ((await picker.getByTestId('region-size').textContent()) ?? '')
+      .split(' × ')
+      .map(Number);
+    await picker.waitForTimeout(600);
+    await picker.keyboard.press('Enter').catch((error: unknown) => {
+      if (!String(error).includes('closed')) throw error;
+    });
+
+    // Stops by itself after 2 s, then exports the GIF and shows it.
+    const exports = path.join(run.projects, 'Exports');
+    await expect
+      .poll(() => app.evaluate(() => (globalThis as { shown?: string[] }).shown ?? []), {
+        timeout: 90_000,
+      })
+      .toHaveLength(1);
+    const gifs = readdirSync(exports).filter((n) => n.endsWith('.gif'));
+    expect(gifs).toHaveLength(1);
+    expect(probeStreams(path.join(exports, gifs[0]!))[0]).toMatch(/^gif \d+x\d+$/);
+
+    // The screen file is the region itself, and the project has no crop.
+    const [folder] = readdirSync(run.projects).filter((n) => n.endsWith('.cstudio'));
+    const screen = readdirSync(path.join(run.projects, folder!, 'media')).find((n) =>
+      n.startsWith('screen.'),
+    );
+    expect(probeStreams(path.join(run.projects, folder!, 'media', screen!))[0]).toMatch(
+      new RegExp(` ${String(w)}x${String(h)}$`),
+    );
+    const doc = JSON.parse(
+      readFileSync(path.join(run.projects, folder!, 'project.json'), 'utf8'),
+    ) as {
+      recording: { source: { widthPx: number; heightPx: number; region: unknown } };
+    };
+    expect(doc.recording.source).toMatchObject({ widthPx: w, heightPx: h, region: null });
   } finally {
     await run.cleanup();
   }

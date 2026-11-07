@@ -9,6 +9,12 @@ const US_PER_SECOND = 1_000_000;
 export const METER_FLOOR_DB = -60;
 
 /** Elapsed recording time as `MM:SS`, or `H:MM:SS` from one hour on (whole seconds, floored). */
+/** The controls timer: elapsed time, or with a fixed duration the time left ("−04:59"). */
+export function formatTimer(elapsedUs: number, limitUs: number | null | undefined): string {
+  if (!limitUs) return formatElapsed(elapsedUs);
+  return `−${formatElapsed(Math.max(0, limitUs - elapsedUs) + US_PER_SECOND - 1)}`;
+}
+
 export function formatElapsed(us: number): string {
   const total = Math.max(0, Math.floor(us / US_PER_SECOND));
   const h = Math.floor(total / 3600);

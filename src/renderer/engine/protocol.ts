@@ -8,6 +8,7 @@
  * when the track ends or the encoder fails).
  */
 import type { EngineStreamStats, StreamKind } from '../../shared/ipc/contract';
+import type { NRect } from '../../shared/project/schema';
 import type { CalibrationSample } from '../../shared/recording/sync-calibrator';
 import type { Us } from '../../shared/time';
 import type {
@@ -39,6 +40,8 @@ export interface VideoInit extends InitBase {
   encoder: { name: string; hardware: boolean };
   sourceWidth: number;
   sourceHeight: number;
+  /** Crop at record time (P2): only this rect of the source, in source pixels, is encoded. */
+  crop: NRect | null;
 }
 
 export interface AudioInit extends InitBase {

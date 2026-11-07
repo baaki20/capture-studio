@@ -73,6 +73,7 @@ import { isActive, type RecordingState } from './recording/state-machine';
 import { SecretStore } from './secrets/secret-store';
 import { allowMediaCapture, installSecurityGuards, isAppUrl } from './security/web-security';
 import { SettingsStore } from './settings/store';
+import { exportQuickGif } from './recording/quick-gif';
 import { createTray, type AppTray, type TrayRecordingState } from './tray';
 import { startMediaUtility, type MediaUtilityHandle } from './utility-host';
 import { ControlsWindowHost } from './windows/controls';
@@ -228,8 +229,8 @@ function trayState(state: RecordingState): TrayRecordingState {
   return isActive(state) ? 'busy' : 'idle';
 }
 
-/** A folder dialog parented to the calling window; the chosen folder or null. */
-async function chooseDirectory(
+/** An open dialog (folder or file) parented to the calling window; the chosen path or null. */
+async function chooseOpenPath(
   senderId: number,
   options: Electron.OpenDialogOptions,
 ): Promise<string | null> {
@@ -386,7 +387,7 @@ async function start(): Promise<void> {
     chooseFolder: async (which, senderId) => {
       const current = settings.get()[which];
       await fs.mkdir(current, { recursive: true }).catch(() => undefined);
-      return chooseDirectory(senderId, {
+      return chooseOpenPath(senderId, {
         title: which === 'projectsDir' ? 'Projects folder' : 'Exports folder',
         defaultPath: current,
         properties: ['openDirectory', 'createDirectory'],
@@ -507,11 +508,12 @@ async function start(): Promise<void> {
     utility,
     engine: () => engine.ensure(),
     // Cancelling the portal returns to the panel without an error (R1.8).
-    selectScreen: () =>
+    selectScreen: (kind) =>
       selectScreenSource(
         (options) => desktopCapturer.getSources(options),
         {
           fps: settings.get().recorder.fps,
+          sourceType: kind,
           portal: usesPortal,
           ...screenPickerOptions({
             portal: usesPortal,
@@ -567,7 +569,25 @@ async function start(): Promise<void> {
         if (quitGuard.isQuitting) return;
         const openEditor = (): void => void editorHost.open(projectId);
         if (afterRecording === 'open-editor') openEditor();
-        else showShell();
+        else if (afterRecording === 'export-gif' && exportService) {
+          // Quick GIF: export the Small GIF and show it; the editor opens if that fails.
+          exportQuickGif(
+            { exports: exportService, showItemInFolder: (p) => shell.showItemInFolder(p) },
+            projectId,
+          ).then(
+            () => log.info(`recording: quick GIF of ${projectId} exported`),
+            (error: unknown) => {
+              log.warn('recording: quick GIF failed', error);
+              router.broadcast('rec.notice', {
+                id: `notice-gif-${projectId}`,
+                stream: null,
+                level: 'warning',
+                message: `The GIF could not be exported: ${error instanceof Error ? error.message : String(error)}`,
+              });
+              openEditor();
+            },
+          );
+        } else showShell();
         router.broadcast('rec.completed', { projectId, name, afterRecording });
         if (Notification.isSupported()) {
           const notification = new Notification({ title: 'Recording saved', body: name });
@@ -622,10 +642,30 @@ async function start(): Promise<void> {
       if (!enabled || !isActive(manager.state)) setSystemMonitor(enabled);
     },
     chooseImportFolder: (senderId) =>
-      chooseDirectory(senderId, {
+      chooseOpenPath(senderId, {
         title: 'Import a Capture Studio project (.cstudio folder)',
         defaultPath: settings.get().projectsDir,
         properties: ['openDirectory'],
+      }),
+    choosePackFile: async (senderId, defaultName) => {
+      const sender = webContents.fromId(senderId);
+      const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
+      const options: Electron.SaveDialogOptions = {
+        title: 'Pack project',
+        defaultPath: path.join(settings.get().exportsDir, defaultName),
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+        properties: ['showOverwriteConfirmation', 'createDirectory'],
+      };
+      const result = parent
+        ? await dialog.showSaveDialog(parent, options)
+        : await dialog.showSaveDialog(options);
+      return result.canceled || !result.filePath ? null : result.filePath;
+    },
+    chooseUnpackFile: (senderId) =>
+      chooseOpenPath(senderId, {
+        title: 'Unpack a packed project (.zip)',
+        properties: ['openFile'],
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
       }),
   });
 

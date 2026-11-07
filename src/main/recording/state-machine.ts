@@ -11,7 +11,7 @@ import type { RECORDING_STATES } from '../../shared/ipc/contract';
 export type RecordingState = (typeof RECORDING_STATES)[number];
 
 /** Why a recording went to finalizing (§4.3.1; `duration` arrives in P2). */
-export type StopReason = 'stop' | 'screen-ended' | 'disk-low';
+export type StopReason = 'stop' | 'screen-ended' | 'disk-low' | 'duration';
 
 export type RecordingEvent =
   | { type: 'configure' }

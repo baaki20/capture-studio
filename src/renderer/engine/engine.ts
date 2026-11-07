@@ -29,9 +29,11 @@ import {
 } from '../../shared/ipc/contract';
 import type { EnginePreloadApi } from '../../shared/ipc/preload-api';
 import type { CalibrationSample } from '../../shared/recording/sync-calibrator';
+import type { NRect } from '../../shared/project/schema';
 import type { Us } from '../../shared/time';
 import {
   audioEncoderConfig,
+  HARDWARE_CANDIDATES,
   selectVideoEncoder,
   type Quality,
   type SelectedVideoEncoder,
@@ -151,33 +153,40 @@ export class CaptureEngine {
     const acquisition: Acquisition = { tracks: new Map(), ended: new Set(), cleanup: [] };
     const warnings: AcquireWarning[] = [];
 
-    let screenStream: MediaStream;
-    try {
-      screenStream = await navigator.mediaDevices.getUserMedia(
-        screenConstraints(payload.screen) as unknown as MediaStreamConstraints,
-      );
-    } catch (error) {
-      if (isCancelError(error)) {
-        console.info(`engine: screen acquisition cancelled (${describeError(error)})`);
-        return { status: 'cancelled', screen: null, camera: null, mic: null, warnings };
+    // Audio-only mode (P2) asks for no screen.
+    let screenStream: MediaStream | null = null;
+    if (payload.screen) {
+      try {
+        screenStream = await navigator.mediaDevices.getUserMedia(
+          screenConstraints(payload.screen) as unknown as MediaStreamConstraints,
+        );
+      } catch (error) {
+        if (isCancelError(error)) {
+          console.info(`engine: screen acquisition cancelled (${describeError(error)})`);
+          return { status: 'cancelled', screen: null, camera: null, mic: null, warnings };
+        }
+        throw new Error(`screen capture failed: ${describeError(error)}`, { cause: error });
       }
-      throw new Error(`screen capture failed: ${describeError(error)}`, { cause: error });
     }
-    const screenTrack = firstTrack(screenStream, 'video');
-    screenTrack.contentHint = CONTENT_HINTS.screen;
+    const screenTrack = screenStream ? firstTrack(screenStream, 'video') : null;
+    if (screenTrack) screenTrack.contentHint = CONTENT_HINTS.screen;
     this.acquisition = acquisition;
 
     try {
       const [screen, camera, mic] = await Promise.all([
-        this.addVideo(acquisition, 'screen', screenStream, screenTrack, payload.screen.fps),
+        screenStream && screenTrack && payload.screen
+          ? this.addVideo(acquisition, 'screen', screenStream, screenTrack, payload.screen.fps)
+          : Promise.resolve(null),
         payload.camera
           ? this.openCamera(acquisition, payload.camera, warnings)
           : Promise.resolve(null),
         payload.mic ? this.openMic(acquisition, payload.mic, warnings) : Promise.resolve(null),
       ]);
       // Pre-select encoders with the real sizes; the warm-up result is cached for `start`.
-      const screenEncoder = await this.selectEncoder(screen, 'standard');
-      if (!screenEncoder.ok) throw new Error(screenEncoder.message);
+      if (screen) {
+        const screenEncoder = await this.selectEncoder(screen, 'standard');
+        if (!screenEncoder.ok) throw new Error(screenEncoder.message);
+      }
       let cameraInfo: TrackInfo | null = camera ? trackInfo(camera) : null;
       if (camera) {
         const cameraEncoder = await this.selectEncoder(camera, 'standard');
@@ -189,7 +198,7 @@ export class CaptureEngine {
       }
       return {
         status: 'ready',
-        screen: trackInfo(screen),
+        screen: screen ? trackInfo(screen) : null,
         camera: cameraInfo,
         mic: mic ? trackInfo(mic) : null,
         warnings,
@@ -309,14 +318,27 @@ export class CaptureEngine {
     for (const track of entry.stream.getTracks()) track.stop();
   }
 
+  /**
+   * The encoder for a track, sized for `crop` when the region is cropped at record time; only
+   * hardware candidates when `requireHardware` (P2).
+   */
   private async selectEncoder(
     video: VideoTrack,
     quality: Quality,
+    crop: NRect | null = null,
+    requireHardware = false,
   ): Promise<{ ok: true; selected: SelectedVideoEncoder } | { ok: false; message: string }> {
     const role: VideoStreamRole = video.kind;
     const result = await selectVideoEncoder(
-      { role, quality, sourceWidth: video.width, sourceHeight: video.height, fps: video.fps },
+      {
+        role,
+        quality,
+        sourceWidth: crop?.width ?? video.width,
+        sourceHeight: crop?.height ?? video.height,
+        fps: video.fps,
+      },
       this.probe,
+      requireHardware ? HARDWARE_CANDIDATES : undefined,
     );
     if (result.ok) {
       console.info(
@@ -326,7 +348,12 @@ export class CaptureEngine {
       return { ok: true, selected: result.value };
     }
     const tried = result.error.attempts.map((a) => `${a.candidate}: ${a.outcome}`).join(', ');
-    return { ok: false, message: `no usable ${video.kind} encoder (${tried})` };
+    return {
+      ok: false,
+      message: requireHardware
+        ? `no hardware ${video.kind} encoder works, and the setting requires one (${tried})`
+        : `no usable ${video.kind} encoder (${tried})`,
+    };
   }
 
   /** Stops every acquired track. */
@@ -415,12 +442,13 @@ export class CaptureEngine {
   async start(payload: StartPayload): Promise<StartResult> {
     if (this.session) throw new Error('engine.start: already recording');
     const acquisition = this.acquisition;
-    const screen = acquisition?.tracks.get('screen');
-    if (!acquisition || screen?.kind !== 'screen') {
+    if (!acquisition || acquisition.tracks.size === 0) {
       throw new Error('engine.start: nothing acquired');
     }
-    if (screen.track.readyState === 'ended')
+    const screen = acquisition.tracks.get('screen');
+    if (screen?.track.readyState === 'ended') {
       throw new Error('engine.start: the screen track ended');
+    }
 
     const ports = await this.waitForPorts(payload.sessionId);
     // Match ports to live tracks. A port without a live track is closed (an empty file).
@@ -435,7 +463,7 @@ export class CaptureEngine {
       }
       plan.push({ streamId: s.streamId, track, port: s.port });
     }
-    if (!plan.some((p) => p.track.kind === 'screen')) {
+    if (screen && !plan.some((p) => p.track.kind === 'screen')) {
       for (const p of plan) p.port.close();
       ports.clock?.close();
       throw new Error('engine.start: no stream port for the screen');
@@ -445,7 +473,14 @@ export class CaptureEngine {
     const encoders = new Map<string, SelectedVideoEncoder>();
     for (const p of plan) {
       if (p.track.kind === 'mic') continue;
-      const picked = await this.selectEncoder(p.track, payload.quality);
+      const crop =
+        p.track.kind === 'screen' && payload.cropToRegion && payload.region ? payload.region : null;
+      const picked = await this.selectEncoder(
+        p.track,
+        payload.quality,
+        crop,
+        payload.requireHardware ?? false,
+      );
       if (!picked.ok) {
         if (p.track.kind === 'screen') {
           for (const q of plan) q.port.close();
@@ -532,6 +567,10 @@ export class CaptureEngine {
         encoder: selected.encoder,
         sourceWidth: p.track.width,
         sourceHeight: p.track.height,
+        crop:
+          p.track.kind === 'screen' && payload.cropToRegion && payload.region
+            ? payload.region
+            : null,
       };
       this.launch(session, init, selected.encoder);
       streams.push({

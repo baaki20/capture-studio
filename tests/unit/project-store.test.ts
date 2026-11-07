@@ -379,4 +379,29 @@ describe('library', () => {
       expect((await library.list()).map((e) => e.id)).toEqual([b.id, a.id]);
     });
   });
+
+  it('packs a project and unpacks a copy with a new id (R2.34)', async () => {
+    const { library, projectsDir, a, setBusy } = await setup();
+    const root = path.join(projectsDir, 'Older lesson.cstudio');
+    await fs.mkdir(path.join(root, 'media'), { recursive: true });
+    await fs.writeFile(path.join(root, 'media', 'screen.mp4'), 'video bytes');
+    const zip = path.join(work, 'Older lesson.cstudio.zip');
+    setBusy([root]);
+    await expect(library.pack(a.id, zip)).rejects.toThrow();
+    setBusy([]);
+    expect(await library.pack(a.id, zip)).toMatchObject({ path: zip, files: 2 });
+
+    const copy = await library.unpack(zip);
+    expect(copy.name).toBe('Older lesson');
+    expect(copy.id).not.toBe(a.id);
+    const copyRoot = path.join(projectsDir, 'Older lesson (2).cstudio');
+    expect(await fs.readFile(path.join(copyRoot, 'media', 'screen.mp4'), 'utf8')).toBe(
+      'video bytes',
+    );
+    // The cache stays behind; the original keeps its id.
+    await expect(fs.stat(path.join(copyRoot, 'cache'))).rejects.toThrow();
+    const ids = (await library.list()).map((e) => e.id);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(copy.id);
+  });
 });

@@ -29,7 +29,19 @@ function configFrom(settings: Settings): RecorderConfig {
     fps: r.fps,
     quality: r.quality,
     countdownSec: r.countdownSec,
+    durationLimitSec: r.durationLimitSec,
+    cropAtRecord: r.cropAtRecord,
+    requireHardware: r.requireHardware,
+    afterRecording: r.afterRecording,
   };
+}
+
+/** Fixed-duration choices in seconds (0 = until stopped). */
+const DURATIONS = [0, 10, 30, 60, 120, 300, 600, 1800, 3600];
+
+function durationLabel(seconds: number): string {
+  if (seconds === 0) return 'Until stopped';
+  return seconds < 60 ? `${String(seconds)} s` : `${String(seconds / 60)} min`;
 }
 
 /** Last system-audio level from `rec.levels`, while the meter runs. */
@@ -207,7 +219,11 @@ export function NewRecording({ recState }: Props) {
       <fieldset className={styles.group} disabled={disabled}>
         <legend>Screen</legend>
         <p className={styles.muted}>
-          Always recorded. After Record, choose the screen in the system dialog.
+          {config.captureMode === 'audio-only'
+            ? 'No picture: only the microphone and system audio are recorded.'
+            : config.captureMode === 'window'
+              ? 'After Record, choose the window in the system dialog. If it is resized, the recording keeps its size with black bars.'
+              : 'After Record, choose the screen in the system dialog.'}
         </p>
         <div className={styles.choices} role="radiogroup" aria-label="Capture mode">
           <label>
@@ -228,7 +244,36 @@ export function NewRecording({ recState }: Props) {
             />
             Region
           </label>
+          <label>
+            <input
+              type="radio"
+              name="captureMode"
+              checked={config.captureMode === 'window'}
+              onChange={() => update({ captureMode: 'window' })}
+            />
+            Window
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="captureMode"
+              checked={config.captureMode === 'audio-only'}
+              onChange={() => update({ captureMode: 'audio-only' })}
+            />
+            Audio only
+          </label>
         </div>
+        {config.captureMode === 'region' ? (
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              data-testid="crop-at-record"
+              checked={config.cropAtRecord ?? false}
+              onChange={(e) => update({ cropAtRecord: e.target.checked })}
+            />
+            Record only the region (smaller files; the rest of the screen cannot be shown later)
+          </label>
+        ) : null}
       </fieldset>
 
       <div className={styles.columns}>
@@ -394,6 +439,45 @@ export function NewRecording({ recState }: Props) {
             <option value={3}>3 s</option>
             <option value={5}>5 s</option>
           </select>
+        </label>
+        <label className={styles.field}>
+          Stop after
+          <select
+            data-testid="duration-select"
+            value={config.durationLimitSec ?? 0}
+            onChange={(e) => update({ durationLimitSec: Number(e.target.value) })}
+          >
+            {DURATIONS.map((d) => (
+              <option key={d} value={d}>
+                {durationLabel(d)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.field}>
+          When done
+          <select
+            data-testid="after-select"
+            value={config.afterRecording ?? 'open-editor'}
+            onChange={(e) =>
+              update({
+                afterRecording: e.target.value as NonNullable<RecorderConfig['afterRecording']>,
+              })
+            }
+          >
+            <option value="open-editor">Open the editor</option>
+            <option value="show-in-library">Show in the library</option>
+            <option value="export-gif">Export a small GIF (quick GIF)</option>
+          </select>
+        </label>
+        <label className={styles.toggle}>
+          <input
+            type="checkbox"
+            data-testid="require-hardware"
+            checked={config.requireHardware ?? false}
+            onChange={(e) => update({ requireHardware: e.target.checked })}
+          />
+          Require a hardware encoder
         </label>
         <p className={styles.muted}>
           Screens larger than 2560 × 1440 are recorded scaled to fit 1440p.

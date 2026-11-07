@@ -115,6 +115,17 @@ const checkpoint = ([t, n]: readonly [number, number]): [number, number] => [
   Math.max(0, Math.round(n)),
 ];
 
+/** How often the fixed-duration limit is checked (P2). */
+const DURATION_CHECK_MS = 100;
+
+/** "90 s", "5 min", "1 h 30 min". */
+export function formatLimit(seconds: number): string {
+  if (seconds < 60 || seconds % 60 !== 0) return `${String(seconds)} s`;
+  const h = Math.floor(seconds / 3600);
+  const m = (seconds % 3600) / 60;
+  if (h === 0) return `${String(m)} min`;
+  return m === 0 ? `${String(h)} h` : `${String(h)} h ${String(m)} min`;
+}
 // ---------------------------------------------------------------------------------------------
 // Dependencies
 
@@ -178,7 +189,8 @@ export interface SessionManagerDeps {
   utility: UtilityLike;
   /** Resolves with the capture engine (created on demand). */
   engine: () => Promise<EngineLike>;
-  selectScreen: () => Promise<ScreenSource | null>;
+  /** The portal (or in-app picker) for a monitor or, in window mode, one window (P2). */
+  selectScreen: (kind: 'screen' | 'window') => Promise<ScreenSource | null>;
   /** Region mode (§4.3.7). Without a picker the last matching region (or full frame) is used. */
   pickRegion?: (source: { width: number; height: number }) => Promise<RegionChoice>;
   /**
@@ -245,7 +257,9 @@ interface Session {
   sessionId: string;
   config: RecorderConfig;
   engine: EngineLike;
-  source: ScreenSource & { widthPx: number; heightPx: number };
+  source: ScreenSource & { kind: 'monitor' | 'window'; widthPx: number; heightPx: number };
+  /** False in audio-only mode. */
+  hasScreen: boolean;
   labels: { camera: string | null; mic: string | null };
   hasCamera: boolean;
   hasMic: boolean;
@@ -288,6 +302,7 @@ export class SessionManager {
   private countdownCancel: (() => void) | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private disk: DiskMonitor | null = null;
+  private durationTimer: ReturnType<typeof setInterval> | null = null;
   /** The in-flight start, awaited by anything that must not overtake it. */
   private starting: Promise<void> | null = null;
   private finishing: Promise<void> | null = null;
@@ -423,22 +438,33 @@ export class SessionManager {
 
     let engine: EngineLike;
     let session: Session;
+    const audioOnly = config.captureMode === 'audio-only';
+    if (audioOnly && !config.micId && !(config.systemAudio && this.deps.systemAudioAvailable())) {
+      const text = 'Audio only needs a microphone or system audio.';
+      await this.failAndSettle(text);
+      return { status: 'failed', message: text };
+    }
     try {
       engine = await this.deps.engine();
-      const source = await this.deps.selectScreen();
+      // Audio only asks for no screen; the project still gets a canvas of this size.
+      const source = audioOnly
+        ? { sourceId: '', maxWidth: 1920, maxHeight: 1080 }
+        : await this.deps.selectScreen(config.captureMode === 'window' ? 'window' : 'screen');
       if (!source) return await this.portalCancelled(null);
       if (this.current() !== 'acquiring') return { status: 'cancelled' };
 
       const acquired = await engine.command(
         'engine.acquire',
         {
-          screen: {
-            sourceId: source.sourceId,
-            maxWidth: source.maxWidth,
-            maxHeight: source.maxHeight,
-            fps: config.fps,
-          },
-          camera: config.cameraId ? { deviceId: config.cameraId } : null,
+          screen: audioOnly
+            ? null
+            : {
+                sourceId: source.sourceId,
+                maxWidth: source.maxWidth,
+                maxHeight: source.maxHeight,
+                fps: config.fps,
+              },
+          camera: config.cameraId && !audioOnly ? { deviceId: config.cameraId } : null,
           mic: config.micId
             ? {
                 deviceId: config.micId,
@@ -450,7 +476,7 @@ export class SessionManager {
         },
         120_000,
       );
-      if (acquired.status === 'cancelled' || !acquired.screen) {
+      if (acquired.status === 'cancelled' || (!acquired.screen && !audioOnly)) {
         return await this.portalCancelled(engine);
       }
       if (this.current() !== 'acquiring') {
@@ -461,7 +487,7 @@ export class SessionManager {
         const label = acquired.warnings?.find((w) => w.kind === kind)?.label;
         return label ? ` (${label})` : '';
       };
-      if (config.cameraId && !acquired.camera)
+      if (config.cameraId && !audioOnly && !acquired.camera)
         this.notice(
           'warning',
           `The camera${named('camera')} could not be opened; recording without it.`,
@@ -480,9 +506,11 @@ export class SessionManager {
         engine,
         source: {
           ...source,
-          widthPx: acquired.screen.width ?? source.maxWidth,
-          heightPx: acquired.screen.height ?? source.maxHeight,
+          kind: config.captureMode === 'window' ? 'window' : 'monitor',
+          widthPx: acquired.screen?.width ?? source.maxWidth,
+          heightPx: acquired.screen?.height ?? source.maxHeight,
         },
+        hasScreen: acquired.screen !== null,
         labels: { camera: acquired.camera?.label ?? null, mic: acquired.mic?.label ?? null },
         hasCamera: acquired.camera !== null,
         hasMic: acquired.mic !== null,
@@ -771,6 +799,9 @@ export class SessionManager {
       elapsedUs: this.elapsedUs(),
       countdownRemainingSec: this.stateValue === 'countdown' ? this.countdownRemaining : null,
       failureReason: failureReason ?? (this.stateValue === 'failed' ? this.lastFailure : null),
+      limitUs: this.session
+        ? this.recorderOption(this.session, 'durationLimitSec') * 1e6 || null
+        : null,
     };
   }
 
@@ -935,7 +966,7 @@ export class SessionManager {
     // A main-side handshake runs alongside, as the fallback offset.
     const mainOffset = this.deps.utility.measureClockOffset().catch(() => null);
 
-    const kinds: StreamKind[] = ['screen'];
+    const kinds: StreamKind[] = session.hasScreen ? ['screen'] : [];
     if (session.hasCamera) kinds.push('camera');
     if (session.hasMic) kinds.push('mic');
     const created = kinds.map((kind) => this.newStream(session, kind));
@@ -957,11 +988,14 @@ export class SessionManager {
       [...ports, clockPort],
     );
 
+    const cropped = this.cropsAtRecord(session);
     const started = await session.engine.command('engine.start', {
       sessionId: session.sessionId,
       quality: session.config.quality,
       fps: session.config.fps,
       region: session.region,
+      ...(cropped ? { cropToRegion: true } : {}),
+      ...(this.recorderOption(session, 'requireHardware') ? { requireHardware: true } : {}),
     });
     session.t0Us = started.t0Us;
     session.mainStartUs = this.mainNowUs();
@@ -1099,6 +1133,19 @@ export class SessionManager {
 
   private startTimers(session: Session, settings: Settings): void {
     this.stopTimers();
+    const limitSec = this.recorderOption(session, 'durationLimitSec');
+    if (limitSec > 0) {
+      // Fixed duration (P2): stop once the recorded time (pauses excluded) reaches the limit.
+      this.durationTimer = setInterval(() => {
+        if (this.stateValue !== 'recording' || this.elapsedUs() < limitSec * 1_000_000) return;
+        if (this.durationTimer) clearInterval(this.durationTimer);
+        this.durationTimer = null;
+        this.notice('info', `The recording stopped after ${formatLimit(limitSec)}.`);
+        void this.stop('duration').catch((error: unknown) =>
+          this.logger.error('recording: stop at the time limit failed', error),
+        );
+      }, DURATION_CHECK_MS);
+    }
     this.heartbeat = setInterval(() => {
       void this.writeHeartbeat(session);
       void this.writeLog(session);
@@ -1133,6 +1180,8 @@ export class SessionManager {
     this.heartbeat = null;
     this.disk?.stop();
     this.disk = null;
+    if (this.durationTimer) clearInterval(this.durationTimer);
+    this.durationTimer = null;
   }
 
   /**
@@ -1248,18 +1297,54 @@ export class SessionManager {
         startedAt: session.startedAt ?? this.now().toISOString(),
         durationUs,
         pauses,
-        source: {
-          kind: 'monitor',
-          ...(session.source.label ? { label: session.source.label } : {}),
-          widthPx: session.source.widthPx,
-          heightPx: session.source.heightPx,
-          region: session.region,
-        },
+        source: this.manifestSource(session),
         platform: this.deps.platform(),
       },
       frameRate: session.config.fps,
       streams,
     };
+  }
+
+  /**
+   * The recorded source for `project.json`. Cropped at record time, the media already is the
+   * region: the source is its size and the project has no crop.
+   */
+  private manifestSource(session: Session): RecordingManifest['recording']['source'] {
+    const label = session.source.label ? { label: session.source.label } : {};
+    const region = session.region;
+    if (region && this.cropsAtRecord(session)) {
+      return {
+        kind: session.source.kind,
+        ...label,
+        widthPx: region.width,
+        heightPx: region.height,
+        region: null,
+      };
+    }
+    return {
+      kind: session.source.kind,
+      ...label,
+      widthPx: session.source.widthPx,
+      heightPx: session.source.heightPx,
+      region,
+    };
+  }
+
+  /** Region mode with "crop at record time" and a region smaller than the frame. */
+  private cropsAtRecord(session: Session): boolean {
+    return (
+      session.region !== null &&
+      session.config.captureMode === 'region' &&
+      this.recorderOption(session, 'cropAtRecord')
+    );
+  }
+
+  /** A P2 recorder option: the session's choice, else the saved setting. */
+  private recorderOption<K extends 'cropAtRecord' | 'requireHardware' | 'durationLimitSec'>(
+    session: Session,
+    key: K,
+  ): NonNullable<RecorderConfig[K]> {
+    return session.config[key] ?? this.deps.settings.get().recorder[key];
   }
 
   /** Streams as known while recording (no durations yet). */

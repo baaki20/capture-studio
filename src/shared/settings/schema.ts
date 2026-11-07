@@ -34,7 +34,11 @@ export const SettingsV1Schema = z.object({
   /** The persisted `%i` counter for name patterns. */
   nameIncrement: z.int().nonnegative(),
   recorder: z.object({
-    captureMode: z.enum(['fullscreen', 'region']),
+    /**
+     * `window` records one window (the portal's window tab; letterboxed if it resizes) and
+     * `audio-only` records no picture (P2, R2.29–R2.30).
+     */
+    captureMode: z.enum(['fullscreen', 'region', 'window', 'audio-only']),
     cameraId: z.string().nullable(),
     micId: z.string().nullable(),
     systemAudio: z.boolean(),
@@ -44,9 +48,16 @@ export const SettingsV1Schema = z.object({
     countdownSec: z.literal([0, 3, 5]),
     /** `auto`: minimize when `ui.excludeFromCapture` is unavailable (R1.11). */
     minimizeControlsOnStart: z.enum(['auto', 'on', 'off']),
-    afterRecording: z.enum(['open-editor', 'show-in-library']),
+    /** `export-gif`: the quick-GIF workflow (P2): export a Small GIF and show it. */
+    afterRecording: z.enum(['open-editor', 'show-in-library', 'export-gif']),
     /** Abort asks for confirmation in the controls window and the tray (R1.12; added later). */
     confirmAbort: z.boolean().default(true),
+    /** Stop after this many seconds of recording (pauses excluded); 0 = no limit (P2). */
+    durationLimitSec: z.int().min(0).max(86_400).default(0),
+    /** Region mode: record only the region (smaller files) instead of cropping later (P2). */
+    cropAtRecord: z.boolean().default(false),
+    /** Fail instead of recording with a software encoder when no hardware one works (P2). */
+    requireHardware: z.boolean().default(false),
     lastRegion: z
       .object({
         sourceWidth: z.int().positive(),
@@ -103,6 +114,9 @@ export function createDefaultSettings(paths: SettingsPathDefaults): Settings {
       minimizeControlsOnStart: 'auto',
       afterRecording: 'open-editor',
       confirmAbort: true,
+      durationLimitSec: 0,
+      cropAtRecord: false,
+      requireHardware: false,
       lastRegion: null,
     },
     export: { preset: 'standard', encoder: 'auto' },

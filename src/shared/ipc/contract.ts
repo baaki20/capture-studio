@@ -53,6 +53,9 @@ export const SettingsPatchSchema = z.strictObject({
       minimizeControlsOnStart: R.minimizeControlsOnStart.optional(),
       afterRecording: R.afterRecording.optional(),
       confirmAbort: z.boolean().optional(),
+      durationLimitSec: z.int().min(0).max(86_400).optional(),
+      cropAtRecord: z.boolean().optional(),
+      requireHardware: z.boolean().optional(),
       lastRegion: R.lastRegion.optional(),
     })
     .optional(),
@@ -75,6 +78,11 @@ export const RecorderConfigSchema = z.strictObject({
   fps: R.fps,
   quality: R.quality,
   countdownSec: R.countdownSec,
+  /** P2 (optional for older callers; settings fill them): see the settings schema. */
+  durationLimitSec: z.int().min(0).max(86_400).optional(),
+  cropAtRecord: z.boolean().optional(),
+  requireHardware: z.boolean().optional(),
+  afterRecording: R.afterRecording.optional(),
 });
 export type RecorderConfig = z.infer<typeof RecorderConfigSchema>;
 
@@ -106,6 +114,8 @@ export const RecStateEventSchema = z.object({
   elapsedUs: z.number().nonnegative(),
   countdownRemainingSec: z.int().nonnegative().nullable(),
   failureReason: z.string().nullable(),
+  /** Fixed-duration recording (P2): the limit, so the timer can count down. */
+  limitUs: z.number().positive().nullable().optional(),
 });
 
 export const RecStatsEventSchema = z.object({
@@ -434,6 +444,14 @@ export const INVOKE_CHANNELS = {
   'library.import': invoke(NoPayload, LibraryEntrySchema.nullable(), SHELL),
   /** Opens the projects folder in the file manager. */
   'library.openFolder': invoke(NoPayload, z.undefined(), SHELL),
+  /** Pack (R2.34): main's save dialog, then a zip of the project without `cache/`. */
+  'library.pack': invoke(
+    z.strictObject({ id: Id }),
+    z.object({ path: z.string(), files: z.int(), bytes: z.number() }).nullable(),
+    SHELL,
+  ),
+  /** Unpack: main's open dialog, then the pack extracted into the projects folder. */
+  'library.unpack': invoke(NoPayload, LibraryEntrySchema.nullable(), SHELL),
 
   'project.open': invoke(z.strictObject({ id: Id }), ProjectOpenResultSchema, ['shell', 'editor']),
   /** Opens the project in an editor window (one per project; focuses an open one). */
@@ -563,14 +581,17 @@ export type EventPayload<C extends EventChannel> = z.output<(typeof EVENT_CHANNE
 // Capture engine channels
 
 export const EngineAcquireSchema = z.strictObject({
-  screen: z.strictObject({
-    /** `desktopCapturer` source id from main (§9.1). */
-    sourceId: z.string().min(1),
-    /** Always passed; Chromium otherwise caps at 1920×1080 (§9.1). */
-    maxWidth: z.int().positive(),
-    maxHeight: z.int().positive(),
-    fps: z.literal([30, 60]),
-  }),
+  /** Null in audio-only mode (P2): no portal, no screen stream. */
+  screen: z
+    .strictObject({
+      /** `desktopCapturer` source id from main (§9.1). */
+      sourceId: z.string().min(1),
+      /** Always passed; Chromium otherwise caps at 1920×1080 (§9.1). */
+      maxWidth: z.int().positive(),
+      maxHeight: z.int().positive(),
+      fps: z.literal([30, 60]),
+    })
+    .nullable(),
   camera: z.strictObject({ deviceId: z.string().min(1) }).nullable(),
   mic: z
     .strictObject({
@@ -615,6 +636,10 @@ export const EngineStartSchema = z.strictObject({
   quality: z.enum(['standard', 'high']),
   fps: z.literal([30, 60]),
   region: NRectSchema.nullable(),
+  /** P2: encode only `region` (crop at record time) instead of the full frame. */
+  cropToRegion: z.boolean().optional(),
+  /** P2: fail when no hardware video encoder works, instead of using a software one. */
+  requireHardware: z.boolean().optional(),
 });
 
 /** `[sessionUs, cumulativeSamples]` drift checkpoint (§1.5, `media/<x>.sync.json`). */

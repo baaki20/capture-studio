@@ -29,7 +29,9 @@ export interface DesktopVideoConstraints {
   };
 }
 
-export function screenConstraints(screen: AcquirePayload['screen']): DesktopVideoConstraints {
+export function screenConstraints(
+  screen: NonNullable<AcquirePayload['screen']>,
+): DesktopVideoConstraints {
   return {
     audio: false,
     video: {

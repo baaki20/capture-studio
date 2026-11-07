@@ -17,6 +17,7 @@
  * camera: 28 → 12 fps). The camera never goes still, so it keeps nothing.
  */
 import { CheckpointLog, VIDEO_SYNC_RATE } from '../../../shared/recording/drift';
+import { clampCrop, letterboxRect } from '../../../shared/recording/region';
 import { FrameRateMeter } from '../encoder-select';
 import { PauseSchedule } from '../pipeline/pause-gate';
 import { sessionNowUs } from '../pipeline/clock';
@@ -132,8 +133,39 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
       this.still = new OffscreenCanvas(width, height).getContext('2d');
       if (!this.still) return;
     }
-    this.still.drawImage(frame, 0, 0, width, height);
+    this.draw(this.still, frame);
     this.last = { fileUs, arrivalUs };
+  }
+
+  /**
+   * Draws `frame` into a canvas of the encoder size: the crop (crop at record time) or the whole
+   * frame, scaled to fit and centred. A window resized mid-recording keeps its aspect ratio
+   * inside black bars instead of being stretched (P2, acceptance f).
+   */
+  private draw(context: OffscreenCanvasRenderingContext2D, frame: VideoFrame): void {
+    const { width, height } = this.video.config;
+    const size = { width: frame.displayWidth, height: frame.displayHeight };
+    const source = (this.video.crop && clampCrop(this.video.crop, size)) ?? {
+      x: 0,
+      y: 0,
+      ...size,
+    };
+    const target = letterboxRect(source, { width, height });
+    if (target.width !== width || target.height !== height) {
+      context.fillStyle = '#000';
+      context.fillRect(0, 0, width, height);
+    }
+    context.drawImage(
+      frame,
+      source.x,
+      source.y,
+      source.width,
+      source.height,
+      target.x,
+      target.y,
+      target.width,
+      target.height,
+    );
   }
 
   /** Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`. */
@@ -166,18 +198,21 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     }
   }
 
-  /** A frame at file time `fileUs`, scaled to the encoder size when the source differs. */
+  /**
+   * A frame at file time `fileUs`, drawn at the encoder size when the source differs (scaled,
+   * cropped, or letterboxed after a window resize).
+   */
   private prepare(frame: VideoFrame, fileUs: number): VideoFrame {
     const { width, height } = this.video.config;
     const init = { timestamp: fileUs, duration: frame.duration ?? this.frameDurationUs };
-    if (frame.displayWidth === width && frame.displayHeight === height) {
+    if (!this.video.crop && frame.displayWidth === width && frame.displayHeight === height) {
       return new VideoFrame(frame, init);
     }
     if (!this.scaler) {
       this.scaler = new OffscreenCanvas(width, height).getContext('2d');
       if (!this.scaler) throw new Error('no 2D context for scaling');
     }
-    this.scaler.drawImage(frame, 0, 0, width, height);
+    this.draw(this.scaler, frame);
     return new VideoFrame(this.scaler.canvas, init);
   }
 

@@ -34,7 +34,7 @@ export type ChooseSource = (
 ) => Promise<string | null>;
 
 export type GetSources = (options: {
-  types: 'screen'[];
+  types: ('screen' | 'window')[];
   thumbnailSize: { width: number; height: number };
   fetchWindowIcons: boolean;
 }) => Promise<DesktopSourceLike[]>;
@@ -44,13 +44,15 @@ export type ScreenPick =
       status: 'selected';
       source: DesktopSourceLike;
       /** Ready to pass as `engine.acquire`'s `screen`. */
-      screen: EngineCommandPayload<'engine.acquire'>['screen'];
+      screen: NonNullable<EngineCommandPayload<'engine.acquire'>['screen']>;
     }
   | { status: 'cancelled' }
   | { status: 'failed'; message: string };
 
 export interface PickScreenOptions {
   fps: 30 | 60;
+  /** `window`: one window (the portal's window tab, or the window list without a portal; P2). */
+  sourceType?: 'screen' | 'window';
   /** X11 only: keep the user's previous monitor when it is still listed. */
   preferredSourceId?: string;
   /**
@@ -122,7 +124,7 @@ export async function pickScreenSource(
   let sources: DesktopSourceLike[];
   try {
     sources = await getSources({
-      types: ['screen'],
+      types: [options.sourceType ?? 'screen'],
       // Thumbnails only for the in-app picker: they cost a capture per monitor, and the portal
       // shows its own preview.
       thumbnailSize: canAsk ? { ...PICKER_THUMBNAIL_SIZE } : { width: 0, height: 0 },

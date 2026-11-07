@@ -85,6 +85,11 @@ export const VIDEO_CANDIDATES: readonly VideoCandidate[] = [
 ];
 
 /** §8: Phase 1 records up to 1440p. */
+/** Only the hardware candidates, for "require the hardware encoder" (P2). */
+export const HARDWARE_CANDIDATES: readonly VideoCandidate[] = VIDEO_CANDIDATES.filter(
+  (c) => c.hardwareAcceleration === 'prefer-hardware',
+);
+
 export const MAX_RECORD_SIZE = { width: 2560, height: 1440 } as const;
 
 const MBPS = 1_000_000;

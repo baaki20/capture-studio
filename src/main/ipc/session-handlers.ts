@@ -2,6 +2,7 @@
  * Handlers for the recording, library, project and recovery channels (§4.3.11, steps 10, 12 and
  * 13). Each forwards to its module; errors reach the renderer as rejected invokes.
  */
+import path from 'node:path';
 import type { Logger } from '../../shared/logger';
 import { checkMediaPresence } from '../projects/editor-media';
 import type { Library } from '../projects/library';
@@ -24,6 +25,10 @@ export interface SessionHandlerDeps {
   monitorSystem: (enabled: boolean) => void;
   /** Library → Import: main's folder dialog; null when cancelled (R1.27). */
   chooseImportFolder?: (senderId: number) => Promise<string | null>;
+  /** Library → Pack: main's save dialog for the zip (default name given); null when cancelled. */
+  choosePackFile?: (senderId: number, defaultName: string) => Promise<string | null>;
+  /** Library → Unpack: main's open dialog for a zip; null when cancelled. */
+  chooseUnpackFile?: (senderId: number) => Promise<string | null>;
 }
 
 /** Invoke channels without a result answer `undefined`. */
@@ -75,6 +80,22 @@ export function registerSessionHandlers(deps: SessionHandlerDeps): void {
     const folder = await deps.chooseImportFolder?.(context.senderId);
     if (!folder) return null;
     const entry = await library.importFolder(folder);
+    deps.libraryChanged();
+    return entry;
+  });
+
+  router.handle('library.pack', async ({ id }, context) => {
+    const root = await library.findRoot(id);
+    if (!root) throw new Error(`project ${id} was not found`);
+    const chosen = await deps.choosePackFile?.(context.senderId, `${path.basename(root)}.zip`);
+    if (!chosen) return null;
+    const output = path.extname(chosen).toLowerCase() === '.zip' ? chosen : `${chosen}.zip`;
+    return library.pack(id, output);
+  });
+  router.handle('library.unpack', async (_payload, context) => {
+    const file = await deps.chooseUnpackFile?.(context.senderId);
+    if (!file) return null;
+    const entry = await library.unpack(file);
     deps.libraryChanged();
     return entry;
   });
