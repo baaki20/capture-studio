@@ -315,6 +315,31 @@ export function registerTools(server: McpServer, app: AppApi): void {
   stepTool(
     server,
     app,
+    'set_clip_audio',
+    'clipAudio',
+    'Sets audio clips’ own gain (on top of the track volume) and fade in/out.',
+    () => 'Change clip audio',
+  );
+  stepTool(
+    server,
+    app,
+    'set_volume_keyframe',
+    'volumeKeyframe',
+    'Sets or removes a volume keyframe of an audio track: dB from that time, eased to the next keyframe (two keyframes make a fade). get_project lists them.',
+    (a) =>
+      a.remove ? `Remove volume keyframe at ${show(a.at)}` : `Volume keyframe at ${show(a.at)}`,
+  );
+  stepTool(
+    server,
+    app,
+    'set_audio_cleanup',
+    'audioCleanup',
+    'Audio cleanup for a track: noise reduction, loudness normalization of the export (−16 LUFS), and ducking (go quieter under a voice track while it speaks).',
+    (a) => `Audio cleanup ${a.track}`,
+  );
+  stepTool(
+    server,
+    app,
     'set_speed',
     'speed',
     'Plays a time range faster or slower (0.25–4×) on every unlocked track, so face, voice and screen stay in sync; audio keeps its pitch. Everything after the range moves with it.',

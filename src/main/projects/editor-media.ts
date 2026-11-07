@@ -8,8 +8,9 @@
  *   while the shared queue generates it (a missing cache is queued here, never twice), and
  *   `unavailable` when it cannot (wrong kind, missing media, failed job). The editor polls while
  *   pending, so the timeline stays usable meanwhile.
- * - **Audio renders.** `audioRender()` answers the same way for a sped-up clip's audio, rendered
- *   on demand into `cache/audio/` for the preview (R2.18).
+ * - **Audio renders.** `audioRender()` answers the same way for a media's cleaned audio (noise
+ *   reduction, R2.14) and for a sped-up clip's audio (R2.18), rendered on demand into
+ *   `cache/audio/` for the preview.
  * - **Offline media.** `checkMediaPresence` sets `status: 'missing'` on media whose file is gone,
  *   unreadable or damaged (`media-check.ts`), and back to `ok` when a usable file is there again,
  *   in the document `project.open` returns; it also says why each one is offline.
@@ -21,11 +22,9 @@ import path from 'node:path';
 import type { OfflineMedia } from '../../shared/ipc/contract';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
-import {
-  audioRenderKey,
-  audioRenderPath,
-  type AudioRenderSpec,
-} from '../../shared/project/audio-speed';
+import type { AudioRenderRequest } from '../../shared/ipc/contract';
+import { cleanedAudioPath } from '../../shared/project/audio-cleanup';
+import { audioRenderKey, audioRenderPath } from '../../shared/project/audio-speed';
 import type { Media, Project } from '../../shared/project/schema';
 import {
   assetRelativePath,
@@ -165,31 +164,58 @@ export class EditorMedia {
    * `media.audioRender` (R2.18): the preview's render of an audio media's file range at a clip's
    * speed (`cache/audio/<key>.wav`), queued on first request; `pending` until it is written.
    */
-  async audioRender(projectId: string, spec: AudioRenderSpec): Promise<AssetResult> {
+  async audioRender(projectId: string, request: AudioRenderRequest): Promise<AssetResult> {
     const unavailable = { status: 'unavailable', url: null } as const;
+    const pending = { status: 'pending', url: null } as const;
     const root = await this.options.findRoot(projectId);
     if (!root) return unavailable;
     const loaded = await this.options.store.read(root);
-    const media = loaded?.doc.media.find((m) => m.id === spec.mediaId);
+    const media = loaded?.doc.media.find((m) => m.id === request.mediaId);
     if (!loaded || media?.kind !== 'audio') return unavailable;
-    if (spec.fileStartUs < 0 || spec.fileEndUs <= spec.fileStartUs) return unavailable;
-    const key = audioRenderKey(spec);
-    const relative = audioRenderPath(key);
     const projectKey = loaded.doc.id;
-    if (this.caches.isAudioRenderPending(projectKey, key)) return { status: 'pending', url: null };
-    const file = path.join(root, ...relative.split('/'));
-    if (await isFile(file)) return { status: 'ready', url: mediaUrl(projectKey, relative) };
-    if (this.caches.hasAudioRenderFailed(projectKey, key)) return unavailable;
-    if (!(await isFile(path.join(root, ...media.path.split('/'))))) return unavailable;
-    void this.caches.ensureAudioRender(
-      { projectId: projectKey, root, mediaPath: media.path, key, output: file },
-      {
-        startSeconds: spec.fileStartUs / 1_000_000,
-        endSeconds: spec.fileEndUs / 1_000_000,
-        speed: spec.speed,
-      },
-    );
-    return { status: 'pending', url: null };
+    const noise = request.noise ?? 'off';
+    const original = path.join(root, ...media.path.split('/'));
+    if (!(await isFile(original))) return unavailable;
+
+    /** One cache file: ready, or queued (once) and pending. */
+    const ensure = async (
+      key: string,
+      relative: string,
+      job: (output: string) => Parameters<CacheJobs['ensureAudioRender']>[1],
+    ): Promise<AssetResult> => {
+      if (this.caches.isAudioRenderPending(projectKey, key)) return pending;
+      const file = path.join(root, ...relative.split('/'));
+      if (await isFile(file)) return { status: 'ready', url: mediaUrl(projectKey, relative) };
+      if (this.caches.hasAudioRenderFailed(projectKey, key)) return unavailable;
+      void this.caches.ensureAudioRender({ projectId: projectKey, key }, job(file));
+      return pending;
+    };
+
+    // The cleaned audio first (a sped-up render of a cleaned track starts from it).
+    let input = original;
+    if (noise !== 'off') {
+      const relative = cleanedAudioPath(media.id, noise);
+      const cleaned = await ensure(`${media.id}-clean-${noise}`, relative, (output) => ({
+        kind: 'cleanAudio',
+        input: original,
+        output,
+        noise,
+      }));
+      if (cleaned.status !== 'ready' || !request.range) return cleaned;
+      input = path.join(root, ...relative.split('/'));
+    }
+    const range = request.range;
+    if (!range) return unavailable;
+    if (range.fileStartUs < 0 || range.fileEndUs <= range.fileStartUs) return unavailable;
+    const key = audioRenderKey({ mediaId: media.id, noise, ...range });
+    return ensure(key, audioRenderPath(key), (output) => ({
+      kind: 'audioRender',
+      input,
+      output,
+      startSeconds: range.fileStartUs / 1_000_000,
+      endSeconds: range.fileEndUs / 1_000_000,
+      speed: range.speed,
+    }));
   }
 
   /** `project.relink`: replaces an offline media file with one the user picks. */

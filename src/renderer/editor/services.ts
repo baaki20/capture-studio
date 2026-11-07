@@ -63,7 +63,12 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
   const assets = new MediaAssets(api.media, projectId);
   const preview = new PreviewHub();
   const context = new AudioContext({ latencyHint: 'interactive', sampleRate: 48_000 });
-  const scheduler = new AudioScheduler(context, { openSource: openAudioSource });
+  const scheduler = new AudioScheduler(context, {
+    openSource: openAudioSource,
+    peaksOf: (mediaId) => assets.peaks.get(mediaId) ?? null,
+  });
+  // Ducking follows the voice's peaks: recompute envelopes when they load.
+  const offAssetsForEnvelopes = assets.onChange(() => scheduler.refreshEnvelopes());
   const renders = new AudioRenders(api.media, projectId);
   const offRenders = renders.onChange((ready) => scheduler.setRenders(ready));
   const playback = new Playback({
@@ -110,6 +115,7 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
       void context.close();
       assets.dispose();
       offRenders();
+      offAssetsForEnvelopes();
       renders.dispose();
       void autosave.flush().finally(() => autosave.dispose());
     },

@@ -35,7 +35,8 @@ export const EDGE_GRAB_PX = 6;
 export const SNAP_PX = 8;
 /**
  * Keyframe lanes: a strip at the bottom of a row, and the grab distance. The face row shows its
- * layout keyframes (R2.1), the screen row the camera's zoom keyframes (R2.9).
+ * layout keyframes (R2.1), the screen row the camera's zoom keyframes (R2.9), an audio row its
+ * volume keyframes (R2.13).
  */
 export const KEYFRAME_LANE_PX = 14;
 export const KEYFRAME_GRAB_PX = 6;
@@ -131,7 +132,7 @@ export function objectBarTop(row: ObjectRow, objectId: string): number {
   return row.top + 3 + (row.lanes.get(objectId) ?? 0) * OBJECT_LANE_PX;
 }
 
-export type KeyframeLane = 'layout' | 'camera';
+export type KeyframeLane = 'layout' | 'camera' | 'volume';
 
 /** A keyframe in a lane: the face track's layout keyframe, or a camera keyframe. */
 export interface LaneKeyframe {
@@ -262,7 +263,7 @@ export function hitTest(
 /** Which keyframes a row's lane shows: the face's layout, the camera on the screen row. */
 export function rowLane(row: Row): KeyframeLane | null {
   const track = row.track;
-  if (track.type !== 'video') return null;
+  if (track.type === 'audio') return (track.volumeKeyframes?.length ?? 0) > 0 ? 'volume' : null;
   if (track.layout.kind === 'overlay') return 'layout';
   return row.cameraKeys ? 'camera' : null;
 }
@@ -275,11 +276,17 @@ export function rowKeyframes(row: Row): readonly number[] {
   if (lane === 'layout' && track.type === 'video') {
     return (track.layoutKeyframes ?? []).map((k) => k.tUs);
   }
+  if (lane === 'volume' && track.type === 'audio') {
+    return (track.volumeKeyframes ?? []).map((k) => k.tUs);
+  }
   return [];
 }
 
 /** The operation that moves a lane keyframe to `toUs`. */
 export function moveKeyframeOp(key: LaneKeyframe, toUs: number): TimelineOp {
+  if (key.lane === 'volume') {
+    return { type: 'moveVolumeKeyframe', trackId: key.trackId, fromUs: key.tUs, toUs };
+  }
   return key.lane === 'camera'
     ? { type: 'moveCameraKeyframe', fromUs: key.tUs, toUs }
     : { type: 'moveLayoutKeyframe', trackId: key.trackId, fromUs: key.tUs, toUs };
@@ -287,6 +294,9 @@ export function moveKeyframeOp(key: LaneKeyframe, toUs: number): TimelineOp {
 
 /** The operation that deletes a lane keyframe. */
 export function removeKeyframeOp(key: LaneKeyframe): TimelineOp {
+  if (key.lane === 'volume') {
+    return { type: 'removeVolumeKeyframe', trackId: key.trackId, tUs: key.tUs };
+  }
   return key.lane === 'camera'
     ? { type: 'removeCameraKeyframe', tUs: key.tUs }
     : { type: 'removeLayoutKeyframe', trackId: key.trackId, tUs: key.tUs };

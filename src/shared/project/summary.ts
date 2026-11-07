@@ -9,6 +9,7 @@ import { isTrackAudible } from './render-plan';
 import { cameraView } from './camera-keyframes';
 import { objectLabel } from './objects';
 import type {
+  AudioTrack,
   Beautify,
   Component,
   Easing,
@@ -41,6 +42,10 @@ export interface ClipSummary {
   freeze?: true;
   /** The transition in from the previous clip. */
   transition?: { kind: string; seconds: number };
+  /** Audio clips: own gain (dB) and fades (seconds). */
+  gainDb?: number;
+  fadeInSeconds?: number;
+  fadeOutSeconds?: number;
 }
 
 interface TrackSummaryBase {
@@ -73,6 +78,10 @@ export interface AudioTrackSummary extends TrackSummaryBase {
   solo: boolean;
   /** False when muted, or when another track is soloed. */
   audible: boolean;
+  /** Noise reduction, normalization and ducking; absent when off. */
+  cleanup?: NonNullable<AudioTrack['cleanup']>;
+  /** Volume keyframes (dB on top of the track volume). */
+  volumeKeyframes?: { at: TimeSummary; gainDb: number; easing: Easing }[];
 }
 
 export type TrackSummary = VideoTrackSummary | AudioTrackSummary;
@@ -150,6 +159,9 @@ export function summarizeProject(doc: Project): ProjectSummary {
           source: media.get(clip.mediaId)?.role ?? 'unknown',
           ...(clip.speed !== undefined ? { speed: clip.speed } : {}),
           ...(clip.freeze ? { freeze: true as const } : {}),
+          ...(clip.gainDb !== undefined ? { gainDb: clip.gainDb } : {}),
+          ...(clip.fadeInUs ? { fadeInSeconds: usToSeconds(clip.fadeInUs) } : {}),
+          ...(clip.fadeOutUs ? { fadeOutSeconds: usToSeconds(clip.fadeOutUs) } : {}),
           ...(clip.transitionIn
             ? {
                 transition: {
@@ -185,6 +197,16 @@ export function summarizeProject(doc: Project): ProjectSummary {
             muted: track.muted,
             solo: track.solo,
             audible: isTrackAudible(doc, track),
+            ...(track.cleanup ? { cleanup: track.cleanup } : {}),
+            ...(track.volumeKeyframes
+              ? {
+                  volumeKeyframes: track.volumeKeyframes.map((k) => ({
+                    at: time(k.tUs),
+                    gainDb: k.gainDb,
+                    easing: k.easing,
+                  })),
+                }
+              : {}),
           };
     }),
     components: doc.components.map((component) => ({

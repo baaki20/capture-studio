@@ -148,6 +148,11 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   addMarker: 'Add marker',
   updateMarker: 'Change marker',
   removeMarker: 'Delete marker',
+  setClipAudio: 'Change clip audio',
+  setVolumeKeyframe: 'Change volume keyframe',
+  removeVolumeKeyframe: 'Delete volume keyframe',
+  moveVolumeKeyframe: 'Move volume keyframe',
+  setCleanup: 'Change audio cleanup',
   nudge: 'Sync nudge',
   unlink: 'Unlink',
   relink: 'Link',
@@ -180,6 +185,12 @@ export function defaultCoalesceKey(op: TimelineOp): string | null {
       return `marker:${op.markerId}:${Object.keys(op).sort().join(',')}`;
     case 'setTransition':
       return `transition:${op.clipId}`;
+    case 'setClipAudio':
+      return `clip-audio:${op.clipIds.join(',')}:${Object.keys(op).sort().join(',')}`;
+    case 'setVolumeKeyframe':
+      return `volume-key:${op.trackId}:${String(op.tUs)}`;
+    case 'setCleanup':
+      return `cleanup:${op.trackId}:${Object.keys(op.cleanup).sort().join(',')}`;
     case 'setObjectKeyframe':
       return `object-key:${op.objectId}:${String(op.tUs)}`;
     case 'nudge':

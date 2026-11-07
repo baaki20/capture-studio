@@ -45,6 +45,9 @@ describe('Capture Studio MCP tools', () => {
         'add_annotation',
         'edit_annotation',
         'remove_annotations',
+        'set_clip_audio',
+        'set_volume_keyframe',
+        'set_audio_cleanup',
         'set_speed',
         'freeze_frame',
         'set_transition',
@@ -396,6 +399,59 @@ describe('Capture Studio MCP tools', () => {
     expect(await call('set_speed', { project: doc.id, start: 1, end: 3, speed: 3 })).toMatchObject({
       isError: true,
     });
+  });
+
+  it('sets clip audio, volume keyframes and cleanup (R2.12–R2.16)', async () => {
+    const { call, doc, fake } = await setup();
+    const voiceClip = trackByName(doc, 'Voice').clips[0]!;
+    const shaped = await call('set_clip_audio', {
+      project: doc.id,
+      clipIds: [voiceClip.id],
+      gainDb: -3,
+      fadeInSeconds: 0.5,
+    });
+    expect(shaped.text).toMatch(/^Applied "Change clip audio"/);
+    expect(
+      (
+        await call('set_volume_keyframe', {
+          project: doc.id,
+          track: 'System audio',
+          at: 5,
+          gainDb: -18,
+        })
+      ).isError,
+    ).toBe(false);
+    const cleaned = await call('set_audio_cleanup', {
+      project: doc.id,
+      track: 'System audio',
+      noise: 'light',
+      normalize: true,
+      duckUnder: 'Voice',
+    });
+    expect(cleaned.isError).toBe(false);
+    const current = fake.editor()!.getState().doc!;
+    const sys = trackByName(current, 'System audio');
+    if (sys.type !== 'audio') throw new Error('not audio');
+    expect(sys.cleanup).toMatchObject({ noise: 'light', normalize: true, duck: { amountDb: -12 } });
+    expect(sys.volumeKeyframes?.map((k) => [k.tUs / S, k.gainDb])).toEqual([
+      [0, 0],
+      [5, -18],
+    ]);
+    const summary = JSON.parse((await call('get_project', { project: doc.id })).text) as {
+      tracks: {
+        name: string;
+        cleanup?: unknown;
+        clips: { gainDb?: number; fadeInSeconds?: number }[];
+      }[];
+    };
+    expect(summary.tracks.find((t) => t.name === 'Voice')?.clips[0]).toMatchObject({
+      gainDb: -3,
+      fadeInSeconds: 0.5,
+    });
+    expect(summary.tracks.find((t) => t.name === 'System audio')?.cleanup).toBeTruthy();
+    expect(
+      await call('set_audio_cleanup', { project: doc.id, track: 'Screen', noise: 'light' }),
+    ).toMatchObject({ isError: true });
   });
 
   it('explains mistakes and refusals', async () => {

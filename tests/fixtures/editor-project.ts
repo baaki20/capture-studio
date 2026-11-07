@@ -215,6 +215,10 @@ const OP_KINDS = [
   'marker-add',
   'marker-update',
   'marker-remove',
+  'clip-audio',
+  'volume-key',
+  'volume-key-remove',
+  'cleanup',
   'nudge',
   'unlink',
   'relink',
@@ -505,6 +509,56 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
       return {
         type: 'removeMarker',
         markerId: markers[Math.floor(t.a * markers.length)]?.id ?? 'mrk_none',
+      };
+    }
+    case 'clip-audio':
+      return {
+        type: 'setClipAudio',
+        clipIds: [clipId],
+        gainDb: t.flag ? null : -30 + t.b * 50,
+        fadeInUs: Math.round(t.c * 4_000_000),
+        ...(t.b < 0.5 ? { fadeOutUs: t.flag ? null : Math.round(t.b * 3_000_000) } : {}),
+      };
+    case 'volume-key': {
+      const audio = tracks.filter((tr) => tr.type === 'audio');
+      const target = audio[Math.floor(t.a * audio.length)]?.id ?? trackId;
+      return {
+        type: 'setVolumeKeyframe',
+        trackId: t.c < 0.9 ? target : trackId,
+        tUs: time(t.b),
+        ...(t.flag ? { gainDb: -70 + t.c * 90 } : {}),
+        ...(t.b < 0.5 ? { easing: pick(easings, t.c) } : {}),
+      };
+    }
+    case 'volume-key-remove': {
+      const audio = tracks.find((tr) => tr.type === 'audio' && tr.volumeKeyframes?.length);
+      const keys = audio?.type === 'audio' ? (audio.volumeKeyframes ?? []) : [];
+      return {
+        type: 'removeVolumeKeyframe',
+        trackId: audio?.id ?? trackId,
+        tUs: keys[Math.floor(t.b * keys.length)]?.tUs ?? time(t.b),
+      };
+    }
+    case 'cleanup': {
+      const audio = tracks.filter((tr) => tr.type === 'audio');
+      const target = audio[Math.floor(t.a * audio.length)]?.id ?? trackId;
+      const other = audio[Math.floor(t.c * audio.length)]?.id ?? trackId;
+      const noises = ['off', 'light', 'strong'] as const;
+      return {
+        type: 'setCleanup',
+        trackId: target,
+        cleanup: {
+          noise: pick(noises, t.b),
+          normalize: t.flag,
+          ...(t.c < 0.5
+            ? {
+                duck:
+                  t.b < 0.3
+                    ? null
+                    : { byTrackId: other, amountDb: -60 + t.b * 70, attackMs: 50, releaseMs: 9000 },
+              }
+            : {}),
+        },
       };
     }
     case 'crop':

@@ -192,6 +192,44 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
     chapter: z.boolean().optional(),
   }),
   z.strictObject({ type: z.literal('removeMarker'), markerId: prefixedId('mrk') }),
+  z.strictObject({
+    type: z.literal('setClipAudio'),
+    clipIds: ClipIds,
+    gainDb: z.number().nullable().optional(),
+    fadeInUs: NonNegativeUs.nullable().optional(),
+    fadeOutUs: NonNegativeUs.nullable().optional(),
+  }),
+  z.strictObject({
+    type: z.literal('setVolumeKeyframe'),
+    trackId: TrackId,
+    tUs: NonNegativeUs,
+    gainDb: z.number().optional(),
+    easing: Easing.optional(),
+  }),
+  z.strictObject({ type: z.literal('removeVolumeKeyframe'), trackId: TrackId, tUs: NonNegativeUs }),
+  z.strictObject({
+    type: z.literal('moveVolumeKeyframe'),
+    trackId: TrackId,
+    fromUs: NonNegativeUs,
+    toUs: NonNegativeUs,
+  }),
+  z.strictObject({
+    type: z.literal('setCleanup'),
+    trackId: TrackId,
+    cleanup: z.strictObject({
+      noise: z.enum(['off', 'light', 'strong']).optional(),
+      normalize: z.boolean().optional(),
+      duck: z
+        .strictObject({
+          byTrackId: TrackId,
+          amountDb: z.number(),
+          attackMs: z.number(),
+          releaseMs: z.number(),
+        })
+        .nullable()
+        .optional(),
+    }),
+  }),
   z.strictObject({ type: z.literal('nudge'), target: NudgeTargetSchema, syncAdjustUs: Us }),
   z.strictObject({ type: z.literal('unlink'), clipIds: ClipIds }),
   z.strictObject({ type: z.literal('relink'), clipIds: ClipIds }),

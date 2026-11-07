@@ -202,14 +202,23 @@ export const ProjectSaveSchema = z.strictObject({
 });
 
 export const MediaAssetRequestSchema = z.strictObject({ projectId: Id, mediaId: Id });
-/** A sped-up clip's audio for the preview: a media's file range at a speed (R2.18). */
+/**
+ * Preview audio from the cache: a media's cleaned audio (`noise`, R2.14), or a range of it at a
+ * clip's speed (`range`, R2.18), made from the cleaned audio when `noise` is on.
+ */
 export const AudioRenderRequestSchema = z.strictObject({
   projectId: Id,
   mediaId: Id,
-  fileStartUs: z.int().nonnegative(),
-  fileEndUs: z.int().positive(),
-  speed: z.number().min(0.25).max(4),
+  noise: z.enum(['off', 'light', 'strong']).optional(),
+  range: z
+    .strictObject({
+      fileStartUs: z.int().nonnegative(),
+      fileEndUs: z.int().positive(),
+      speed: z.number().min(0.25).max(4),
+    })
+    .optional(),
 });
+export type AudioRenderRequest = Omit<z.infer<typeof AudioRenderRequestSchema>, 'projectId'>;
 
 export const MediaAssetResultSchema = z.object({
   status: z.enum(['ready', 'pending', 'unavailable']),

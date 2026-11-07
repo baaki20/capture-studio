@@ -57,6 +57,17 @@
  * and picks exactly the frames the single input would have; FFmpeg stops reading an input once
  * its pieces have ended. In-order projects keep one input per media.
  */
+import {
+  LOUDNORM_MEASURE,
+  loudnormApply,
+  type LoudnormMeasured,
+} from '../../../shared/project/audio-cleanup';
+import {
+  gainAt,
+  trackEnvelope,
+  type GainPoint,
+  type PeaksOf,
+} from '../../../shared/project/audio-gain';
 import { exportChapters, ffmetadataText } from '../../../shared/export/chapters';
 import { atempoFilters } from '../../../shared/project/audio-speed';
 import path from 'node:path';
@@ -236,6 +247,12 @@ export interface BuildExportGraphOptions {
   audioScriptPath: string;
   /** Where the job writes the chapters file (when the project has chapter markers). */
   chaptersPath?: string;
+  /** Absolute paths of cleaned audio to read instead of an audio media's file (noise reduction). */
+  audioPaths?: ReadonlyMap<string, string>;
+  /** Waveform peaks of the media, for ducking. */
+  peaksOf?: PeaksOf;
+  /** The loudness pass's measurements: the mix is normalized to −16 LUFS with them. */
+  loudness?: LoudnormMeasured;
   /** Where the job writes mask PNGs (`mask-<n>.png`). */
   maskDir: string;
   /** Probed colour properties of video media; missing entries are taken as BT.709. */
@@ -413,6 +430,71 @@ function audioChain(segment: AudioSegment, media: Media): string[] {
   const delaySamples = Math.round((segment.timelineStartUs * EXPORT_SAMPLE_RATE) / 1_000_000);
   filters.push(`adelay=delays=${String(delaySamples)}S:all=1`);
   return filters;
+}
+
+/** The end of the audio graph after the mix (`loudnessMeasure` replaces it). */
+const LIMITER_TAIL = `alimiter=limit=0.98:level=0:latency=1,aresample=${String(EXPORT_SAMPLE_RATE)},apad[aout]`;
+
+/** How often the envelope's level is updated while it changes. */
+const ENVELOPE_COMMAND_US = 20_000;
+
+/**
+ * The gain envelope over a segment (`audio-gain.ts`), after `adelay` (timestamps are timeline
+ * time): a `volume` filter named `volume@<name>` starting at the envelope's level, set again by
+ * `asendcmd` at every breakpoint and every `ENVELOPE_COMMAND_US` along a ramp.
+ */
+function envelopeFilters(
+  points: readonly GainPoint[],
+  segment: AudioSegment,
+  name: string,
+): string[] {
+  const start = segment.timelineStartUs;
+  const end = segment.timelineEndUs;
+  const times = new Set<number>();
+  points.forEach((p, i) => {
+    const next = points[i + 1];
+    if (p.tUs > start && p.tUs < end) times.add(p.tUs);
+    if (next && next.gain !== p.gain && next.tUs > start && p.tUs < end) {
+      for (let t = Math.max(start, p.tUs); t < Math.min(end, next.tUs); t += ENVELOPE_COMMAND_US) {
+        times.add(t);
+      }
+    }
+  });
+  const g = (t: number) => trimNumber(Math.round(gainAt(points, t) * 1e6) / 1e6);
+  const commands = [...times]
+    .filter((t) => t > start)
+    .sort((a, b) => a - b)
+    .map((t) => `${sec(t)} volume@${name} volume ${g(t)}`);
+  const filters = [`volume@${name}=volume=${g(start)}:eval=frame`];
+  if (commands.length > 0) filters.unshift(`asendcmd=c='${commands.join(';')}'`);
+  return filters;
+}
+
+/**
+ * The loudness-measuring pass (first of two, R2.15): the same inputs and audio graph with
+ * `loudnorm` printing its measurements instead of the limiter, into the null muxer. The frame
+ * pipe is replaced by a short blank picture (the audio graph does not read it).
+ */
+export function loudnessMeasure(
+  graph: ExportGraph,
+  scriptPath: string,
+): { args: string[]; scriptText: string } {
+  const args: string[] = ['-y', '-loglevel', 'info', '-nostats'];
+  for (const input of graph.inputs) {
+    if (input.kind === 'pipe') {
+      args.push('-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=0.1');
+      continue;
+    }
+    if (input.kind === 'chapters') args.push('-f', 'ffmetadata');
+    if (input.seek) args.push('-noaccurate_seek', '-ss', sec(input.seek.startUs));
+    args.push('-i', input.path);
+  }
+  args.push('-/filter_complex', scriptPath, '-map', '[aout]', '-f', 'null', '-');
+  const scriptText = graph.audioScriptText.replace(
+    /(?:loudnorm=[^,]*,)?alimiter=[^[]*apad\[aout\]/,
+    `${LOUDNORM_MEASURE}[aout]`,
+  );
+  return { args, scriptText };
 }
 
 function videoEncoderArgs(settings: ExportSettings): string[] {
@@ -602,7 +684,7 @@ export function buildExportGraph(
     inputs.push({
       index,
       kind: 'media',
-      path: path.join(options.projectRoot, media.path),
+      path: options.audioPaths?.get(media.id) ?? path.join(options.projectRoot, media.path),
       mediaId: media.id,
       seek: null,
     });
@@ -639,7 +721,7 @@ export function buildExportGraph(
     inputs.push({
       index,
       kind: 'media',
-      path: path.join(options.projectRoot, media.path),
+      path: options.audioPaths?.get(media.id) ?? path.join(options.projectRoot, media.path),
       mediaId: media.id,
       seek: { startUs: seekStartUs(source) },
     });
@@ -821,6 +903,13 @@ export function buildExportGraph(
     lines.push(`[${String(index)}:a:0]${filters.join(',')}${outs.map((l) => `[${l}]`).join('')};`);
     audioSources.set(source.key, outs);
   }
+  const envelopes = new Map<string, GainPoint[] | null>();
+  const envelopeOf = (trackId: string) => {
+    if (!envelopes.has(trackId)) {
+      envelopes.set(trackId, trackEnvelope(doc, trackId, options.peaksOf, durationUs));
+    }
+    return envelopes.get(trackId) ?? null;
+  };
   const clipLabels: string[] = [];
   for (const segment of audio) {
     const media = mediaById.get(segment.mediaId);
@@ -828,9 +917,14 @@ export function buildExportGraph(
     if (!media || !src) throw new Error(`unreachable: no audio source for ${segment.mediaId}`);
     const out = labels.next('a');
     clipLabels.push(out);
-    lines.push(`[${src}]${audioChain(segment, media).join(',')}[${out}];`);
+    const envelope = envelopeOf(segment.trackId);
+    const filters = [
+      ...audioChain(segment, media),
+      ...(envelope ? envelopeFilters(envelope, segment, labels.next('e')) : []),
+    ];
+    lines.push(`[${src}]${filters.join(',')}[${out}];`);
   }
-  const audioTail = `alimiter=limit=0.98:level=0:latency=1,aresample=${String(EXPORT_SAMPLE_RATE)},apad[aout]`;
+  const audioTail = `${options.loudness ? `${loudnormApply(options.loudness)},` : ''}${LIMITER_TAIL}`;
   if (clipLabels.length === 0) {
     lines.push(`anullsrc=r=${String(EXPORT_SAMPLE_RATE)}:cl=stereo[aout]`);
   } else {

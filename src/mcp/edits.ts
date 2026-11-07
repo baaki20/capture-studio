@@ -28,6 +28,7 @@ import type { ExternalOp } from '../shared/project/op-schema';
 import {
   EASINGS,
   FACE_MODES,
+  type AudioTrack,
   type OverlayLayout,
   type Project,
   type TimelineObject,
@@ -296,6 +297,43 @@ export const SHAPES = {
   markerRemove: {
     id: z.string().min(1).describe('A marker (mrk_…) from get_project'),
   },
+  clipAudio: {
+    clipIds: z.array(ClipId).min(1).describe('Audio clips (Voice, System audio)'),
+    gainDb: z.number().min(-60).max(12).optional().describe('The clip’s own gain; 0 removes it'),
+    fadeInSeconds: z.number().min(0).max(30).optional().describe('0 removes the fade'),
+    fadeOutSeconds: z.number().min(0).max(30).optional().describe('0 removes the fade'),
+  },
+  volumeKeyframe: {
+    track: TrackRef.describe('An audio track'),
+    at: TimeInput,
+    remove: z.boolean().optional().describe('Remove the keyframe at this time instead'),
+    gainDb: z
+      .number()
+      .min(-60)
+      .max(12)
+      .optional()
+      .describe('dB on top of the track volume from here (e.g. −20 to lower music under a demo)'),
+    easing: z
+      .enum(EASINGS)
+      .optional()
+      .describe('How it changes to the next keyframe; linear by default, hold keeps it'),
+  },
+  audioCleanup: {
+    track: TrackRef.describe('An audio track'),
+    noise: z
+      .enum(['off', 'light', 'strong'])
+      .optional()
+      .describe('Noise reduction (light: steady hiss; strong: more, at some cost to the voice)'),
+    normalize: z
+      .boolean()
+      .optional()
+      .describe('Bring the whole export to −16 LUFS (true on any track turns it on)'),
+    duckUnder: z
+      .string()
+      .optional()
+      .describe('A voice track this track goes quieter under while it speaks; "none" stops it'),
+    duckDb: z.number().min(-40).max(0).optional().describe('How much quieter; default −12'),
+  },
   annotation: {
     type: z
       .enum(OBJECT_KINDS)
@@ -373,6 +411,9 @@ export const EditStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('transition'), ...SHAPES.transition }),
   z.object({ kind: z.literal('marker'), ...SHAPES.marker }),
   z.object({ kind: z.literal('markerRemove'), ...SHAPES.markerRemove }),
+  z.object({ kind: z.literal('clipAudio'), ...SHAPES.clipAudio }),
+  z.object({ kind: z.literal('volumeKeyframe'), ...SHAPES.volumeKeyframe }),
+  z.object({ kind: z.literal('audioCleanup'), ...SHAPES.audioCleanup }),
   z.object({ kind: z.literal('annotation'), ...SHAPES.annotation }),
   z.object({ kind: z.literal('annotationEdit'), ...SHAPES.annotationEdit }),
   z.object({ kind: z.literal('annotationRemove'), ...SHAPES.annotationRemove }),
@@ -394,6 +435,13 @@ export function resolveTrack(doc: Project, ref: string): Track {
       ? `Several tracks are named "${ref}"; use the track ID from get_project.`
       : `No track "${ref}". Tracks: ${names}.`,
   );
+}
+
+function audioTrackOf(doc: Project, ref: string): AudioTrack {
+  const track = resolveTrack(doc, ref);
+  if (track.type !== 'audio')
+    throw new ToolInputError(`Track "${track.name}" is not an audio track.`);
+  return track;
 }
 
 function videoTrack(doc: Project, ref: string | undefined, kind: 'overlay' | 'screen'): VideoTrack {
@@ -776,6 +824,63 @@ export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
     }
     case 'markerRemove':
       return [{ type: 'removeMarker', markerId: step.id }];
+    case 'clipAudio': {
+      const us = (s: number | undefined) => (s === undefined ? {} : Math.round(s * 1e6));
+      const fadeIn = us(step.fadeInSeconds);
+      const fadeOut = us(step.fadeOutSeconds);
+      const change = {
+        ...(step.gainDb !== undefined ? { gainDb: step.gainDb === 0 ? null : step.gainDb } : {}),
+        ...(typeof fadeIn === 'number' ? { fadeInUs: fadeIn === 0 ? null : fadeIn } : {}),
+        ...(typeof fadeOut === 'number' ? { fadeOutUs: fadeOut === 0 ? null : fadeOut } : {}),
+      };
+      if (Object.keys(change).length === 0) {
+        throw new ToolInputError('Give a gain or a fade to change.');
+      }
+      return [{ type: 'setClipAudio', clipIds: step.clipIds, ...change }];
+    }
+    case 'volumeKeyframe': {
+      const track = audioTrackOf(doc, step.track);
+      const tUs = time(step.at);
+      if (step.remove) return [{ type: 'removeVolumeKeyframe', trackId: track.id, tUs }];
+      return [
+        {
+          type: 'setVolumeKeyframe',
+          trackId: track.id,
+          tUs,
+          ...(step.gainDb !== undefined ? { gainDb: step.gainDb } : {}),
+          ...(step.easing ? { easing: step.easing } : {}),
+        },
+      ];
+    }
+    case 'audioCleanup': {
+      const track = audioTrackOf(doc, step.track);
+      const current = track.cleanup?.duck;
+      let duck:
+        | { byTrackId: string; amountDb: number; attackMs: number; releaseMs: number }
+        | null
+        | undefined;
+      if (step.duckUnder !== undefined) {
+        duck =
+          step.duckUnder.trim().toLowerCase() === 'none'
+            ? null
+            : {
+                attackMs: current?.attackMs ?? 150,
+                releaseMs: current?.releaseMs ?? 600,
+                amountDb: step.duckDb ?? current?.amountDb ?? -12,
+                byTrackId: audioTrackOf(doc, step.duckUnder).id,
+              };
+      } else if (step.duckDb !== undefined) {
+        if (!current) throw new ToolInputError('Set duckUnder first: the track does not duck.');
+        duck = { ...current, amountDb: step.duckDb };
+      }
+      const cleanup = {
+        ...(step.noise ? { noise: step.noise } : {}),
+        ...(step.normalize !== undefined ? { normalize: step.normalize } : {}),
+        ...(duck !== undefined ? { duck } : {}),
+      };
+      if (Object.keys(cleanup).length === 0) throw new ToolInputError('Give something to change.');
+      return [{ type: 'setCleanup', trackId: track.id, cleanup }];
+    }
     case 'annotation': {
       const inUs = time(step.start);
       const outUs = step.end === undefined ? inUs + DEFAULT_OBJECT_US : time(step.end);

@@ -268,11 +268,11 @@ describe('preview audio renders', () => {
     const doc = run(project(), { type: 'setSpeed', inUs: 2 * S, outUs: 6 * S, speed: 2 });
     const segments = audioSegments(doc);
     const [want] = wantedRenders(segments);
-    expect(want).toMatchObject({ speed: 2 });
+    expect(want?.request).toMatchObject({ range: { speed: 2 } });
     const sped = segments.find((s) => s.speed === 2)!;
     const urls = { [sped.mediaId]: 'cs-media://p/media/microphone.mp4' };
     expect(playableSegments(segments, urls, new Map()).segments).toHaveLength(segments.length - 1);
-    const renders = new Map([[audioRenderKey(want!), 'cs-media://p/cache/audio/x.wav']]);
+    const renders = new Map([[want!.key, 'cs-media://p/cache/audio/x.wav']]);
     const played = playableSegments(segments, urls, renders);
     const swapped = played.segments.find((s) => s.mediaId.startsWith('render:'))!;
     expect(swapped).toMatchObject({ fileStartSeconds: 0, speed: 1, timelineStartUs: 2 * S });

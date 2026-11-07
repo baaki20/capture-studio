@@ -23,6 +23,7 @@ import { FrameFeed } from './export/frame-feed';
 import { ffmpegTooOldError } from './ffmpeg-runner';
 import { generatePeaks } from './peaks';
 import { renderAudio } from './audio-render';
+import { cleanAudio } from './audio-clean';
 import { probeFfmpegVersion, type FfmpegVersion } from './probe';
 import {
   attachClockPort,
@@ -309,6 +310,15 @@ export class MediaService {
             startSeconds: job.startSeconds,
             endSeconds: job.endSeconds,
             speed: job.speed,
+            signal,
+          });
+          break;
+        case 'cleanAudio':
+          result = await cleanAudio({
+            ffmpegPath: ffmpeg.ffmpegPath,
+            input: job.input,
+            output: job.output,
+            noise: job.noise,
             signal,
           });
           break;

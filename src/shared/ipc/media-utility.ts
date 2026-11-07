@@ -48,6 +48,13 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
     endSeconds: z.number().positive(),
     speed: z.number().min(0.25).max(4),
   }),
+  /** A media's whole audio with noise reduction, for the preview and export (`audio-clean.ts`). */
+  z.object({
+    kind: z.literal('cleanAudio'),
+    input: AbsPath,
+    output: AbsPath,
+    noise: z.enum(['light', 'strong']),
+  }),
   z.object({ kind: z.literal('encoders.probe') }),
   /**
    * Export a project snapshot to MP4 (§4.3.9). Main validated `doc` against the full schema;
@@ -72,6 +79,7 @@ export const JOB_KINDS = [
   'peaks',
   'thumbnails',
   'audioRender',
+  'cleanAudio',
   'encoders.probe',
   'export',
 ] as const;
@@ -137,6 +145,7 @@ export const JOB_RESULT_SCHEMAS = {
   peaks: PeaksResultSchema,
   thumbnails: z.object({ indexPath: AbsPath, index: ThumbnailIndexSchema }),
   audioRender: z.object({ output: AbsPath }),
+  cleanAudio: z.object({ output: AbsPath }),
   'encoders.probe': FfmpegEncoderReportSchema,
   export: z.object({
     output: AbsPath,

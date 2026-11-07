@@ -1,9 +1,10 @@
 /**
- * Preview renders of sped-up audio (R2.18): asks main for the render of each sped-up segment
- * the document has (`media.audioRender`), retries while it is being made, and reports the ready
+ * Preview audio from the cache (R2.14, R2.18): asks main for the cleaned audio of noise-reduced
+ * tracks and the render of each sped-up segment the document has (`media.audioRender`), retries while it is being made, and reports the ready
  * ones (key → URL) to the scheduler. Kept free of DOM types so it is testable from Node.
  */
-import { audioRenderKey } from '../../../shared/project/audio-speed';
+import type { AudioRenderRequest } from '../../../shared/ipc/contract';
+import { noiseByTrack } from '../../../shared/project/audio-cleanup';
 import { audioSegments } from '../../../shared/project/render-plan';
 import type { Project } from '../../../shared/project/schema';
 import type { EditorPreloadApi } from '../../../shared/ipc/preload-api';
@@ -43,11 +44,11 @@ export class AudioRenders {
   /** Requests the renders the document's sped-up segments need (idempotent). */
   load(doc: Project): void {
     if (!this.api.audioRender) return;
-    for (const spec of wantedRenders(audioSegments(doc, { includeInaudible: true }))) {
-      const key = audioRenderKey(spec);
+    const wanted = wantedRenders(audioSegments(doc, { includeInaudible: true }), noiseByTrack(doc));
+    for (const { key, request } of wanted) {
       if (this.requested.has(key)) continue;
       this.requested.add(key);
-      void this.request(key, spec);
+      void this.request(key, request);
     }
   }
 
@@ -57,12 +58,12 @@ export class AudioRenders {
     this.listeners.clear();
   }
 
-  private async request(key: string, spec: Parameters<typeof audioRenderKey>[0]): Promise<void> {
+  private async request(key: string, request: AudioRenderRequest): Promise<void> {
     try {
-      const result = await this.api.audioRender?.({ projectId: this.projectId, ...spec });
+      const result = await this.api.audioRender?.({ projectId: this.projectId, ...request });
       if (!result || this.isDisposed()) return;
       if (result.status === 'pending') {
-        this.pending.retry(key, () => void this.request(key, spec));
+        this.pending.retry(key, () => void this.request(key, request));
       } else if (result.status === 'ready' && result.url) {
         this.ready.set(key, result.url);
         for (const listener of this.listeners) listener(new Map(this.ready));

@@ -24,7 +24,7 @@ interface EditorDebugApi {
     snapping: boolean;
     /** Timeline zoom and scroll (to aim at the timeline canvas). */
     view: { pxPerSec: number; scrollUs: number };
-    selectedKeyframe: { lane: 'layout' | 'camera'; trackId: string; tUs: number } | null;
+    selectedKeyframe: { lane: 'layout' | 'camera' | 'volume'; trackId: string; tUs: number } | null;
   };
   /** Renders the playhead (or `tUs`) and measures the preview picture. */
   probePreview(tUs?: number): Promise<{ meanLuma: number; nonBlack: number; exact: boolean }>;

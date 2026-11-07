@@ -11,6 +11,9 @@
  *   `GainNode`, then a master gain. `planChunk` computes when, from which offset and for how
  *   long; it skips into a chunk that is already late.
  * - **Gains.** Mute and solo are gains (0 when inaudible), so toggling them is immediate.
+ * - **Envelopes.** Each track's gain envelope (`audio-gain.ts`: clip gain, fades, volume
+ *   keyframes, ducking; the same one the export applies) is gain automation on a node before the
+ *   track's gain, scheduled from the transport anchor on every start.
  * - **Speed.** A sped-up segment plays a preview render of its range at that speed with its pitch
  *   kept (`playableSegments`, rendered by the media utility with the export's `atempo`); it is
  *   silent until the render is ready.
@@ -20,11 +23,19 @@
  * The maths (`timelineAt`, `contextTimeFor`, `planChunk`, `ChunkAccumulator`) is pure and
  * unit-tested; `AudioScheduler` does the Web Audio plumbing.
  */
+import {
+  gainAt,
+  trackEnvelope,
+  type GainPoint,
+  type PeaksOf,
+} from '../../../shared/project/audio-gain';
+import { noiseByTrack } from '../../../shared/project/audio-cleanup';
 import { audioSegments, type AudioSegment } from '../../../shared/project/render-plan';
 import type { Project } from '../../../shared/project/schema';
 import {
   chunkLatenessS,
   LOOKAHEAD_US,
+  contextTimeFor,
   planChunk,
   playableSegments,
   scheduleSignature,
@@ -41,6 +52,8 @@ export * from './schedule-math';
 
 export interface AudioSchedulerOptions {
   openSource: (url: string) => Promise<AudioSource>;
+  /** Waveform peaks of loaded media, for ducking envelopes (none when absent). */
+  peaksOf?: PeaksOf;
   lookaheadUs?: number;
   /** Poll interval while waiting for the lookahead window, ms. */
   tickMs?: number;
@@ -61,9 +74,16 @@ interface PlayingNode {
   endsAt: number;
 }
 
+/** Automation events scheduled per track on a start (a long ducked recording has thousands). */
+const MAX_ENVELOPE_EVENTS = 20_000;
+
 export class AudioScheduler {
   private readonly master: GainNode;
   private readonly trackGainNodes = new Map<string, GainNode>();
+  /** Per track, the gain envelope (clip gain, fades, volume keyframes, ducking) before its gain. */
+  private readonly envelopeNodes = new Map<string, GainNode>();
+  private envelopes = new Map<string, GainPoint[] | null>();
+  private envelopeSignature = '';
   private readonly sources = new Map<string, Promise<AudioSource>>();
   private readonly nodes = new Set<PlayingNode>();
   private doc: Project | null = null;
@@ -123,6 +143,54 @@ export class AudioScheduler {
       node.gain.setTargetAtTime(gain, now, 0.01);
     }
     this.reschedule();
+    this.refreshEnvelopes();
+  }
+
+  /**
+   * Recomputes the tracks' gain envelopes (an edit, or waveform peaks that ducking needs have
+   * loaded) and, while playing, schedules them again from the time being heard.
+   */
+  refreshEnvelopes(): void {
+    if (!this.doc) return;
+    const doc = this.doc;
+    const next = new Map<string, GainPoint[] | null>();
+    for (const track of doc.timeline.tracks) {
+      if (track.type === 'audio') {
+        next.set(track.id, trackEnvelope(doc, track.id, this.options.peaksOf));
+      }
+    }
+    const signature = JSON.stringify([...next]);
+    if (signature === this.envelopeSignature) return;
+    this.envelopeSignature = signature;
+    this.envelopes = next;
+    const heard = this.heardTimeUs();
+    if (heard !== null && this.anchor) this.applyEnvelopes(heard, this.anchor);
+    else this.applyEnvelopes(0, null);
+  }
+
+  /**
+   * Sets every envelope node to its level at `fromUs` and, with an anchor (playing), ramps it
+   * through the envelope's breakpoints at their context times.
+   */
+  private applyEnvelopes(fromUs: number, anchor: TransportAnchor | null): void {
+    const now = this.context.currentTime;
+    for (const [trackId, points] of this.envelopes) {
+      const gain = this.envelopeNode(trackId).gain;
+      gain.cancelScheduledValues(0);
+      if (!points) {
+        gain.setValueAtTime(1, now);
+        continue;
+      }
+      const start = anchor ? Math.max(now, contextTimeFor(anchor, fromUs)) : now;
+      gain.setValueAtTime(gainAt(points, fromUs), start);
+      if (!anchor || anchor.rate <= 0) continue;
+      let count = 0;
+      for (const p of points) {
+        if (p.tUs <= fromUs) continue;
+        gain.linearRampToValueAtTime(p.gain, contextTimeFor(anchor, p.tUs));
+        if (++count >= MAX_ENVELOPE_EVENTS) break;
+      }
+    }
   }
 
   /** New ready renders of sped-up segments: they play from now on. */
@@ -155,11 +223,13 @@ export class AudioScheduler {
       rate,
     };
     this.anchor = anchor;
+    this.applyEnvelopes(fromUs, anchor);
     if (rate > 0 && this.doc) {
       const playable = playableSegments(
         audioSegments(this.doc, { includeInaudible: true }),
         this.mediaUrls,
         this.renders,
+        noiseByTrack(this.doc),
       );
       this.playUrls = playable.urls;
       const segments = playable.segments.filter(
@@ -189,6 +259,17 @@ export class AudioScheduler {
       );
     this.sources.clear();
     this.master.disconnect();
+  }
+
+  /** Where a track's sources connect: its envelope, then its gain. */
+  private envelopeNode(trackId: string): GainNode {
+    let node = this.envelopeNodes.get(trackId);
+    if (!node) {
+      node = this.context.createGain();
+      node.connect(this.gainNode(trackId));
+      this.envelopeNodes.set(trackId, node);
+    }
+    return node;
   }
 
   private gainNode(trackId: string): GainNode {
@@ -272,7 +353,7 @@ export class AudioScheduler {
     const node = this.context.createBufferSource();
     node.buffer = buffer;
     node.playbackRate.value = plan.playbackRate;
-    node.connect(this.gainNode(trackId));
+    node.connect(this.envelopeNode(trackId));
     const entry: PlayingNode = { node, endsAt: plan.when + plan.duration / plan.playbackRate };
     this.nodes.add(entry);
     node.onended = () => {

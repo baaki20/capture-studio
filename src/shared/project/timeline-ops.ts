@@ -59,6 +59,7 @@ import {
 import { mediaEditBounds } from './media-time';
 import type { ObjectPatch } from './object-patch';
 import { upsertBoxKeyframe } from './objects';
+import { upsertVolumeKeyframe, type VolumeKeyframe } from './volume-keyframes';
 import {
   CAMERA_EASE_MAX_US,
   cameraZoomRange,
@@ -154,6 +155,15 @@ export type LayoutPatch = Flatten<
 /** One object type instead of an intersection (so it equals the op schema's inferred type). */
 type Flatten<T> = { [K in keyof T]: T[K] };
 
+/** An audio track's cleanup settings (R2.14–R2.16). */
+export type Cleanup = NonNullable<AudioTrack['cleanup']>;
+/** What `setCleanup` changes; `duck: null` stops ducking. */
+export interface CleanupPatch {
+  noise?: Cleanup['noise'];
+  normalize?: boolean;
+  duck?: NonNullable<Cleanup['duck']> | null;
+}
+
 /** A clip's transition from the previous clip on its track (v2, R2.10). */
 export type Transition = NonNullable<Clip['transitionIn']>;
 
@@ -215,6 +225,17 @@ export type TimelineOp =
   | { type: 'addMarker'; marker: Marker }
   | { type: 'updateMarker'; markerId: string; tUs?: Us; label?: string; chapter?: boolean }
   | { type: 'removeMarker'; markerId: string }
+  | {
+      type: 'setClipAudio';
+      clipIds: string[];
+      gainDb?: number | null;
+      fadeInUs?: Us | null;
+      fadeOutUs?: Us | null;
+    }
+  | { type: 'setVolumeKeyframe'; trackId: string; tUs: Us; gainDb?: number; easing?: Easing }
+  | { type: 'removeVolumeKeyframe'; trackId: string; tUs: Us }
+  | { type: 'moveVolumeKeyframe'; trackId: string; fromUs: Us; toUs: Us }
+  | { type: 'setCleanup'; trackId: string; cleanup: CleanupPatch }
   | { type: 'nudge'; target: NudgeTarget; syncAdjustUs: Us }
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
@@ -393,14 +414,30 @@ interface Ctx {
  * Applies an operation and returns the new document with Immer patches (for undo/redo).
  * No change gives the input document and empty patch lists.
  */
+/**
+ * IDs drawn by an operation that was then refused, per generator, handed out again first: a
+ * refused edit uses up no IDs, so a batch draws the same IDs as the same edits made one by one.
+ */
+const returnedIds = new WeakMap<() => string, string[]>();
+
 export function applyOpWithPatches(
   doc: Project,
   op: TimelineOp,
   options: OpOptions = {},
 ): Result<PatchedResult, OpError> {
   const generate = options.generateId ?? ulid;
+  const drawn: string[] = [];
+  const draw = (): string => {
+    const id = returnedIds.get(generate)?.shift() ?? generate();
+    drawn.push(id);
+    return id;
+  };
+  const giveBack = () => {
+    if (drawn.length > 0)
+      returnedIds.set(generate, [...drawn, ...(returnedIds.get(generate) ?? [])]);
+  };
   const ctx: Ctx = {
-    id: (kind) => newId(kind, generate),
+    id: (kind) => newId(kind, draw),
     minUs: frameDurationUs(doc.timeline.frameRate),
   };
   try {
@@ -409,9 +446,13 @@ export function applyOpWithPatches(
       runOp(draft, op, ctx);
       return undefined;
     });
-    if (patches.length === 0) return ok({ doc, patches: [], inversePatches: [] });
+    if (patches.length === 0) {
+      giveBack();
+      return ok({ doc, patches: [], inversePatches: [] });
+    }
     const violations = checkProjectInvariants(next);
     if (violations.length > 0) {
+      giveBack();
       return err({
         code: 'invariant',
         message: `${op.type} would break an invariant: ${violations.map((v) => v.message).join('; ')}`,
@@ -419,7 +460,10 @@ export function applyOpWithPatches(
     }
     return ok({ doc: next, patches, inversePatches });
   } catch (error) {
-    if (error instanceof OpFailure) return err(error.opError);
+    if (error instanceof OpFailure) {
+      giveBack();
+      return err(error.opError);
+    }
     throw error;
   }
 }
@@ -547,6 +591,20 @@ export const setTransition = opFn('setTransition');
 export const addMarker = opFn('addMarker');
 export const updateMarker = opFn('updateMarker');
 export const removeMarker = opFn('removeMarker');
+/**
+ * Sets audio clips' own gain (on top of the track's) and fade in/out (R2.12); null removes one.
+ * Fades are kept within the clip.
+ */
+export const setClipAudio = opFn('setClipAudio');
+/** Sets an audio track's volume keyframe (R2.13); see `volume-keyframes.ts`. */
+export const setVolumeKeyframe = opFn('setVolumeKeyframe');
+export const removeVolumeKeyframe = opFn('removeVolumeKeyframe');
+export const moveVolumeKeyframe = opFn('moveVolumeKeyframe');
+/**
+ * Sets an audio track's cleanup (R2.14–R2.16): noise reduction, loudness normalization of the
+ * export, and ducking under another (voice) track.
+ */
+export const setCleanup = opFn('setCleanup');
 /** Sets `syncAdjustUs` of a component's (or explicit) media; clip positions do not change. */
 export const nudge = opFn('nudge');
 export const unlink = opFn('unlink');
@@ -635,6 +693,17 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
     case 'updateMarker':
     case 'removeMarker':
       markerDraft(draft, op);
+      return;
+    case 'setClipAudio':
+      clipAudioDraft(draft, op);
+      return;
+    case 'setVolumeKeyframe':
+    case 'removeVolumeKeyframe':
+    case 'moveVolumeKeyframe':
+      volumeDraft(draft, op);
+      return;
+    case 'setCleanup':
+      cleanupDraft(draft, op);
       return;
     case 'nudge':
       nudgeDraft(draft, op);
@@ -999,6 +1068,9 @@ function cutDraft(draft: Project, a: Us, b: Us, ctx: Ctx): void {
     track.clips = out;
     if (track.type === 'video' && track.layoutKeyframes) {
       setKeyframes(track, keyframesThroughCut(plain(track.layoutKeyframes), a, b));
+    }
+    if (track.type === 'audio' && track.volumeKeyframes) {
+      setVolumeKeys(track, keyframesThroughCut(plain(track.volumeKeyframes), a, b));
     }
   }
   for (const track of draft.timeline.objectTracks ?? []) {
@@ -1526,6 +1598,13 @@ function splitAllAt(draft: Project, at: Us, ctx: Ctx): void {
  */
 function remapTimes(draft: Project, map: (t: Us) => Us, minUs: Us): void {
   for (const track of draft.timeline.tracks) {
+    if (track.locked || track.type !== 'audio' || !track.volumeKeyframes) continue;
+    setVolumeKeys(
+      track,
+      dedupeTimes(plain(track.volumeKeyframes).map((k) => ({ ...k, tUs: map(k.tUs) }))),
+    );
+  }
+  for (const track of draft.timeline.tracks) {
     if (track.locked || track.type !== 'video' || !track.layoutKeyframes) continue;
     setKeyframes(
       track,
@@ -1805,6 +1884,113 @@ function markerDraft(
       return;
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Audio: clip gain and fades, volume keyframes, cleanup
+
+/** Stores volume keyframes, dropping the field when there are none. */
+function setVolumeKeys(track: AudioTrack, keys: VolumeKeyframe[] | undefined): void {
+  if (keys && keys.length > 0) track.volumeKeyframes = keys;
+  else delete track.volumeKeyframes;
+}
+
+function checkGainDb(gainDb: number): number {
+  if (!Number.isFinite(gainDb)) fail('invalid-value', 'gain must be a number');
+  return Math.min(
+    GAIN_MAX_DB,
+    Math.max(GAIN_MIN_DB, Math.round(gainDb / GAIN_STEP_DB) * GAIN_STEP_DB),
+  );
+}
+
+function clipAudioDraft(draft: Project, op: OpOf<'setClipAudio'>): void {
+  if (op.clipIds.length === 0) fail('nothing-to-do', 'no clips');
+  for (const id of new Set(op.clipIds)) {
+    const { track, clip } = requireClip(draft, id);
+    if (track.locked) fail('track-locked', `track ${track.name} is locked`);
+    if (track.type !== 'audio') fail('wrong-track-type', 'gain and fades are for audio clips');
+    const length = clipDurationUs(clip);
+    if (op.gainDb === null || op.gainDb === 0) delete clip.gainDb;
+    else if (op.gainDb !== undefined) clip.gainDb = checkGainDb(op.gainDb);
+    const fade = (value: Us | null | undefined): Us | null | undefined => {
+      if (value === undefined || value === null || value === 0) return value === 0 ? null : value;
+      if (!isTime(value)) fail('invalid-value', 'a fade lasts a time ≥ 0');
+      return Math.min(value, length);
+    };
+    const fadeIn = fade(op.fadeInUs);
+    if (fadeIn === null) delete clip.fadeInUs;
+    else if (fadeIn !== undefined) clip.fadeInUs = fadeIn;
+    const fadeOut = fade(op.fadeOutUs);
+    if (fadeOut === null) delete clip.fadeOutUs;
+    else if (fadeOut !== undefined) clip.fadeOutUs = fadeOut;
+  }
+}
+
+function volumeDraft(
+  draft: Project,
+  op: OpOf<'setVolumeKeyframe' | 'removeVolumeKeyframe' | 'moveVolumeKeyframe'>,
+): void {
+  const track = audioTrack(draft, op.trackId);
+  if (track.locked) fail('track-locked', `track ${track.name} is locked`);
+  const keys = track.volumeKeyframes ? plain(track.volumeKeyframes) : undefined;
+  switch (op.type) {
+    case 'setVolumeKeyframe':
+      requireTime(op.tUs, 'the keyframe time');
+      setVolumeKeys(
+        track,
+        upsertVolumeKeyframe(keys, op.tUs, {
+          ...(op.gainDb !== undefined ? { gainDb: checkGainDb(op.gainDb) } : {}),
+          ...(op.easing ? { easing: op.easing } : {}),
+        }),
+      );
+      return;
+    case 'removeVolumeKeyframe': {
+      const next = removeKeyframe(keys, op.tUs);
+      if (next === null) fail('nothing-to-do', `no volume keyframe at ${String(op.tUs)} µs`);
+      setVolumeKeys(track, next);
+      return;
+    }
+    case 'moveVolumeKeyframe': {
+      requireTime(op.toUs, 'the keyframe time');
+      const next = moveKeyframe(keys, op.fromUs, op.toUs);
+      if (next === null) {
+        const there = keys?.some((k) => k.tUs === op.fromUs);
+        fail(
+          there ? 'overlap' : 'nothing-to-do',
+          there
+            ? `another volume keyframe is at ${String(op.toUs)} µs`
+            : `no volume keyframe at ${String(op.fromUs)} µs`,
+        );
+      }
+      setVolumeKeys(track, next);
+      return;
+    }
+  }
+}
+
+function cleanupDraft(draft: Project, op: OpOf<'setCleanup'>): void {
+  const track = audioTrack(draft, op.trackId);
+  if (track.locked) fail('track-locked', `track ${track.name} is locked`);
+  const current: Cleanup = track.cleanup
+    ? plain(track.cleanup)
+    : { noise: 'off', normalize: false };
+  const next: Cleanup = { ...current };
+  if (op.cleanup.noise !== undefined) next.noise = op.cleanup.noise;
+  if (op.cleanup.normalize !== undefined) next.normalize = op.cleanup.normalize;
+  if (op.cleanup.duck === null) delete next.duck;
+  else if (op.cleanup.duck !== undefined) {
+    const d = op.cleanup.duck;
+    const by = audioTrack(draft, d.byTrackId);
+    if (by.id === track.id) fail('invalid-value', 'a track cannot duck under itself');
+    next.duck = {
+      byTrackId: d.byTrackId,
+      amountDb: clampTo(d.amountDb, -40, 0, 'the ducking amount'),
+      attackMs: Math.round(clampTo(d.attackMs, 1, 2000, 'the attack')),
+      releaseMs: Math.round(clampTo(d.releaseMs, 1, 5000, 'the release')),
+    };
+  }
+  if (next.noise === 'off' && !next.normalize && !next.duck) delete track.cleanup;
+  else track.cleanup = next;
 }
 
 function nudgeDraft(draft: Project, op: OpOf<'nudge'>): void {

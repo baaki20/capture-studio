@@ -19,8 +19,8 @@ export function registerEditorHandlers(deps: EditorHandlerDeps): void {
     await deps.openEditor(id);
     return undefined;
   });
-  router.handle('media.audioRender', ({ projectId, ...spec }) =>
-    media.audioRender(projectId, spec),
+  router.handle('media.audioRender', ({ projectId, ...request }) =>
+    media.audioRender(projectId, request),
   );
   router.handle('media.peaks', ({ projectId, mediaId }) =>
     media.asset('peaks', projectId, mediaId),

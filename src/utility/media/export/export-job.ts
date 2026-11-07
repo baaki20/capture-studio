@@ -13,6 +13,11 @@
  * frame port, as raw yuv420p on FFmpeg's stdin; the graph then only carries the audio. Each
  * attempt asks the renderer to start from frame 0. A renderer failure fails the export with the
  * renderer's message and is not retried with another encoder.
+ *
+ * Audio (step 7): media on noise-reduced tracks are read from their cleaned audio in the project
+ * cache (made here when the editor has not made it yet), ducking reads the voice's waveform
+ * peaks (made here when missing), and a normalized export first runs a loudness-measuring pass
+ * (`loudnessMeasure`) whose results the real run applies.
  */
 import { randomBytes } from 'node:crypto';
 import { promises as fs, rmSync } from 'node:fs';
@@ -30,7 +35,20 @@ import { FrameFeedError, type FrameFeed } from './frame-feed';
 import { fileSize } from '../fs-utils';
 import { probeMedia } from '../probe';
 import {
+  cleanedAudioPath,
+  noiseByMedia,
+  parseLoudnorm,
+  wantsNormalize,
+  type LoudnormMeasured,
+} from '../../../shared/project/audio-cleanup';
+import type { PeaksOf } from '../../../shared/project/audio-gain';
+import { parsePeaks } from '../../../shared/project/peaks';
+import { cleanAudio } from '../audio-clean';
+import { spawnChild } from '../child-processes';
+import { generatePeaks } from '../peaks';
+import {
   buildExportGraph,
+  loudnessMeasure,
   resolveExportSettings,
   type ExportSettings,
   type MediaColor,
@@ -156,6 +174,92 @@ async function probeColors(
   return colors;
 }
 
+/** Cleaned audio of the media on noise-reduced tracks, rendered into the cache when missing. */
+async function prepareCleanAudio(
+  options: ExportJobOptions,
+  logger: Logger,
+): Promise<Map<string, string>> {
+  const paths = new Map<string, string>();
+  for (const [mediaId, mode] of noiseByMedia(options.doc)) {
+    const media = options.doc.media.find((m) => m.id === mediaId);
+    if (media?.kind !== 'audio') continue;
+    const output = path.join(options.root, ...cleanedAudioPath(mediaId, mode).split('/'));
+    if (!(await exists(output))) {
+      logger.info(`export: cleaning the audio of ${mediaId} (${mode})`);
+      await cleanAudio({
+        ffmpegPath: options.ffmpegPath,
+        input: path.join(options.root, media.path),
+        output,
+        noise: mode,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    }
+    paths.set(mediaId, output);
+  }
+  return paths;
+}
+
+/** Waveform peaks of the voice tracks other tracks duck under, made into the cache when missing. */
+async function prepareDuckPeaks(options: ExportJobOptions): Promise<PeaksOf> {
+  const voices = new Set<string>();
+  for (const track of options.doc.timeline.tracks) {
+    if (track.type === 'audio' && track.cleanup?.duck) voices.add(track.cleanup.duck.byTrackId);
+  }
+  const peaks = new Map<string, Int16Array>();
+  for (const track of options.doc.timeline.tracks) {
+    if (!voices.has(track.id)) continue;
+    for (const clip of track.clips) {
+      if (peaks.has(clip.mediaId)) continue;
+      const media = options.doc.media.find((m) => m.id === clip.mediaId);
+      if (!media) continue;
+      const file = path.join(options.root, 'cache', `${media.id}.peaks`);
+      if (!(await exists(file))) {
+        await generatePeaks({
+          ffmpegPath: options.ffmpegPath,
+          input: path.join(options.root, media.path),
+          output: file,
+          ...(options.signal ? { signal: options.signal } : {}),
+        });
+      }
+      const bytes = await fs.readFile(file);
+      peaks.set(
+        media.id,
+        parsePeaks(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)),
+      );
+    }
+  }
+  return (mediaId) => peaks.get(mediaId) ?? null;
+}
+
+/** Runs the loudness-measuring pass and returns `loudnorm`'s measurements. */
+async function measureLoudness(
+  ffmpegPath: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<LoudnormMeasured> {
+  const stderr = await new Promise<string>((resolve, reject) => {
+    const child = spawnChild(ffmpegPath, ['-hide_banner', '-nostdin', ...args], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      windowsHide: true,
+      ...(signal ? { signal } : {}),
+    });
+    let text = '';
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (chunk: string) => {
+      text = (text + chunk).slice(-65536);
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve(text);
+      else
+        reject(new Error(`loudness pass: ffmpeg exited with ${String(code)}: ${text.slice(-500)}`));
+    });
+  });
+  const measured = parseLoudnorm(stderr);
+  if (!measured) throw new Error('loudness pass: no measurement in the FFmpeg output');
+  return measured;
+}
+
 export async function runExportJob(options: ExportJobOptions): Promise<ExportJobResult> {
   const logger = options.logger ?? silentLogger;
   const now = options.now ?? (() => performance.now());
@@ -178,21 +282,46 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
       ? await probeColors(options.ffprobePath, root, doc, options.signal)
       : undefined;
 
+    const audioPaths = await prepareCleanAudio(options, logger);
+    const peaksOf = await prepareDuckPeaks(options);
+    let loudness: LoudnormMeasured | undefined;
+
     const attempt = async (
       settings: ExportSettings,
     ): Promise<{ ok: true } | { ok: false; error: FfmpegRunError }> => {
-      const built = buildExportGraph({
-        doc,
-        projectRoot: root,
-        settings,
-        outputPath: temp,
-        filterScriptPath: path.join(work, 'video.txt'),
-        audioScriptPath: path.join(work, 'audio.txt'),
-        chaptersPath: path.join(work, 'chapters.txt'),
-        maskDir: work,
-        ...(mediaColor ? { mediaColor } : {}),
-        video: options.frames ? 'pipe' : 'graph',
-      });
+      const build = () =>
+        buildExportGraph({
+          doc,
+          projectRoot: root,
+          settings,
+          outputPath: temp,
+          filterScriptPath: path.join(work, 'video.txt'),
+          audioScriptPath: path.join(work, 'audio.txt'),
+          chaptersPath: path.join(work, 'chapters.txt'),
+          maskDir: work,
+          ...(mediaColor ? { mediaColor } : {}),
+          video: options.frames ? 'pipe' : 'graph',
+          audioPaths,
+          peaksOf,
+          ...(loudness ? { loudness } : {}),
+        });
+      if (wantsNormalize(doc) && !loudness) {
+        const first = build();
+        if (first.ok && !first.value.audioScriptText.includes('anullsrc')) {
+          const scriptPath = path.join(work, 'loudness.txt');
+          const measure = loudnessMeasure(first.value, scriptPath);
+          await fs.writeFile(scriptPath, measure.scriptText);
+          if (first.value.chaptersText !== null) {
+            await fs.writeFile(path.join(work, 'chapters.txt'), first.value.chaptersText);
+          }
+          await Promise.all(
+            first.value.masks.map((m) => writeMaskPng(m.path, m.mask, m.width, m.height)),
+          );
+          loudness = await measureLoudness(options.ffmpegPath, measure.args, options.signal);
+          logger.info(`export: loudness ${loudness.input_i} LUFS, normalizing to −16 LUFS`);
+        }
+      }
+      const built = build();
       if (!built.ok) {
         throw new ExportError(
           built.error.code === 'offline' ? 'offline' : 'invalid',

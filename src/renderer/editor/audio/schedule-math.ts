@@ -4,7 +4,13 @@
  * (`planChunk`), merging decoded pieces into ~1 s chunks (`ChunkAccumulator`), per-track gains
  * after mute and solo, and the signature that decides when an edit needs rescheduling.
  */
-import { audioRenderKey, type AudioRenderSpec } from '../../../shared/project/audio-speed';
+import type { AudioRenderRequest } from '../../../shared/ipc/contract';
+import {
+  cleanedAudioKey,
+  noiseByTrack,
+  type NoiseMode,
+} from '../../../shared/project/audio-cleanup';
+import { audioRenderKey } from '../../../shared/project/audio-speed';
 import {
   audioSegments,
   dbToLinear,
@@ -229,6 +235,7 @@ export function scheduleSignature(
     audioSegments(doc, { includeInaudible: true }),
     mediaUrls,
     renders,
+    noiseByTrack(doc),
   );
   return JSON.stringify(
     segments.map((s) => [
@@ -245,35 +252,66 @@ export function scheduleSignature(
   );
 }
 
-/** The preview renders a document's sped-up audio segments need (R2.18). */
-export function wantedRenders(segments: readonly AudioSegment[]): AudioRenderSpec[] {
-  return segments
-    .filter((s) => s.speed !== 1 && !s.offline)
-    .map((s) => ({
-      mediaId: s.mediaId,
-      fileStartUs: s.fileStartUs,
-      fileEndUs: s.fileEndUs,
-      speed: s.speed,
-    }));
+/** A cache render the preview asks main for, by key. */
+export interface WantedRender {
+  key: string;
+  request: AudioRenderRequest;
 }
 
 /**
- * What the preview can play: segments at speed 1 as they are, and each sped-up segment as its
- * render (`renders`: key → URL), a file that already holds the range at that speed with its
- * pitch kept, so it plays from 0 at the media's clock ratio. A sped-up segment whose render is
- * not ready yet is left out (silent until it is). `urls` maps every segment's media ID (a render
- * gets `render:<key>`) to its URL.
+ * The cache renders a document's audio needs in the preview: the cleaned audio of media on
+ * noise-reduced tracks (R2.14), and every sped-up segment at its speed (R2.18), made from the
+ * cleaned audio on such tracks.
+ */
+export function wantedRenders(
+  segments: readonly AudioSegment[],
+  noise: ReadonlyMap<string, Exclude<NoiseMode, 'off'>> = new Map(),
+): WantedRender[] {
+  const out = new Map<string, AudioRenderRequest>();
+  for (const s of segments) {
+    if (s.offline) continue;
+    const mode = noise.get(s.trackId);
+    if (mode) out.set(cleanedAudioKey(s.mediaId, mode), { mediaId: s.mediaId, noise: mode });
+    if (s.speed !== 1) {
+      const range = { fileStartUs: s.fileStartUs, fileEndUs: s.fileEndUs, speed: s.speed };
+      out.set(audioRenderKey({ mediaId: s.mediaId, noise: mode ?? 'off', ...range }), {
+        mediaId: s.mediaId,
+        ...(mode ? { noise: mode } : {}),
+        range,
+      });
+    }
+  }
+  return [...out].map(([key, request]) => ({ key, request }));
+}
+
+/**
+ * What the preview can play, given the ready renders (`renders`: key → URL):
+ * - on a noise-reduced track, a segment at speed 1 plays the media's cleaned audio (same file
+ *   times) once it is ready, and the original until then;
+ * - a sped-up segment plays its render, a file that already holds the range at that speed with
+ *   its pitch kept, from 0 at the media's clock ratio; it is left out (silent) until ready.
+ * `urls` maps every segment's media ID (a render gets `render:<key>`) to its URL.
  */
 export function playableSegments(
   segments: readonly AudioSegment[],
   mediaUrls: Record<string, string>,
   renders: ReadonlyMap<string, string>,
+  noise: ReadonlyMap<string, Exclude<NoiseMode, 'off'>> = new Map(),
 ): { segments: AudioSegment[]; urls: Record<string, string> } {
   const urls: Record<string, string> = { ...mediaUrls };
   const out: AudioSegment[] = [];
   for (const s of segments) {
+    const mode = noise.get(s.trackId);
     if (s.speed === 1) {
-      out.push(s);
+      const cleanKey = mode ? cleanedAudioKey(s.mediaId, mode) : null;
+      const cleanUrl = cleanKey ? renders.get(cleanKey) : undefined;
+      if (cleanKey && cleanUrl) {
+        const mediaId = `render:${cleanKey}`;
+        urls[mediaId] = cleanUrl;
+        out.push({ ...s, mediaId });
+      } else {
+        out.push(s);
+      }
       continue;
     }
     const key = audioRenderKey({
@@ -281,6 +319,7 @@ export function playableSegments(
       fileStartUs: s.fileStartUs,
       fileEndUs: s.fileEndUs,
       speed: s.speed,
+      noise: mode ?? 'off',
     });
     const url = renders.get(key);
     if (!url) continue;
