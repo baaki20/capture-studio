@@ -2923,6 +2923,30 @@
                     "to",
                     "angleDeg"
                   ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "image"
+                    },
+                    "mediaId": {
+                      "type": "string",
+                      "pattern": "^med_[0-9A-Za-z]+$",
+                      "description": "An imported picture, drawn to cover the canvas"
+                    },
+                    "color": {
+                      "type": "string",
+                      "pattern": "^#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?$",
+                      "description": "Shown while the picture loads or if it is missing"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "mediaId",
+                    "color"
+                  ]
                 }
               ]
             },

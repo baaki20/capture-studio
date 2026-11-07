@@ -417,6 +417,11 @@ export const BeautifySchema = z.object({
       to: HexColor,
       angleDeg: z.number().min(0).max(360),
     }),
+    z.object({
+      type: z.literal('image'),
+      mediaId: prefixedId('med').describe('An imported picture, drawn to cover the canvas'),
+      color: HexColor.describe('Shown while the picture loads or if it is missing'),
+    }),
   ]),
   padding: z.number().min(0).max(0.3).describe('Fraction of the canvas short side'),
   cornerRadius: z.number().min(0).max(0.2).describe('Fraction of the canvas short side'),

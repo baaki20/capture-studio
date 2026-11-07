@@ -400,7 +400,8 @@ export class WebGlCompositor {
     this.frameNumber += 1;
     gl.viewport(0, 0, this.size.width, this.size.height);
     const [r, g, b] = parseHexColor(
-      background.type === 'color' ? background.color : background.from,
+      // A picture background is the scene's bottom layer; this colour shows until it decodes.
+      background.type === 'gradient' ? background.from : background.color,
     );
     gl.disable(gl.BLEND);
     gl.clearColor(r, g, b, 1);

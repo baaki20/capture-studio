@@ -250,6 +250,16 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
     }
   }
 
+  // An image background refers to a picture of the project.
+  const background = project.timeline.beautify?.background;
+  if (background?.type === 'image' && mediaById.get(background.mediaId)?.kind !== 'video') {
+    violations.push({
+      code: 'missing-media',
+      message: `the background refers to unknown or non-picture media ${background.mediaId}`,
+      path: ['timeline', 'beautify', 'background', 'mediaId'],
+    });
+  }
+
   checkV2Timeline(project, minDurationUs, violations);
   return violations;
 }

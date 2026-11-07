@@ -1,6 +1,7 @@
 /**
  * Background and zoom panels of the inspector (R2.9, R2.11). The background panel turns the
- * beautify setting on and off and edits its fill (swatches, colours, gradient angle), padding,
+ * beautify setting on and off and edits its fill (swatches, colours, gradient angle, or a picture
+ * imported into the project and drawn to cover the canvas), padding,
  * rounded corners and shadow. The zoom panel edits the camera keyframe in effect at the playhead
  * (zoom and centre), zooms the In–Out range, and lists the camera keyframes. Operations come
  * from `screen-style-ops.ts`; sliders group a whole drag into one undo step.
@@ -26,8 +27,11 @@ import {
   cameraZoomOp,
   DEFAULT_SCREEN_SHADOW,
   gradientOf,
+  imageBackgroundOp,
   plainBackgroundOp,
   removeCameraKeyframeOp,
+  withFillColor,
+  withoutPicture,
 } from './screen-style-ops';
 
 const percent = (fraction: number) => `${String(Math.round(fraction * 100))} %`;
@@ -38,6 +42,29 @@ export function BackgroundSection({ doc }: { doc: Project }) {
   const gesture = useGesture();
   const beautify = doc.timeline.beautify;
   const shadow = beautify?.shadow;
+  const { api, projectId, docStore, ui } = useEditor();
+  const [importing, setImporting] = useState(false);
+  /** Imports one picture and makes it the background (one undo step). */
+  const choosePicture = async () => {
+    setImporting(true);
+    try {
+      const result = await api.media.importMedia?.(projectId);
+      const file = result?.files[0];
+      if (!result || !file) return;
+      const picture = file.items.find((item) => item.still);
+      const media = picture && file.media.find((m) => m.id === picture.mediaId);
+      if (!media) {
+        ui.getState().setStatus('Choose a picture (PNG, JPEG, WebP…) for the background.');
+        return;
+      }
+      docStore.getState().addMediaUrls(result.urls);
+      apply(imageBackgroundOp(doc, media));
+    } catch (error) {
+      ui.getState().setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setImporting(false);
+    }
+  };
   const short = Math.min(doc.timeline.canvas.width, doc.timeline.canvas.height);
   const px = (fraction: number) => `${String(Math.round(fraction * short))} px`;
   return (
@@ -77,6 +104,11 @@ export function BackgroundSection({ doc }: { doc: Project }) {
               <input
                 type="color"
                 aria-label={beautify.background.type === 'gradient' ? 'Gradient start' : 'Colour'}
+                title={
+                  beautify.background.type === 'image'
+                    ? 'Shown while the picture loads or if it is missing'
+                    : undefined
+                }
                 value={
                   beautify.background.type === 'gradient'
                     ? beautify.background.from
@@ -88,7 +120,7 @@ export function BackgroundSection({ doc }: { doc: Project }) {
                       background:
                         beautify.background.type === 'gradient'
                           ? gradientOf(beautify.background, { from: e.target.value })
-                          : { type: 'color', color: e.target.value },
+                          : withFillColor(beautify.background, e.target.value),
                     }),
                   )
                 }
@@ -123,6 +155,37 @@ export function BackgroundSection({ doc }: { doc: Project }) {
             >
               {beautify.background.type === 'gradient' ? 'Solid' : 'Gradient'}
             </button>
+          </div>
+          <div className={styles.field}>
+            <span>Picture</span>
+            <span className={styles.group}>
+              <button
+                type="button"
+                disabled={importing}
+                data-testid="background-picture"
+                onClick={() => void choosePicture()}
+              >
+                {importing
+                  ? 'Importing…'
+                  : beautify.background.type === 'image'
+                    ? 'Change…'
+                    : 'Choose…'}
+              </button>
+              {beautify.background.type === 'image' ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    apply(
+                      beautifyOp(doc, {
+                        background: withoutPicture(beautify.background),
+                      }),
+                    )
+                  }
+                >
+                  Remove
+                </button>
+              ) : null}
+            </span>
           </div>
           {beautify.background.type === 'gradient' ? (
             <Slider

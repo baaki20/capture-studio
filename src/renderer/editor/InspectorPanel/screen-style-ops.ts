@@ -22,7 +22,7 @@ import {
   mergeBeautify,
   type BeautifyChange,
 } from '../../../shared/project/beautify';
-import type { Beautify, Easing, Project } from '../../../shared/project/schema';
+import type { Beautify, Easing, Media, Project } from '../../../shared/project/schema';
 import type { TimelineOp } from '../../../shared/project/timeline-ops';
 
 export { DEFAULT_SCREEN_SHADOW };
@@ -48,9 +48,35 @@ export const BACKGROUND_PRESETS: { label: string; background: Beautify['backgrou
 
 /** The CSS for a background swatch (the compositor draws gradients the CSS way). */
 export function backgroundCss(background: Beautify['background']): string {
-  return background.type === 'color'
-    ? background.color
-    : `linear-gradient(${String(background.angleDeg)}deg, ${background.from}, ${background.to})`;
+  return background.type === 'gradient'
+    ? `linear-gradient(${String(background.angleDeg)}deg, ${background.from}, ${background.to})`
+    : background.color;
+}
+
+/** A picture background (R2.11) from an imported picture, added in the same undo step. */
+export function imageBackgroundOp(doc: Project, picture: Media): TimelineOp {
+  const current = doc.timeline.beautify?.background;
+  const color = current?.type === 'gradient' ? current.from : (current?.color ?? '#000000');
+  return {
+    type: 'setBeautify',
+    beautify: mergeBeautify(doc.timeline.beautify, {
+      background: { type: 'image', mediaId: picture.id, color },
+    }),
+    media: [picture],
+  };
+}
+
+/** The background with its fill colour changed (a picture keeps its picture). */
+export function withFillColor(
+  background: Beautify['background'],
+  color: string,
+): Beautify['background'] {
+  return background.type === 'image' ? { ...background, color } : { type: 'color', color };
+}
+
+/** The picture removed: its fill colour stays as a solid background. */
+export function withoutPicture(background: Beautify['background']): Beautify['background'] {
+  return background.type === 'image' ? { type: 'color', color: background.color } : background;
 }
 
 /** The beautify setting after a change, starting from the defaults when the background is plain. */

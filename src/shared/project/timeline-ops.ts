@@ -207,7 +207,7 @@ export type TimelineOp =
       mode: FaceMode;
       easeUs?: Us;
     }
-  | { type: 'setBeautify'; beautify: Beautify | null }
+  | { type: 'setBeautify'; beautify: Beautify | null; media?: Media[] }
   | { type: 'setCameraKeyframe'; tUs: Us; rect?: FRect; easing?: Easing }
   | { type: 'removeCameraKeyframe'; tUs: Us }
   | { type: 'moveCameraKeyframe'; fromUs: Us; toUs: Us }
@@ -669,7 +669,7 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
       layoutKeyframeDraft(draft, op);
       return;
     case 'setBeautify':
-      beautifyDraft(draft, op.beautify);
+      beautifyDraft(draft, op.beautify, op.media);
       return;
     case 'setCameraKeyframe':
     case 'removeCameraKeyframe':
@@ -1283,7 +1283,19 @@ const clampTo = (v: number, lo: number, hi: number, name: string) => {
   return Math.min(hi, Math.max(lo, v));
 };
 
-function beautifyDraft(draft: Project, beautify: Beautify | null): void {
+function beautifyDraft(draft: Project, beautify: Beautify | null, media?: Media[]): void {
+  for (const m of media ?? []) {
+    if (draft.media.some((known) => known.id === m.id)) {
+      fail('invalid-value', `media ${m.id} already exists`);
+    }
+    draft.media.push(plain(m));
+  }
+  if (beautify?.background.type === 'image') {
+    const { mediaId } = beautify.background;
+    const picture = draft.media.find((m) => m.id === mediaId);
+    if (!picture) fail('unknown-media', `unknown media ${mediaId}`);
+    if (picture.kind !== 'video') fail('invalid-value', 'the background must be a picture');
+  }
   if (beautify === null) {
     if (!draft.timeline.beautify) fail('nothing-to-do', 'the background is already plain');
     delete draft.timeline.beautify;

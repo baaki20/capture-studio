@@ -123,7 +123,12 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
     mode: FaceMode,
     easeUs: NonNegativeUs.optional(),
   }),
-  z.strictObject({ type: z.literal('setBeautify'), beautify: BeautifySchema.nullable() }),
+  z.strictObject({
+    type: z.literal('setBeautify'),
+    beautify: BeautifySchema.nullable(),
+    /** A picture for an image background, added in the same step. */
+    media: z.array(MediaSchema).max(1).optional(),
+  }),
   z.strictObject({
     type: z.literal('setCameraKeyframe'),
     tUs: NonNegativeUs,

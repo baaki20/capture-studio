@@ -504,12 +504,55 @@ export function transitionLayers(
 // ---------------------------------------------------------------------------------------------
 // Scene
 
+/** Track id of the picture background's layer (it belongs to no track). */
+export const BACKGROUND_LAYER_ID = 'background';
+
+/**
+ * The picture background (R2.11) as the bottom layer: the picture cropped to the canvas's aspect
+ * and centred ("cover"), on the whole canvas, its first frame. The camera does not move it.
+ */
+export function backgroundLayer(doc: Project): SceneLayer | null {
+  const background = doc.timeline.beautify?.background;
+  if (background?.type !== 'image') return null;
+  const picture = doc.media.find((m) => m.id === background.mediaId);
+  if (!picture?.video) return null;
+  const { width: cw, height: ch } = doc.timeline.canvas;
+  const { width: pw, height: ph } = picture.video;
+  const scale = Math.max(cw / pw, ch / ph);
+  const sw = Math.min(pw, Math.round(cw / scale));
+  const sh = Math.min(ph, Math.round(ch / scale));
+  return {
+    trackId: BACKGROUND_LAYER_ID,
+    trackIndex: -1,
+    kind: 'screen',
+    clipId: BACKGROUND_LAYER_ID,
+    mediaId: picture.id,
+    sourceRect: {
+      x: Math.floor((pw - sw) / 2),
+      y: Math.floor((ph - sh) / 2),
+      width: Math.max(1, sw),
+      height: Math.max(1, sh),
+    },
+    destRect: { x: 0, y: 0, width: cw, height: ch },
+    mask: { shape: 'rectangle', radiusPx: 0 },
+    mirror: false,
+    offline: picture.status !== 'ok',
+    refTimeUs: 0,
+    fileTimeUs: 0,
+    opacity: 1,
+    tint: null,
+    border: null,
+    shadow: null,
+  };
+}
+
 /** Everything drawn at timeline time `tUs`. */
 export function sceneAt(doc: Project, tUs: Us): Scene {
   const canvas = { width: doc.timeline.canvas.width, height: doc.timeline.canvas.height };
   const camera = cameraRectAt(doc, tUs);
   const media = new Map(doc.media.map((m) => [m.id, m]));
-  const layers: SceneLayer[] = [];
+  const background = backgroundLayer(doc);
+  const layers: SceneLayer[] = background ? [background] : [];
   /** A video layer placed on the canvas: face layout, or screen area, beautify and camera. */
   const place = (layer: VideoLayer): SceneLayer | null => {
     const track = doc.timeline.tracks[layer.trackIndex];

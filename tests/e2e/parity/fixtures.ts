@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { frameTimeUs } from '../../../src/shared/export/frame-render';
 import { cameraRect } from '../../../src/shared/project/camera-keyframes';
+import { importedMediaEntry } from '../../../src/shared/project/media-import';
 import { TEXT_PRESETS, newObject, type ObjectKind } from '../../../src/shared/project/objects';
 import type { RectF } from '../../../src/shared/project/scene';
 import { sceneAt } from '../../../src/shared/project/scene';
@@ -635,6 +636,66 @@ const timeEdits: ParityFixture = {
   },
 };
 
+/**
+ * Phase 2: a picture background (R2.11). The picture is 1600×1200 (4:3), so "cover" crops its
+ * top and bottom on the 16:9 canvas; the padded screen sits on it with rounded corners.
+ */
+const imageBackground: ParityFixture = {
+  name: 'p2-image-background',
+  frames: [0, 15, 30, 45, 60, 75, 90, 105, 120, 140],
+  minSsim: 0.98,
+  regions: [],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 5;
+    let doc = recorded(seconds, '9', 'Parity image background');
+    const ids = { generateId: counterIds('G') };
+    doc = unwrap(
+      applyOp(doc, { type: 'setHidden', trackId: trackByName(doc, 'Face').id, hidden: true }, ids),
+    );
+    const pictureId = 'med_01JBQ4ZJ4X6V3K8N2M7P5R9PIC';
+    const picture = importedMediaEntry(pictureId, 'media/background.mp4', {
+      kind: 'video',
+      durationUs: 33_334,
+      video: { codec: 'h264', width: 1600, height: 1200, frameRateNominal: 30 },
+    });
+    doc = unwrap(
+      applyOp(
+        doc,
+        {
+          type: 'setBeautify',
+          beautify: {
+            background: { type: 'image', mediaId: pictureId, color: '#000000' },
+            padding: 0.1,
+            cornerRadius: 0.03,
+          },
+          media: [picture],
+        },
+        ids,
+      ),
+    );
+    const saved = save(projectsDir, doc, seconds);
+    // A smooth, colourful picture (one frame, like an imported PNG).
+    ff([
+      '-f',
+      'lavfi',
+      '-i',
+      'gradients=s=1600x1200:c0=0x2050C0:c1=0xE0A030:c2=0x30A060:n=3:speed=0:d=0.04',
+      '-frames:v',
+      '1',
+      '-c:v',
+      'libx264',
+      '-preset',
+      'veryfast',
+      '-crf',
+      '16',
+      ...BT601,
+      path.join(saved.root, 'media', 'background.mp4'),
+    ]);
+    return saved;
+  },
+};
+
 export const FIXTURES: readonly ParityFixture[] = [
   roundedFace,
   faceKeyframes,
@@ -644,6 +705,7 @@ export const FIXTURES: readonly ParityFixture[] = [
   callouts,
   privacy,
   timeEdits,
+  imageBackground,
 ];
 
 /** Timeline time of an output frame. */
