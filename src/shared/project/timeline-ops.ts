@@ -236,6 +236,7 @@ export type TimelineOp =
   | { type: 'removeVolumeKeyframe'; trackId: string; tUs: Us }
   | { type: 'moveVolumeKeyframe'; trackId: string; fromUs: Us; toUs: Us }
   | { type: 'setCleanup'; trackId: string; cleanup: CleanupPatch }
+  | { type: 'addMedia'; media: Media[]; tracks: Track[]; atUs: Us }
   | { type: 'nudge'; target: NudgeTarget; syncAdjustUs: Us }
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
@@ -605,6 +606,11 @@ export const moveVolumeKeyframe = opFn('moveVolumeKeyframe');
  * export, and ducking under another (voice) track.
  */
 export const setCleanup = opFn('setCleanup');
+/**
+ * Adds media and the tracks that show them at `atUs` (imported files, extra takes, R2.21,
+ * R2.22); see `media-import.ts`. Clip times in `tracks` count from 0.
+ */
+export const addMedia = opFn('addMedia');
 /** Sets `syncAdjustUs` of a component's (or explicit) media; clip positions do not change. */
 export const nudge = opFn('nudge');
 export const unlink = opFn('unlink');
@@ -704,6 +710,9 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
       return;
     case 'setCleanup':
       cleanupDraft(draft, op);
+      return;
+    case 'addMedia':
+      addMediaDraft(draft, op, ctx);
       return;
     case 'nudge':
       nudgeDraft(draft, op);
@@ -1991,6 +2000,52 @@ function cleanupDraft(draft: Project, op: OpOf<'setCleanup'>): void {
   }
   if (next.noise === 'off' && !next.normalize && !next.duck) delete track.cleanup;
   else track.cleanup = next;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Adding media
+
+function addMediaDraft(draft: Project, op: OpOf<'addMedia'>, ctx: Ctx): void {
+  requireTime(op.atUs, 'the start');
+  if (op.tracks.length === 0) fail('nothing-to-do', 'nothing to add');
+  const known = new Set(draft.media.map((m) => m.id));
+  for (const m of op.media) {
+    if (known.has(m.id)) fail('invalid-value', `media ${m.id} already exists`);
+    known.add(m.id);
+  }
+  for (const track of op.tracks) {
+    for (const clip of track.clips) {
+      if (!known.has(clip.mediaId)) fail('unknown-media', `unknown media ${clip.mediaId}`);
+      if (clipDurationUs(clip) < ctx.minUs) {
+        fail('invalid-value', 'that media is shorter than one frame of the timeline');
+      }
+    }
+  }
+  draft.media.push(...op.media.map((m) => plain(m)));
+  // New IDs: the same link in the given tracks stays one link.
+  const links = new Map<string, string>();
+  const linkFor = (id: string | null): string | null => {
+    if (id === null) return null;
+    const known = links.get(id) ?? ctx.id('link');
+    links.set(id, known);
+    return known;
+  };
+  const placed = op.tracks.map((track): Track => {
+    const clips = track.clips.map((clip) => ({
+      ...plain(clip),
+      id: ctx.id('clip'),
+      timelineStartUs: clip.timelineStartUs + op.atUs,
+      linkId: linkFor(clip.linkId),
+    }));
+    return { ...plain(track), id: ctx.id('track'), componentId: null, clips } as Track;
+  });
+  const tracks = draft.timeline.tracks;
+  const screenIndex = tracks.findIndex((t) => t.type === 'video' && t.layout.kind === 'screen');
+  const video = placed.filter((t) => t.type === 'video');
+  const audio = placed.filter((t) => t.type === 'audio');
+  tracks.splice(screenIndex + 1, 0, ...video);
+  tracks.push(...audio);
+  normalizeLinks(draft);
 }
 
 function nudgeDraft(draft: Project, op: OpOf<'nudge'>): void {

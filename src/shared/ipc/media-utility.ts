@@ -55,6 +55,15 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
     output: AbsPath,
     noise: z.enum(['light', 'strong']),
   }),
+  /** A picture, video or audio file into a project's `media/` (`media-import.ts`). */
+  z.object({
+    kind: z.literal('importMedia'),
+    input: AbsPath,
+    mediaDir: AbsPath,
+    baseName: z.string().regex(/^[\w.-]+$/),
+  }),
+  /** A 720p preview proxy of a video (`media-import.ts`). */
+  z.object({ kind: z.literal('proxy'), input: AbsPath, output: AbsPath }),
   z.object({ kind: z.literal('encoders.probe') }),
   /**
    * Export a project snapshot to MP4 (§4.3.9). Main validated `doc` against the full schema;
@@ -80,6 +89,8 @@ export const JOB_KINDS = [
   'thumbnails',
   'audioRender',
   'cleanAudio',
+  'importMedia',
+  'proxy',
   'encoders.probe',
   'export',
 ] as const;
@@ -146,6 +157,32 @@ export const JOB_RESULT_SCHEMAS = {
   thumbnails: z.object({ indexPath: AbsPath, index: ThumbnailIndexSchema }),
   audioRender: z.object({ output: AbsPath }),
   cleanAudio: z.object({ output: AbsPath }),
+  importMedia: z.object({
+    files: z.array(
+      z.object({
+        kind: z.enum(['video', 'audio']),
+        still: z.boolean(),
+        path: AbsPath,
+        durationUs: z.int().positive(),
+        video: z
+          .object({
+            codec: z.string(),
+            width: z.int().positive(),
+            height: z.int().positive(),
+            frameRateNominal: z.number().positive(),
+          })
+          .optional(),
+        audio: z
+          .object({
+            codec: z.string(),
+            sampleRate: z.int().positive(),
+            channels: z.int().positive(),
+          })
+          .optional(),
+      }),
+    ),
+  }),
+  proxy: z.object({ output: AbsPath }),
   'encoders.probe': FfmpegEncoderReportSchema,
   export: z.object({
     output: AbsPath,

@@ -28,7 +28,12 @@ function controlledRunner() {
   const started: string[] = [];
   const finish = new Map<string, (ok: boolean) => void>();
   const runJob = vi.fn((job: Parameters<CacheJobRunner>[0]) => {
-    const name = job.kind === 'thumbnails' ? `${job.mediaId}.thumbs` : path.basename(job.output);
+    const name =
+      job.kind === 'thumbnails'
+        ? `${job.mediaId}.thumbs`
+        : job.kind === 'importMedia'
+          ? job.baseName
+          : path.basename(job.output);
     started.push(name);
     return new Promise((resolve, reject) => {
       finish.set(name, (ok) => (ok ? resolve({}) : reject(new Error('ffmpeg failed'))));

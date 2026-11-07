@@ -17,7 +17,9 @@ import {
   NRectSchema,
   ClipSchema,
   MarkerSchema,
+  MediaSchema,
   ShadowSchema,
+  TrackSchema,
   TimelineObjectSchema,
   prefixedId,
 } from './schema';
@@ -229,6 +231,12 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
         .nullable()
         .optional(),
     }),
+  }),
+  z.strictObject({
+    type: z.literal('addMedia'),
+    media: z.array(MediaSchema),
+    tracks: z.array(TrackSchema).min(1),
+    atUs: NonNegativeUs,
   }),
   z.strictObject({ type: z.literal('nudge'), target: NudgeTargetSchema, syncAdjustUs: Us }),
   z.strictObject({ type: z.literal('unlink'), clipIds: ClipIds }),

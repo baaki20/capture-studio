@@ -4,6 +4,7 @@
  * and thumbnail assets, the audio scheduler (master clock), the transport and the preview hub
  * the preview pane attaches its worker to.
  */
+import { ProxyUrls } from './preview/proxy-urls';
 import { AudioRenders } from './audio/audio-renders';
 import type { EditorPreloadApi } from '../../shared/ipc/preload-api';
 import type { Project } from '../../shared/project/schema';
@@ -54,6 +55,8 @@ export interface EditorServices {
   scheduler: AudioScheduler;
   playback: Playback;
   autosave: Autosave;
+  /** The media URLs the preview decodes (proxies in place of large videos). */
+  previewUrls(): Record<string, string>;
   dispose(): void;
 }
 
@@ -70,6 +73,13 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
   // Ducking follows the voice's peaks: recompute envelopes when they load.
   const offAssetsForEnvelopes = assets.onChange(() => scheduler.refreshEnvelopes());
   const renders = new AudioRenders(api.media, projectId);
+  // The preview decodes proxies of large videos once they are ready (the export never does).
+  const proxies = new ProxyUrls(api.media, projectId);
+  const previewUrls = () => ({ ...docStore.getState().mediaUrls, ...proxies.urls });
+  const offProxies = proxies.onChange(() => {
+    const doc = docStore.getState().doc;
+    if (doc) preview.setDoc(doc, previewUrls());
+  });
   const offRenders = renders.onChange((ready) => scheduler.setRenders(ready));
   const playback = new Playback({
     docStore,
@@ -92,7 +102,8 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
     if (!state.doc) return;
     if (state.doc === previous.doc && state.mediaUrls === previous.mediaUrls) return;
     scheduler.setDoc(state.doc, state.mediaUrls);
-    preview.setDoc(state.doc, state.mediaUrls);
+    preview.setDoc(state.doc, previewUrls());
+    proxies.load(state.doc);
     assets.load(state.doc);
     renders.load(state.doc);
     playback.refresh();
@@ -108,6 +119,7 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
     scheduler,
     playback,
     autosave,
+    previewUrls,
     dispose() {
       unsubscribe();
       playback.dispose();
@@ -115,6 +127,8 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
       void context.close();
       assets.dispose();
       offRenders();
+      offProxies();
+      proxies.dispose();
       offAssetsForEnvelopes();
       renders.dispose();
       void autosave.flush().finally(() => autosave.dispose());

@@ -84,6 +84,8 @@ export interface DocumentState {
 
 export interface DocumentActions {
   load(open: ProjectOpenResult): void;
+  /** URLs of media added since the project opened (imports, takes). */
+  addMediaUrls(urls: Record<string, string>): void;
   apply(op: TimelineOp, options?: ApplyOptions): Result<Project, EditError>;
   applyBatch(
     ops: readonly TimelineOp[],
@@ -153,6 +155,7 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   removeVolumeKeyframe: 'Delete volume keyframe',
   moveVolumeKeyframe: 'Move volume keyframe',
   setCleanup: 'Change audio cleanup',
+  addMedia: 'Add media',
   nudge: 'Sync nudge',
   unlink: 'Unlink',
   relink: 'Link',
@@ -328,6 +331,7 @@ export function createDocumentStore(options: DocumentStoreOptions = {}): Documen
 
     return {
       ...EMPTY,
+      addMediaUrls: (urls) => set({ mediaUrls: { ...get().mediaUrls, ...urls } }),
       load: (open) => {
         set({ ...opened(open), notice: null });
       },

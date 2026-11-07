@@ -22,6 +22,13 @@ export function registerEditorHandlers(deps: EditorHandlerDeps): void {
   router.handle('media.audioRender', ({ projectId, ...request }) =>
     media.audioRender(projectId, request),
   );
+  router.handle('media.proxy', ({ projectId, mediaId }) => media.proxy(projectId, mediaId));
+  router.handle('project.importMedia', ({ projectId }, context) =>
+    media.importMedia(projectId, context.senderId),
+  );
+  router.handle('project.addTake', ({ projectId }, context) =>
+    media.addTake(projectId, context.senderId),
+  );
   router.handle('media.peaks', ({ projectId, mediaId }) =>
     media.asset('peaks', projectId, mediaId),
   );

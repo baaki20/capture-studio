@@ -29,6 +29,8 @@ interface EditorDebugApi {
   /** Renders the playhead (or `tUs`) and measures the preview picture. */
   probePreview(tUs?: number): Promise<{ meanLuma: number; nonBlack: number; exact: boolean }>;
   saveStatus(): string;
+  /** The media URLs the preview decodes (proxies in place of large videos). */
+  previewUrls(): Record<string, string>;
   /** Renders `tUs` and returns the composited picture, RGBA top-down, base64 (R1.48 parity). */
   capturePreview(
     tUs: number,

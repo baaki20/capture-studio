@@ -650,6 +650,56 @@ async function start(): Promise<void> {
         : await dialog.showOpenDialog(options);
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
+    chooseImports: async (senderId) => {
+      const sender = webContents.fromId(senderId);
+      const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
+      const options: Electron.OpenDialogOptions = {
+        title: 'Import pictures, videos or audio',
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          {
+            name: 'Pictures, video and audio',
+            extensions: [
+              'png',
+              'jpg',
+              'jpeg',
+              'webp',
+              'gif',
+              'bmp',
+              'mp4',
+              'm4v',
+              'mov',
+              'webm',
+              'mkv',
+              'avi',
+              'm4a',
+              'mp3',
+              'wav',
+              'ogg',
+              'opus',
+              'flac',
+              'aac',
+            ],
+          },
+        ],
+      };
+      const result = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      return result.canceled ? [] : result.filePaths;
+    },
+    chooseTake: async (senderId) => {
+      const sender = webContents.fromId(senderId);
+      const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
+      const options: Electron.OpenDialogOptions = {
+        title: 'Add a take: choose a recorded project folder',
+        properties: ['openDirectory'],
+      };
+      const result = parent
+        ? await dialog.showOpenDialog(parent, options)
+        : await dialog.showOpenDialog(options);
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
     logger: log,
   });
   registerEditorHandlers({

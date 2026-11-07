@@ -4,6 +4,7 @@
  * deterministic (`clp_T0001`, …), so tests can compare documents.
  */
 import type { ObjectPatch } from '../../src/shared/project/object-patch';
+import { importedMediaEntry, importedTracks } from '../../src/shared/project/media-import';
 import { newObject } from '../../src/shared/project/objects';
 import fc from 'fast-check';
 import {
@@ -219,6 +220,7 @@ const OP_KINDS = [
   'volume-key',
   'volume-key-remove',
   'cleanup',
+  'add-media',
   'nudge',
   'unlink',
   'relink',
@@ -559,6 +561,29 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
               }
             : {}),
         },
+      };
+    }
+    case 'add-media': {
+      const id = `med_F${String(Math.round(t.a * 1e9))}`;
+      const still = t.flag;
+      return {
+        type: 'addMedia',
+        media: [
+          importedMediaEntry(id, 'media/import.mp4', {
+            kind: 'video',
+            durationUs: still ? 33_334 : 1 + Math.round(t.c * 5_000_000),
+            video: { codec: 'h264', width: 640, height: 360, frameRateNominal: 30 },
+          }),
+        ],
+        tracks: importedTracks('import', [
+          {
+            mediaId: id,
+            kind: 'video',
+            still,
+            durationUs: still ? 33_334 : 1 + Math.round(t.c * 5_000_000),
+          },
+        ]),
+        atUs: time(t.b),
       };
     }
     case 'crop':

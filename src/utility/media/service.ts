@@ -24,6 +24,7 @@ import { ffmpegTooOldError } from './ffmpeg-runner';
 import { generatePeaks } from './peaks';
 import { renderAudio } from './audio-render';
 import { cleanAudio } from './audio-clean';
+import { importMedia, makeProxy } from './media-import';
 import { probeFfmpegVersion, type FfmpegVersion } from './probe';
 import {
   attachClockPort,
@@ -319,6 +320,24 @@ export class MediaService {
             input: job.input,
             output: job.output,
             noise: job.noise,
+            signal,
+          });
+          break;
+        case 'importMedia':
+          result = await importMedia({
+            ffmpegPath: ffmpeg.ffmpegPath,
+            ffprobePath: ffmpeg.ffprobePath,
+            input: job.input,
+            mediaDir: job.mediaDir,
+            baseName: job.baseName,
+            signal,
+          });
+          break;
+        case 'proxy':
+          result = await makeProxy({
+            ffmpegPath: ffmpeg.ffmpegPath,
+            input: job.input,
+            output: job.output,
             signal,
           });
           break;

@@ -19,7 +19,9 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { OfflineMedia } from '../../shared/ipc/contract';
+import type { AddTakeResult, ImportMediaResult, OfflineMedia } from '../../shared/ipc/contract';
+import { newId } from '../../shared/ids';
+import { importedMediaEntry, needsProxy } from '../../shared/project/media-import';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
 import type { AudioRenderRequest } from '../../shared/ipc/contract';
@@ -55,6 +57,10 @@ export interface EditorMediaOptions {
   runJob?: CacheJobRunner;
   /** Shows an open-file dialog for a replacement; null when cancelled. */
   chooseFile?: (media: Media, senderId: number) => Promise<string | null>;
+  /** Shows an open-files dialog for pictures, videos and audio to import; empty when cancelled. */
+  chooseImports?: (senderId: number) => Promise<string[]>;
+  /** Shows a folder dialog for a recorded project to add as a take; null when cancelled. */
+  chooseTake?: (senderId: number) => Promise<string | null>;
   logger?: Logger;
 }
 
@@ -100,6 +106,20 @@ export async function markMediaPresence(
   health?: MediaHealthCache,
 ): Promise<Project> {
   return (await checkMediaPresence(root, doc, health)).doc;
+}
+
+/** `name` made safe for a file name and unused in `dir` (any extension). */
+async function uniqueBaseName(dir: string, name: string): Promise<string> {
+  const safe =
+    name
+      .replace(/[^\w.-]+/g, '-')
+      .replace(/^[.-]+/, '')
+      .slice(0, 60) || 'media';
+  const taken = new Set(
+    (await fs.readdir(dir).catch(() => [] as string[])).map((f) => path.parse(f).name),
+  );
+  if (!taken.has(safe)) return safe;
+  for (let n = 2; ; n++) if (!taken.has(`${safe}-${String(n)}`)) return `${safe}-${String(n)}`;
 }
 
 export class EditorMedia {
@@ -216,6 +236,131 @@ export class EditorMedia {
       endSeconds: range.fileEndUs / 1_000_000,
       speed: range.speed,
     }));
+  }
+
+  /**
+   * `project.importMedia` (R2.21): the user picks files; each is put into the project's `media/`
+   * by the utility (`media-import.ts`) and comes back as media entries, per file, with URLs.
+   * The editor adds them with `addMedia`. Null when the user cancelled.
+   */
+  async importMedia(projectId: string, senderId: number): Promise<ImportMediaResult | null> {
+    const root = await this.requireRoot(projectId);
+    const files = (await this.options.chooseImports?.(senderId)) ?? [];
+    if (files.length === 0) return null;
+    const result: ImportMediaResult = { files: [], urls: {} };
+    const mediaDir = path.join(root, 'media');
+    for (const input of files) {
+      const baseName = await uniqueBaseName(mediaDir, path.parse(input).name);
+      const imported = await this.caches.runNow({
+        kind: 'importMedia',
+        input,
+        mediaDir,
+        baseName,
+      });
+      const entry: ImportMediaResult['files'][number] = {
+        name: path.parse(input).name,
+        media: [],
+        items: [],
+      };
+      for (const file of imported.files) {
+        const id = newId('media');
+        const relative = `media/${path.basename(file.path)}`;
+        entry.media.push(importedMediaEntry(id, relative, file));
+        entry.items.push({
+          mediaId: id,
+          kind: file.kind,
+          still: file.still,
+          durationUs: file.durationUs,
+        });
+        result.urls[id] = mediaUrl(projectId, relative);
+      }
+      result.files.push(entry);
+      this.logger.info(
+        `editor: imported ${input} into ${projectId} (${String(entry.media.length)} streams)`,
+      );
+    }
+    return result;
+  }
+
+  /**
+   * `project.addTake` (R2.22): the user picks another recorded project; its media are copied
+   * into this one (new IDs and file names) and come back with its tracks (clips from 0, edits
+   * kept), for `addMedia` at the playhead. Null when the user cancelled.
+   */
+  async addTake(projectId: string, senderId: number): Promise<AddTakeResult | null> {
+    const root = await this.requireRoot(projectId);
+    const takeRoot = await this.options.chooseTake?.(senderId);
+    if (!takeRoot) return null;
+    if (path.resolve(takeRoot) === path.resolve(root)) {
+      throw new ProjectStoreError(
+        'mismatch',
+        'Choose another project: this is the one being edited.',
+      );
+    }
+    const take = await this.options.store.read(takeRoot);
+    if (!take) throw new ProjectStoreError('unknown-project', 'That folder is not a project.');
+    const mediaDir = path.join(root, 'media');
+    const ids = new Map<string, string>();
+    const result: AddTakeResult = { media: [], tracks: [], urls: {} };
+    for (const m of take.doc.media) {
+      const source = path.join(takeRoot, ...m.path.split('/'));
+      if (!(await isFile(source))) continue;
+      const parsed = path.parse(m.path);
+      const baseName = await uniqueBaseName(mediaDir, `take-${parsed.name}`);
+      const relative = `media/${baseName}${parsed.ext}`;
+      await fs.mkdir(mediaDir, { recursive: true });
+      await fs.copyFile(source, path.join(root, ...relative.split('/')));
+      const id = newId('media');
+      ids.set(m.id, id);
+      const { sync: _sync, ...rest } = m;
+      result.media.push({ ...rest, id, path: relative, status: 'ok', syncAdjustUs: 0 });
+      result.urls[id] = mediaUrl(projectId, relative);
+    }
+    for (const track of take.doc.timeline.tracks) {
+      const clips = track.clips
+        .filter((c) => ids.has(c.mediaId))
+        .map((c) => ({ ...c, mediaId: ids.get(c.mediaId) ?? c.mediaId }));
+      if (clips.length === 0) continue;
+      result.tracks.push({ ...track, name: `${track.name} (take)`, clips });
+    }
+    this.logger.info(`editor: added the take ${takeRoot} to ${projectId}`);
+    return result;
+  }
+
+  /**
+   * `media.proxy` (acceptance g): a 720p preview proxy of a large video (`cache/<id>.proxy.mp4`),
+   * queued on first request; `unavailable` for audio and videos up to 1080p.
+   */
+  async proxy(projectId: string, mediaId: string): Promise<AssetResult> {
+    const unavailable = { status: 'unavailable', url: null } as const;
+    const root = await this.options.findRoot(projectId);
+    if (!root) return unavailable;
+    const loaded = await this.options.store.read(root);
+    const media = loaded?.doc.media.find((m) => m.id === mediaId);
+    if (!loaded || media?.kind !== 'video' || !media.video || !needsProxy(media.video)) {
+      return unavailable;
+    }
+    const projectKey = loaded.doc.id;
+    const key = `${mediaId}-proxy`;
+    const relative = `${CACHE_DIR_NAME}/${mediaId}.proxy.mp4`;
+    if (this.caches.isAudioRenderPending(projectKey, key)) return { status: 'pending', url: null };
+    const file = path.join(root, ...relative.split('/'));
+    if (await isFile(file)) return { status: 'ready', url: mediaUrl(projectKey, relative) };
+    if (this.caches.hasAudioRenderFailed(projectKey, key)) return unavailable;
+    const input = path.join(root, ...media.path.split('/'));
+    if (!(await isFile(input))) return unavailable;
+    void this.caches.ensureAudioRender(
+      { projectId: projectKey, key },
+      { kind: 'proxy', input, output: file },
+      3,
+    );
+    return { status: 'pending', url: null };
+  }
+
+  private async requireRoot(projectId: string): Promise<string> {
+    const root = await this.options.findRoot(projectId);
+    if (!root) throw new ProjectStoreError('unknown-project', `unknown project ${projectId}`);
+    return root;
   }
 
   /** `project.relink`: replaces an offline media file with one the user picks. */

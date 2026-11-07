@@ -33,7 +33,9 @@ export function cacheKindOf(media: Pick<Media, 'kind'>): CacheKind {
   return media.kind === 'audio' ? 'peaks' : 'thumbs';
 }
 
-export type CacheJobRunner = <K extends 'peaks' | 'thumbnails' | 'audioRender' | 'cleanAudio'>(
+export type CacheJobRunner = <
+  K extends 'peaks' | 'thumbnails' | 'audioRender' | 'cleanAudio' | 'proxy' | 'importMedia',
+>(
   job: Extract<JobSpec, { kind: K }>,
 ) => Promise<JobResult<K>>;
 
@@ -124,7 +126,7 @@ export class CacheJobs {
    */
   ensureAudioRender(
     request: { projectId: string; key: string },
-    job: Extract<JobSpec, { kind: 'audioRender' | 'cleanAudio' }>,
+    job: Extract<JobSpec, { kind: 'audioRender' | 'cleanAudio' | 'proxy' }>,
     priority = 0,
   ): Promise<void> {
     const promise = this.enqueueWork(
@@ -137,6 +139,11 @@ export class CacheJobs {
     );
     this.pump();
     return promise;
+  }
+
+  /** Runs a job now, outside the queue (imports: the user is waiting for them). */
+  runNow<K extends 'importMedia'>(job: Extract<JobSpec, { kind: K }>) {
+    return this.options.runJob(job);
   }
 
   /** Queued or running audio render. */

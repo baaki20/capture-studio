@@ -81,6 +81,7 @@ export function App() {
         return client.probe(tUs ?? created.ui.getState().playheadUs);
       },
       saveStatus: () => created.docStore.getState().saveStatus,
+      previewUrls: () => created.previewUrls(),
       capturePreview: async (tUs) => {
         const client = created.preview.current;
         if (!client) throw new Error('the preview is not ready');

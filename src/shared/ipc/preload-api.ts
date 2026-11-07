@@ -137,6 +137,12 @@ export interface EditorPreloadApi extends PreloadBase {
     audioRender?(
       request: InvokeRequest<'media.audioRender'>,
     ): Promise<InvokeResponse<'media.audioRender'>>;
+    /** A large video's preview proxy (optional for test doubles). */
+    proxy?(projectId: string, mediaId: string): Promise<InvokeResponse<'media.proxy'>>;
+    /** Imports pictures, videos and audio the user picks; null when cancelled. */
+    importMedia?(projectId: string): Promise<InvokeResponse<'project.importMedia'>>;
+    /** Copies another recorded project in as a take; null when cancelled. */
+    addTake?(projectId: string): Promise<InvokeResponse<'project.addTake'>>;
     /** A project's background peaks and thumbnails are done (optional for test doubles). */
     onCachesReady?(listener: Listener<EventPayload<'media.cachesReady'>>): Unsubscribe;
   };

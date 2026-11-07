@@ -23,6 +23,9 @@ const api: EditorPreloadApi = {
     peaks: (projectId, mediaId) => invoke('media.peaks', { projectId, mediaId }),
     thumbs: (projectId, mediaId) => invoke('media.thumbs', { projectId, mediaId }),
     audioRender: (request) => invoke('media.audioRender', request),
+    proxy: (projectId, mediaId) => invoke('media.proxy', { projectId, mediaId }),
+    importMedia: (projectId) => invoke('project.importMedia', { projectId }),
+    addTake: (projectId) => invoke('project.addTake', { projectId }),
     onCachesReady: (listener) => subscribe('media.cachesReady', listener),
   },
   export: {

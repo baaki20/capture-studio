@@ -49,6 +49,7 @@ import { useDocumentStore } from '../store/document-store';
 import { useUi } from '../ui-store';
 import { useApply, useGesture } from './hooks';
 import { AudioCleanupSection, ClipAudioSection, PausesSection } from './AudioSections';
+import { MediaSection } from './MediaSection';
 import { AnnotationsSection, ObjectSection } from './ObjectSections';
 import { BackgroundSection, CameraSection } from './ScreenStyleSections';
 import { MarkersSection, SpeedSection, TransitionSection } from './TimeSections';
@@ -113,6 +114,7 @@ export function InspectorPanel() {
       <FaceStyleSection doc={doc} />
       <FaceTimeSection doc={doc} />
       <ScreenSection doc={doc} />
+      <MediaSection doc={doc} />
       <AnnotationsSection doc={doc} />
       <SpeedSection doc={doc} />
       <AudioCleanupSection doc={doc} />

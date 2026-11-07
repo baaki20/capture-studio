@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { CapabilityReportSchema, FfmpegEncoderReportSchema } from '../capabilities/types';
-import { NRectSchema, ProjectSchema } from '../project/schema';
+import { MediaSchema, NRectSchema, ProjectSchema, TrackSchema } from '../project/schema';
 import { AutomationSettingsSchema, SettingsV1Schema } from '../settings/schema';
 import { CLI_ACTIONS } from './actions';
 import { EditorAutomationReplySchema, EditorAutomationRequestSchema } from './editor-automation';
@@ -220,6 +220,34 @@ export const AudioRenderRequestSchema = z.strictObject({
 });
 export type AudioRenderRequest = Omit<z.infer<typeof AudioRenderRequestSchema>, 'projectId'>;
 
+/** `project.importMedia`: per imported file, its media (picture and/or sound) and URLs. */
+export const ImportMediaResultSchema = z.object({
+  files: z.array(
+    z.object({
+      name: z.string(),
+      media: z.array(MediaSchema),
+      items: z.array(
+        z.object({
+          mediaId: Id,
+          kind: z.enum(['video', 'audio']),
+          still: z.boolean(),
+          durationUs: z.int().positive(),
+        }),
+      ),
+    }),
+  ),
+  urls: z.record(z.string(), z.string()),
+});
+export type ImportMediaResult = z.infer<typeof ImportMediaResultSchema>;
+
+/** `project.addTake`: the take's media (copied in) and its tracks, with URLs. */
+export const AddTakeResultSchema = z.object({
+  media: z.array(MediaSchema),
+  tracks: z.array(TrackSchema),
+  urls: z.record(z.string(), z.string()),
+});
+export type AddTakeResult = z.infer<typeof AddTakeResultSchema>;
+
 export const MediaAssetResultSchema = z.object({
   status: z.enum(['ready', 'pending', 'unavailable']),
   url: z.string().nullable(),
@@ -403,6 +431,17 @@ export const INVOKE_CHANNELS = {
   'media.peaks': invoke(MediaAssetRequestSchema, MediaAssetResultSchema, EDITOR),
   'media.thumbs': invoke(MediaAssetRequestSchema, MediaAssetResultSchema, EDITOR),
   'media.audioRender': invoke(AudioRenderRequestSchema, MediaAssetResultSchema, EDITOR),
+  'media.proxy': invoke(MediaAssetRequestSchema, MediaAssetResultSchema, EDITOR),
+  'project.importMedia': invoke(
+    z.strictObject({ projectId: Id }),
+    ImportMediaResultSchema.nullable(),
+    EDITOR,
+  ),
+  'project.addTake': invoke(
+    z.strictObject({ projectId: Id }),
+    AddTakeResultSchema.nullable(),
+    EDITOR,
+  ),
 
   'export.probeEncoders': invoke(NoPayload, FfmpegEncoderReportSchema, EDITOR),
   'export.start': invoke(ExportStartSchema, ExportStartResultSchema, EDITOR),
