@@ -1768,6 +1768,8 @@ function freezeDraft(draft: Project, op: OpOf<'freezeFrame'>, ctx: Ctx): void {
       track.clips.find((c) => c.timelineStartUs <= at && at < clipEndUs(c)) ??
       track.clips.find((c) => clipEndUs(c) === at);
     if (!clip) continue;
+    // A frozen clip (an imported picture) keeps its own source span: it may be shorter than a
+    // timeline frame (a 30 fps picture in a 24 fps project).
     const ref = clip.freeze
       ? clip.sourceStartUs
       : Math.min(clipRefAt(clip, at), clip.sourceEndUs - ctx.minUs);
@@ -1776,7 +1778,7 @@ function freezeDraft(draft: Project, op: OpOf<'freezeFrame'>, ctx: Ctx): void {
       mediaId: clip.mediaId,
       timelineStartUs: at,
       sourceStartUs: ref,
-      sourceEndUs: ref + ctx.minUs,
+      sourceEndUs: clip.freeze ? clip.sourceEndUs : ref + ctx.minUs,
       linkId: null,
       freeze: true,
       durationUs: d,

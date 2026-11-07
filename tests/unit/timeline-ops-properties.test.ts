@@ -2,6 +2,8 @@
  * Property tests (fast-check, §4.6.1) for the timeline operations: invariants after any sequence
  * of operations, sync preservation through `cutRange`, and split + delete-left ≡ trim.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { checkProjectInvariants } from '../../src/shared/project/invariants';
@@ -24,6 +26,7 @@ import {
   arbRecordedProject,
   counterIds,
   resolveOp,
+  type OpTemplate,
 } from '../fixtures/editor-project';
 
 const RUNS = { numRuns: 150 };
@@ -182,5 +185,20 @@ describe('timeline operations (properties)', () => {
       ),
       RUNS,
     );
+  });
+
+  it('freezes an imported picture in a 24 fps project (found by the fuzz)', () => {
+    // The picture is one 30 fps frame (33 334 µs), shorter than a 24 fps timeline frame.
+    const [start, templates] = JSON.parse(
+      readFileSync(path.join(import.meta.dirname, '../fixtures/freeze-picture-24fps.json'), 'utf8'),
+    ) as [Project, OpTemplate[]];
+    const generateId = counterIds('P');
+    let doc = ProjectSchema.parse(start);
+    for (const template of templates) {
+      const result = applyOp(doc, resolveOp(doc, template), { generateId });
+      if (!result.ok) throw new Error(result.error.message);
+      doc = result.value;
+      expect(checkProjectInvariants(doc)).toEqual([]);
+    }
   });
 });

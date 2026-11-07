@@ -1,0 +1,84 @@
+[
+  {
+    "format": "capture-studio.project",
+    "formatVersion": 2,
+    "id": "prj_01JBQ4ZJ4X6V3K8N2M7P5R9T0W",
+    "name": "Lesson test",
+    "createdAt": "2026-10-24T09:00:00.000Z",
+    "modifiedAt": "2026-10-24T09:05:00.000Z",
+    "createdBy": { "app": "capture-studio", "version": "0.1.0" },
+    "recording": {
+      "state": "complete",
+      "sessionId": "ses_01JBQ4ZJ4Y0000000000000000",
+      "startedAt": "2026-10-24T09:00:00.500Z",
+      "durationUs": 10000000,
+      "clockMode": "shared-capture",
+      "pauses": [],
+      "source": { "kind": "monitor", "widthPx": 1920, "heightPx": 1080, "region": null },
+      "platform": {
+        "os": "linux",
+        "session": "wayland",
+        "electron": "45.0.0",
+        "chromium": "156.0.0.0",
+        "ffmpeg": "n9.0"
+      }
+    },
+    "media": [
+      {
+        "id": "med_R0001",
+        "role": "screen",
+        "kind": "video",
+        "path": "media/screen.mp4",
+        "status": "ok",
+        "durationUs": 9997800,
+        "startOffsetUs": 2200,
+        "syncAdjustUs": 0,
+        "clockRatio": 1,
+        "video": {
+          "codec": "avc1.640028",
+          "width": 1920,
+          "height": 1080,
+          "frameRateNominal": 30,
+          "variableFrameRate": true
+        },
+        "sync": { "mode": "shared", "offsetUs": 0 }
+      }
+    ],
+    "components": [{ "id": "cmp_R0002", "type": "screen", "mediaIds": ["med_R0001"] }],
+    "timeline": {
+      "canvas": {
+        "width": 1920,
+        "height": 1080,
+        "background": { "type": "color", "color": "#000000" }
+      },
+      "frameRate": 24,
+      "marks": { "inUs": null, "outUs": null },
+      "tracks": [
+        {
+          "id": "trk_R0003",
+          "name": "Screen",
+          "componentId": "cmp_R0002",
+          "locked": false,
+          "clips": [
+            {
+              "id": "clp_R0004",
+              "mediaId": "med_R0001",
+              "timelineStartUs": 2200,
+              "sourceStartUs": 2200,
+              "sourceEndUs": 10000000,
+              "linkId": null
+            }
+          ],
+          "type": "video",
+          "hidden": false,
+          "layout": { "kind": "screen", "crop": null, "fit": "contain" }
+        }
+      ]
+    },
+    "extensions": {}
+  },
+  [
+    { "kind": "add-media", "a": 0, "b": 0, "c": 0, "flag": true },
+    { "kind": "freeze", "a": 0, "b": 0, "c": 0.013889, "flag": false }
+  ]
+]
