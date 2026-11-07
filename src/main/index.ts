@@ -731,13 +731,19 @@ async function start(): Promise<void> {
     readProject: async (root) => (await store.read(root))?.doc ?? null,
     settings: () => settings.get(),
     probeEncoders,
-    showSaveDialog: async ({ defaultPath, senderId }) => {
+    showSaveDialog: async ({ defaultPath, senderId, kind }) => {
       const sender = webContents.fromId(senderId);
       const parent = sender ? ElectronWindow.fromWebContents(sender) : null;
       const options: Electron.SaveDialogOptions = {
-        title: 'Export video',
+        title: kind === 'frame' ? 'Save frame' : 'Export',
         defaultPath,
-        filters: [{ name: 'MP4 video', extensions: ['mp4'] }],
+        filters:
+          kind === 'frame'
+            ? [{ name: 'PNG picture', extensions: ['png'] }]
+            : [
+                { name: 'Video', extensions: ['mp4', 'webm', 'gif'] },
+                { name: 'Audio', extensions: ['m4a', 'opus', 'mp3'] },
+              ],
         properties: ['showOverwriteConfirmation', 'createDirectory'],
       };
       const result = parent

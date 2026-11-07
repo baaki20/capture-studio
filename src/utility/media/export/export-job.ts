@@ -411,10 +411,24 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
     };
 
     const settings = resolveExportSettings(doc, options.options, options.hardwareEncoder);
+    const requireHardware = options.options.requireHardware === true;
+    if (requireHardware && settings.encoder === 'libx264') {
+      throw new ExportError(
+        'invalid',
+        settings.format === 'mp4'
+          ? 'No working hardware encoder was found, and this export requires one.'
+          : 'Hardware encoding is available for MP4 (H.264) only.',
+      );
+    }
     let encoder = settings.encoder;
     let fallback: ExportJobResult['fallback'] = null;
     let run = await attempt(settings);
-    if (!run.ok && run.error.kind !== 'cancelled' && settings.encoder !== 'libx264') {
+    if (
+      !run.ok &&
+      run.error.kind !== 'cancelled' &&
+      settings.encoder !== 'libx264' &&
+      !requireHardware
+    ) {
       const reason = describeFailure(run.error);
       logger.warn(`export: ${settings.encoder} failed (${reason}); retrying with libx264`);
       fallback = { from: settings.encoder, reason };

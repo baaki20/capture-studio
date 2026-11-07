@@ -206,6 +206,12 @@ function EditorLayout({ offline, onOffline }: OfflineProps) {
             projectId={services.projectId}
             doc={exporting}
             onClose={() => setExporting(null)}
+            captureFrame={async () => {
+              const picture = await services.preview.current?.capture(
+                services.ui.getState().playheadUs,
+              );
+              return picture ? (await encodePng(picture, picture.width)).pngBase64 : null;
+            }}
           />
         </Suspense>
       ) : null}
@@ -296,7 +302,12 @@ function Toolbar({ onExport }: { onExport: () => void }) {
       <span className={styles.saveStatus} data-status={saveStatus} data-testid="save-status">
         {SAVE_LABELS[saveStatus] ?? saveStatus}
       </span>
-      <button type="button" title="Export an MP4" onClick={onExport} data-testid="export-button">
+      <button
+        type="button"
+        title="Export a video, GIF or audio"
+        onClick={onExport}
+        data-testid="export-button"
+      >
         Export…
       </button>
     </header>

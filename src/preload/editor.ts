@@ -32,7 +32,9 @@ const api: EditorPreloadApi = {
     probeEncoders: () => invoke('export.probeEncoders'),
     start: (request) => invoke('export.start', request),
     target: (projectId) => invoke('export.target', { projectId }),
-    chooseOutput: (projectId) => invoke('export.chooseOutput', { projectId }),
+    chooseOutput: (projectId, format) =>
+      invoke('export.chooseOutput', format ? { projectId, format } : { projectId }),
+    saveFrame: (projectId, pngBase64) => invoke('export.saveFrame', { projectId, pngBase64 }),
     reveal: (jobId) => invoke('export.reveal', { jobId }),
     open: (jobId) => invoke('export.open', { jobId }),
     cancel: (jobId) => invoke('export.cancel', { jobId }),

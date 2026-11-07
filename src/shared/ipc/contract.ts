@@ -11,6 +11,7 @@
  */
 import { z } from 'zod';
 import { CapabilityReportSchema, FfmpegEncoderReportSchema } from '../capabilities/types';
+import { EXPORT_FORMATS } from '../export/formats';
 import { MediaSchema, NRectSchema, ProjectSchema, TrackSchema } from '../project/schema';
 import { AutomationSettingsSchema, SettingsV1Schema } from '../settings/schema';
 import { CLI_ACTIONS } from './actions';
@@ -264,6 +265,22 @@ export const ExportOptionsSchema = z.strictObject({
    * `frames` force one (`graph` cannot show v2 visuals).
    */
   videoPath: z.enum(['auto', 'graph', 'frames']).optional(),
+  /** Container and codecs (`export/formats.ts`); MP4 H.264 when absent. */
+  format: z.enum(EXPORT_FORMATS).optional(),
+  /** GIF only: frame rate, widest width, palette and dither (`GifOptions`). */
+  gif: z
+    .strictObject({
+      fps: z.int().min(1).max(50),
+      maxWidth: z.int().min(16).max(7680).nullable(),
+      dither: z.enum(['none', 'bayer', 'floyd_steinberg', 'sierra2_4a']),
+      bayerScale: z.int().min(0).max(5),
+      colors: z.int().min(2).max(256),
+    })
+    .optional(),
+  /** Fail instead of falling back to software when the hardware encoder is missing or fails. */
+  requireHardware: z.boolean().optional(),
+  /** Extra FFmpeg output options, already split into words (`parseAdvancedArgs`). */
+  advancedArgs: z.array(z.string().max(500)).max(64).optional(),
 });
 export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
 
@@ -450,8 +467,14 @@ export const INVOKE_CHANNELS = {
   'export.target': invoke(z.strictObject({ projectId: Id }), ExportTargetSchema, EDITOR),
   /** Native save dialog in main; the choice becomes the project's target. Null = cancelled. */
   'export.chooseOutput': invoke(
-    z.strictObject({ projectId: Id }),
+    z.strictObject({ projectId: Id, format: z.enum(EXPORT_FORMATS).optional() }),
     ExportTargetSchema.nullable(),
+    EDITOR,
+  ),
+  /** The preview's frame as PNG: main's save dialog, then the file. Null = cancelled. */
+  'export.saveFrame': invoke(
+    z.strictObject({ projectId: Id, pngBase64: z.string().max(64 * 1024 * 1024) }),
+    z.object({ path: z.string() }).nullable(),
     EDITOR,
   ),
   /** After `export.done`: show the file in the file manager, or open it. */

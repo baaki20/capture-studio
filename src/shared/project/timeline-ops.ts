@@ -2037,7 +2037,7 @@ function addMediaDraft(draft: Project, op: OpOf<'addMedia'>, ctx: Ctx): void {
       timelineStartUs: clip.timelineStartUs + op.atUs,
       linkId: linkFor(clip.linkId),
     }));
-    return { ...plain(track), id: ctx.id('track'), componentId: null, clips } as Track;
+    return { ...plain(track), id: ctx.id('track'), componentId: null, clips };
   });
   const tracks = draft.timeline.tracks;
   const screenIndex = tracks.findIndex((t) => t.type === 'video' && t.layout.kind === 'screen');

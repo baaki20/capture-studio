@@ -6,6 +6,12 @@
  * job id.
  */
 import type { EventPayload, ExportOptions, InvokeResponse } from '../../../shared/ipc/contract';
+import {
+  DEFAULT_GIF,
+  EXPORT_PRESETS,
+  FORMATS,
+  type ExportFormat,
+} from '../../../shared/export/formats';
 import { exportSize, QUALITY_SETTINGS } from '../../../shared/export/presets';
 
 export type ExportPhase =
@@ -138,4 +144,58 @@ export function describeEncoder(
 
 export function isBusy(phase: ExportPhase): boolean {
   return phase.kind === 'starting' || phase.kind === 'running';
+}
+
+/** The target's file name with the format's extension (main writes there, R2.24). */
+export function targetForFormat(file: string, format: ExportFormat): string {
+  const extension = FORMATS[format].extension;
+  const match = /^(.*[\\/])?([^\\/]*?)(\.[^.\\/]*)?$/.exec(file);
+  if (!match) return file;
+  const [, dir = '', name = '', ext = ''] = match;
+  return ext.toLowerCase() === extension ? file : `${dir}${name}${extension}`;
+}
+
+/** Which option groups the dialog shows for a format. */
+export function formatControls(format: ExportFormat): {
+  resolution: boolean;
+  quality: boolean;
+  encoder: boolean;
+  gif: boolean;
+} {
+  const info = FORMATS[format];
+  return {
+    resolution: info.video !== null,
+    quality: info.video !== null && info.video !== 'gif',
+    encoder: format === 'mp4',
+    gif: info.video === 'gif',
+  };
+}
+
+/** Options with a preset applied; the encoder choice and picture path stay the user's. */
+export function applyPreset(options: ExportOptions, presetId: string): ExportOptions {
+  const preset = EXPORT_PRESETS.find((p) => p.id === presetId);
+  if (!preset) return options;
+  const { gif: _gif, ...rest } = options;
+  return {
+    ...rest,
+    ...preset.options,
+    ...(preset.options.format === 'gif' ? { gif: preset.options.gif ?? DEFAULT_GIF } : {}),
+  };
+}
+
+/** The options to send: GIF settings only for GIF, hardware only for MP4, arguments if any. */
+export function exportRequestOptions(
+  options: ExportOptions,
+  advanced: string[] | null,
+): ExportOptions {
+  const format = options.format ?? 'mp4';
+  const { gif, requireHardware, advancedArgs: _a, ...rest } = options;
+  return {
+    ...rest,
+    ...(format === 'gif' ? { gif: gif ?? DEFAULT_GIF } : {}),
+    ...(format === 'mp4' && rest.encoder === 'auto' && requireHardware
+      ? { requireHardware: true }
+      : {}),
+    ...(advanced && advanced.length > 0 ? { advancedArgs: advanced } : {}),
+  };
 }

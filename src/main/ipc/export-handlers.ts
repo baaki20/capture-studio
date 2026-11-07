@@ -26,6 +26,7 @@ import { promises as fs, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import type { FfmpegEncoderReport } from '../../shared/capabilities/types';
 import { frameSpec, needsFrameRender, type FrameSpec } from '../../shared/export/frame-render';
+import { FORMATS, formatOf, isAudioOnly, type ExportFormat } from '../../shared/export/formats';
 import { exportTempOwner } from '../../shared/export/temp-name';
 import { newId } from '../../shared/ids';
 import type { ExportOptions, InvokeResponse } from '../../shared/ipc/contract';
@@ -35,6 +36,7 @@ import { audioSegments, videoTrackPlans } from '../../shared/project/render-plan
 import type { Project } from '../../shared/project/schema';
 import { timelineDurationUs } from '../../shared/project/timeline-ops';
 import type { Settings } from '../../shared/settings/schema';
+import { writeFileAtomic } from '../settings/atomic-file';
 import type { RunJobOptions } from '../utility-host';
 import type { IpcRouter } from './router';
 
@@ -72,8 +74,15 @@ export interface ExportHandlerDeps {
   settings: () => Settings;
   /** The cached encoder probe (§1.4 `encode.ffmpeg.hw`). */
   probeEncoders: () => Promise<FfmpegEncoderReport>;
-  /** Native save dialog parented to the calling window; the chosen path or null. */
-  showSaveDialog: (options: { defaultPath: string; senderId: number }) => Promise<string | null>;
+  /**
+   * Native save dialog parented to the calling window; the chosen path or null. `kind` picks the
+   * file filters: the export formats, or PNG for a frame.
+   */
+  showSaveDialog: (options: {
+    defaultPath: string;
+    senderId: number;
+    kind?: 'export' | 'frame';
+  }) => Promise<string | null>;
   showItemInFolder: (fullPath: string) => void;
   /** Resolves with an error message, or '' on success (Electron's `shell.openPath`). */
   openPath: (fullPath: string) => Promise<string>;
@@ -93,6 +102,8 @@ export type VideoPath = 'graph' | 'frames';
 
 /** The export's picture path (D4): the option, or by what the project uses. */
 export function chooseVideoPath(doc: Project, options: ExportOptions): VideoPath {
+  // Audio-only exports draw no pictures.
+  if (isAudioOnly(formatOf(options))) return 'graph';
   const requested = options.videoPath ?? 'auto';
   if (requested !== 'auto') return requested;
   return needsFrameRender(doc) ? 'frames' : 'graph';
@@ -110,18 +121,26 @@ interface RunningExport {
 }
 
 /** A file name from a project name: no path separators or control characters. */
-export function exportFileName(projectName: string): string {
+export function exportFileName(projectName: string, extension = '.mp4'): string {
   const cleaned = projectName
     // eslint-disable-next-line no-control-regex
     .replace(/[/\\\u0000-\u001f]/g, '-')
     .trim()
     .replace(/^\.+/, '');
-  return `${cleaned || 'Export'}.mp4`;
+  return `${cleaned || 'Export'}${extension}`;
 }
 
-/** Appends `.mp4` when the user typed a name without it. */
-export function withMp4Extension(file: string): string {
-  return path.extname(file).toLowerCase() === '.mp4' ? file : `${file}.mp4`;
+/** Appends `extension` when the user typed a name without it. */
+export function withMp4Extension(file: string, extension = '.mp4'): string {
+  return path.extname(file).toLowerCase() === extension ? file : `${file}${extension}`;
+}
+
+/** `file` with its extension changed to `extension` (a format change in the dialog). */
+export function withExtension(file: string, extension: string): string {
+  const parsed = path.parse(file);
+  return parsed.ext.toLowerCase() === extension
+    ? file
+    : path.join(parsed.dir, `${parsed.name}${extension}`);
 }
 
 /** Media that the export would read but that are offline (R1.29). */
@@ -171,6 +190,11 @@ export async function removeExportTemps(output: string): Promise<string[]> {
   return temps;
 }
 
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** Extensions of every export format (temps of any of them are swept). */
+const EXPORT_EXTENSIONS = new Set(Object.values(FORMATS).map((f) => f.extension));
+
 /**
  * Deletes export temp files in `dir` last modified before `beforeMs` (epoch ms): leftovers of a
  * process that was killed mid-export. Newer ones may belong to an export running now.
@@ -180,7 +204,7 @@ export async function sweepStaleExportTemps(dir: string, beforeMs: number): Prom
   const removed: string[] = [];
   for (const name of names) {
     const owner = exportTempOwner(name);
-    if (owner === null || path.extname(owner).toLowerCase() !== '.mp4') continue;
+    if (owner === null || !EXPORT_EXTENSIONS.has(path.extname(owner).toLowerCase())) continue;
     const file = path.join(dir, name);
     try {
       const stat = await fs.lstat(file);
@@ -237,8 +261,11 @@ export class ExportService {
     this.sweeping = this.sweepStaleTemps();
     const { router } = this.deps;
     router.handle('export.target', ({ projectId }) => this.target(projectId));
-    router.handle('export.chooseOutput', ({ projectId }, context) =>
-      this.choose(projectId, context.senderId),
+    router.handle('export.chooseOutput', ({ projectId, format }, context) =>
+      this.choose(projectId, context.senderId, format),
+    );
+    router.handle('export.saveFrame', ({ projectId, pngBase64 }, context) =>
+      this.saveFrame(projectId, pngBase64, context.senderId),
     );
     router.handle('export.start', (request) => this.start(request));
     router.handle('export.cancel', ({ jobId }) => {
@@ -309,6 +336,31 @@ export class ExportService {
     );
   }
 
+  /**
+   * Saves the preview's current frame as PNG (R2.24): a save dialog (default
+   * `<exportsDir>/<project name> frame.png`), then the file. Null when cancelled.
+   */
+  async saveFrame(
+    projectId: string,
+    pngBase64: string,
+    senderId: number,
+  ): Promise<InvokeResponse<'export.saveFrame'>> {
+    const bytes = Buffer.from(pngBase64, 'base64');
+    if (!bytes.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error('The frame is not a PNG.');
+    const { doc } = await this.load(projectId);
+    const defaultPath = path.join(
+      this.deps.settings().exportsDir,
+      exportFileName(`${doc.name} frame`, '.png'),
+    );
+    await fs.mkdir(path.dirname(defaultPath), { recursive: true }).catch(() => undefined);
+    const picked = await this.deps.showSaveDialog({ defaultPath, senderId, kind: 'frame' });
+    if (!picked) return null;
+    const file = withMp4Extension(path.resolve(picked), '.png');
+    await writeFileAtomic(file, bytes);
+    this.deps.logger.info(`export: saved a frame (${String(bytes.length)} bytes)`);
+    return { path: file };
+  }
+
   async target(projectId: string): Promise<InvokeResponse<'export.target'>> {
     const { doc } = await this.load(projectId);
     const target = this.currentTarget(projectId, doc);
@@ -318,13 +370,20 @@ export class ExportService {
   async choose(
     projectId: string,
     senderId: number,
+    format?: ExportFormat,
   ): Promise<InvokeResponse<'export.chooseOutput'>> {
     const { doc } = await this.load(projectId);
     const current = this.currentTarget(projectId, doc);
-    await fs.mkdir(path.dirname(current.path), { recursive: true }).catch(() => undefined);
-    const picked = await this.deps.showSaveDialog({ defaultPath: current.path, senderId });
+    const defaultPath = format
+      ? withExtension(current.path, FORMATS[format].extension)
+      : current.path;
+    await fs.mkdir(path.dirname(defaultPath), { recursive: true }).catch(() => undefined);
+    const picked = await this.deps.showSaveDialog({ defaultPath, senderId, kind: 'export' });
     if (!picked) return null;
-    const file = withMp4Extension(path.resolve(picked));
+    // No extension typed: MP4 (an export in another format swaps it for its own).
+    const file = path.extname(picked)
+      ? path.resolve(picked)
+      : withMp4Extension(path.resolve(picked));
     const exists = await this.fileExists(file);
     // The dialog confirmed replacing the exact file it returned (not one we added .mp4 to).
     this.chosen.set(projectId, { path: file, overwriteConfirmed: exists && file === picked });
@@ -338,8 +397,13 @@ export class ExportService {
     overwrite?: boolean | undefined;
   }): Promise<InvokeResponse<'export.start'>> {
     const { root, doc } = await this.load(request.projectId, request.doc);
-    const target = this.currentTarget(request.projectId, doc);
-    const output = target.path;
+    const chosen = this.currentTarget(request.projectId, doc);
+    // The format decides the extension (a GIF export of "Lesson.mp4" writes "Lesson.gif").
+    const output = withExtension(chosen.path, FORMATS[formatOf(request.options)].extension);
+    const target = {
+      ...chosen,
+      overwriteConfirmed: chosen.overwriteConfirmed && output === chosen.path,
+    };
     const reply = (
       status: 'exists' | 'blocked',
       message: string | null,

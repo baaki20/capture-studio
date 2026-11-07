@@ -280,3 +280,64 @@ test('a 4K recording gets a 720p proxy that the preview plays (acceptance g)', a
     rmSync(projects, { recursive: true, force: true });
   }
 });
+
+test('export dialog: Small GIF preset and Save frame as PNG (R2.24–R2.26)', async () => {
+  test.setTimeout(180_000);
+  const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-formats-'));
+  const projects = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-formats-projects-'));
+  mkdirSync(path.join(projects, 'Exports'), { recursive: true });
+  const { doc } = buildProject(
+    projects,
+    'prj_01JBQ4ZJ4X6V3K8N2M7P5R9TMD',
+    'Formats',
+    [1280, 720],
+    4,
+  );
+  const { app, channel } = await launch(userData, projects);
+  try {
+    const page = await openEditor(app, channel, doc.id);
+    await page
+      .getByRole('button', { name: /^Export/ })
+      .first()
+      .click();
+    const dialog = page.getByTestId('export-dialog');
+    await dialog.getByLabel('Preset').selectOption('small-gif');
+    await expect(dialog.getByLabel('Format')).toHaveValue('gif');
+    await expect(dialog.getByText(/Formats\.gif$/)).toBeVisible();
+    // Unsafe advanced options block the export until fixed.
+    const options = dialog.getByLabel('FFmpeg options');
+    await options.fill('-i other.mp4');
+    await expect(dialog.getByRole('button', { name: 'Export', exact: true })).toBeDisabled();
+    await options.fill('');
+
+    const frame = path.join(projects, 'Exports', 'Still.png');
+    await app.evaluate(({ dialog: d }, filePath) => {
+      d.showSaveDialog = () => Promise.resolve({ canceled: false, filePath });
+    }, frame);
+    await dialog.getByRole('button', { name: 'Save frame as PNG' }).click();
+    await expect(dialog.getByText('Saved Still.png.')).toBeVisible({ timeout: 20_000 });
+    expect(
+      execFileSync(
+        FFMPEG.replace(/ffmpeg$/, 'ffprobe'),
+        ['-v', 'error', '-show_entries', 'stream=codec_name,width', '-of', 'csv=p=0', frame],
+        { encoding: 'utf8' },
+      ).trim(),
+    ).toBe('png,1280');
+
+    await dialog.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(dialog.getByText(/Exported/)).toBeVisible({ timeout: 120_000 });
+    const gif = path.join(projects, 'Exports', 'Formats.gif');
+    expect(
+      execFileSync(
+        FFMPEG.replace(/ffmpeg$/, 'ffprobe'),
+        ['-v', 'error', '-show_entries', 'stream=codec_name,width', '-of', 'csv=p=0', gif],
+        { encoding: 'utf8' },
+      ).trim(),
+    ).toBe('gif,480');
+  } finally {
+    channel.close();
+    await app.close().catch(() => undefined);
+    rmSync(userData, { recursive: true, force: true });
+    rmSync(projects, { recursive: true, force: true });
+  }
+});

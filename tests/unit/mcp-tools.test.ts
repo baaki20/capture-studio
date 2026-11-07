@@ -530,6 +530,26 @@ describe('Capture Studio MCP tools', () => {
     });
   });
 
+  it('exports with a preset, a format and checked FFmpeg options', async () => {
+    const { call, doc, fake } = await setup();
+    await call('export_project', { project: doc.id, preset: 'small-gif' });
+    expect(fake.exports.started[0]).toMatchObject({
+      options: { format: 'gif', resolution: '720p', gif: { fps: 10, maxWidth: 480 } },
+    });
+    await call('export_project', {
+      project: doc.id,
+      format: 'webm-vp9',
+      ffmpegOptions: '-metadata "title=Lesson one"',
+    });
+    expect(fake.exports.started[1]).toMatchObject({
+      options: { format: 'webm-vp9', advancedArgs: ['-metadata', 'title=Lesson one'] },
+    });
+    expect(fake.exports.started[1]).not.toHaveProperty('options.gif');
+    const refused = await call('export_project', { project: doc.id, ffmpegOptions: '-i x.mp4' });
+    expect(refused).toMatchObject({ isError: true });
+    expect(fake.exports.started).toHaveLength(2);
+  });
+
   it('says how to turn automation on when the app cannot be reached', async () => {
     const offline: AppApi = {
       call: () => Promise.reject(new AppError('app-unavailable', 'Capture Studio is not running')),

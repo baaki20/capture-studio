@@ -103,7 +103,7 @@ describe('importMedia', () => {
         kind: 'video',
         still: true,
         durationUs: 33_334,
-        video: expect.objectContaining({ codec: 'h264', width: 300, height: 200 }),
+        video: expect.objectContaining({ codec: 'h264', width: 300, height: 200 }) as unknown,
       }),
     ]);
     expect(path.basename(files[0]!.path)).toBe('logo.mp4');
@@ -119,7 +119,10 @@ describe('importMedia', () => {
     expect(await fs.readFile(clip.files[0]!.path)).toEqual(original);
     const music = await imp(path.join(sources, 'music.wav'), 'music');
     expect(music.files).toEqual([
-      expect.objectContaining({ kind: 'audio', audio: expect.objectContaining({ codec: 'aac' }) }),
+      expect.objectContaining({
+        kind: 'audio',
+        audio: expect.objectContaining({ codec: 'aac' }) as unknown,
+      }),
     ]);
     expect(path.extname(music.files[0]!.path)).toBe('.m4a');
     const old = await imp(path.join(sources, 'old.avi'), 'old');

@@ -11,6 +11,7 @@
  * | engine   | `window.csEngine`         |
  */
 import type { CapabilityReport } from '../capabilities/types';
+import type { ExportFormat } from '../export/formats';
 import type { Settings } from '../settings/schema';
 import type {
   EngineCommandChannel,
@@ -152,7 +153,12 @@ export interface EditorPreloadApi extends PreloadBase {
     /** Where the project's export will be written (chosen or default). */
     target(projectId: string): Promise<InvokeResponse<'export.target'>>;
     /** Native save dialog; null when cancelled. */
-    chooseOutput(projectId: string): Promise<InvokeResponse<'export.chooseOutput'>>;
+    chooseOutput(
+      projectId: string,
+      format?: ExportFormat,
+    ): Promise<InvokeResponse<'export.chooseOutput'>>;
+    /** Saves a PNG of the preview (save dialog in main); null when cancelled. */
+    saveFrame(projectId: string, pngBase64: string): Promise<InvokeResponse<'export.saveFrame'>>;
     /** After `export.done`. */
     reveal(jobId: string): Promise<void>;
     open(jobId: string): Promise<void>;

@@ -8,6 +8,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { AutomationResult } from '../shared/automation/protocol';
+import {
+  DEFAULT_GIF,
+  EXPORT_FORMATS,
+  EXPORT_PRESETS,
+  parseAdvancedArgs,
+} from '../shared/export/formats';
 import { MAX_AUTOMATION_BATCH_OPS } from '../shared/ipc/editor-automation';
 import { summarizeProject, timeSummary } from '../shared/project/summary';
 import { formatTimecode, usToSeconds } from '../shared/time';
@@ -24,7 +30,7 @@ export const SERVER_INSTRUCTIONS = `Capture Studio is a screen recorder with a v
 - Use dryRun: true to preview large or destructive edits (and tell the user what would change) before applying them.
 - Cuts (cut_range, trim_ends, remove_silences) remove time from every unlocked track together, keeping audio and video in sync.
 - Edits refuse with "conflict" if the user changed the project since you read it: read it again and redo.
-- Exports go to the user's exports folder. Ask the user before overwriting an existing file.
+- Exports go to the user's exports folder (MP4, WebM, GIF or audio only). Ask the user before overwriting an existing file.
 - Not possible yet: zooms, captions, transcripts, text, speed changes, transitions, adding media or tracks.`;
 
 type Result = CallToolResult;
@@ -624,9 +630,34 @@ export function registerTools(server: McpServer, app: AppApi): void {
     'export_project',
     {
       description:
-        'Exports the project (as the editor shows it) to an MP4 in the user’s exports folder. Returns a job ID; follow it with export_status. If the file exists, ask the user before calling again with overwrite: true.',
+        'Exports the project (as the editor shows it) to the user’s exports folder: MP4 (H.264 or HEVC), WebM (VP9 or AV1), an animated GIF, or audio only (M4A, Opus, MP3). A preset fills the options; the other arguments override it. Returns a job ID; follow it with export_status. If the file exists, ask the user before calling again with overwrite: true.',
       inputSchema: {
         project: ProjectRef,
+        preset: z
+          .enum(EXPORT_PRESETS.map((p) => p.id) as [string, ...string[]])
+          .optional()
+          .describe(EXPORT_PRESETS.map((p) => `${p.id}: ${p.note}`).join('; ')),
+        format: z.enum(EXPORT_FORMATS).optional().describe('Default mp4 (H.264)'),
+        gif: z
+          .strictObject({
+            fps: z.int().min(1).max(50).optional(),
+            maxWidth: z.int().min(16).max(7680).nullable().optional(),
+            dither: z.enum(['none', 'bayer', 'floyd_steinberg', 'sierra2_4a']).optional(),
+            colors: z.int().min(2).max(256).optional(),
+          })
+          .optional()
+          .describe('GIF only: frame rate, widest width (null: the export size), dither, colours'),
+        requireHardware: z
+          .boolean()
+          .optional()
+          .describe('MP4 H.264 with encoder auto: fail instead of falling back to software'),
+        ffmpegOptions: z
+          .string()
+          .max(2000)
+          .optional()
+          .describe(
+            'Advanced extra FFmpeg output options, e.g. "-tune film". Inputs, filters, mapping, codecs, container and files cannot be changed.',
+          ),
         resolution: z.enum(['canvas', '1080p', '720p']).optional().describe('Default 1080p'),
         fps: z
           .union([z.literal(30), z.literal(60), z.literal('project')])
@@ -644,13 +675,22 @@ export function registerTools(server: McpServer, app: AppApi): void {
     (args) =>
       run(async () => {
         const projectId = await resolveProject(app, args.project);
+        const preset = EXPORT_PRESETS.find((p) => p.id === args.preset)?.options;
+        const advanced = parseAdvancedArgs(args.ffmpegOptions ?? '');
+        if (!advanced.ok) return { ...text(advanced.message), isError: true };
+        const format = args.format ?? preset?.format ?? 'mp4';
+        const gif = { ...DEFAULT_GIF, ...preset?.gif, ...args.gif };
         const result = await app.call('export.start', {
           projectId,
           options: {
-            resolution: args.resolution ?? '1080p',
-            fps: args.fps ?? 'project',
-            quality: args.quality ?? 'standard',
+            resolution: args.resolution ?? preset?.resolution ?? '1080p',
+            fps: args.fps ?? preset?.fps ?? 'project',
+            quality: args.quality ?? preset?.quality ?? 'standard',
             encoder: args.encoder ?? 'auto',
+            format,
+            ...(format === 'gif' ? { gif } : {}),
+            ...(args.requireHardware ? { requireHardware: true } : {}),
+            ...(advanced.args.length > 0 ? { advancedArgs: advanced.args } : {}),
           },
           ...(args.overwrite ? { overwrite: true } : {}),
         });

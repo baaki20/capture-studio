@@ -151,6 +151,7 @@ describe('export handlers', () => {
     expect(deps.showSaveDialog).toHaveBeenCalledWith({
       defaultPath: '/videos/CS/Exports/Lesson test.mp4',
       senderId: 7,
+      kind: 'export',
     });
     const started = await call<{ status: string; path: string }>('export.start', {
       projectId: doc.id,
@@ -160,6 +161,56 @@ describe('export handlers', () => {
     expect(jobs[0]?.job).toMatchObject({ output: '/elsewhere/Talk.mp4', overwrite: true });
     expect(withMp4Extension('/a/b')).toBe('/a/b.mp4');
     expect(withMp4Extension('/a/b.MP4')).toBe('/a/b.MP4');
+  });
+
+  it('writes each format with its own extension and asks again for a new file (R2.24)', async () => {
+    const { doc, call, files, jobs, deps } = setup({
+      showSaveDialog: vi.fn(() => Promise.resolve<string | null>('/elsewhere/Talk.mp4')),
+    });
+    files.add('/elsewhere/Talk.mp4');
+    await call('export.chooseOutput', { projectId: doc.id, format: 'gif' });
+    expect(deps.showSaveDialog).toHaveBeenCalledWith(
+      expect.objectContaining({ defaultPath: '/videos/CS/Exports/Lesson test.gif' }),
+    );
+    const gif = await call<{ status: string; path: string }>('export.start', {
+      projectId: doc.id,
+      options: { ...OPTIONS, format: 'gif' },
+    });
+    // The dialog confirmed replacing Talk.mp4, not Talk.gif.
+    expect(gif).toMatchObject({ status: 'started', path: '/elsewhere/Talk.gif' });
+    expect(jobs[0]?.job).toMatchObject({ output: '/elsewhere/Talk.gif', overwrite: false });
+    files.add('/elsewhere/Talk.mp3');
+    const mp3 = await call<{ status: string }>('export.start', {
+      projectId: doc.id,
+      options: { ...OPTIONS, format: 'mp3' },
+    });
+    expect(mp3.status).toBe('exists');
+  });
+
+  it('saves a PNG frame through the save dialog', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-frame-'));
+    try {
+      const { doc, call, deps } = setup({
+        showSaveDialog: vi.fn(() => Promise.resolve<string | null>(path.join(dir, 'Still'))),
+      });
+      const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+      const saved = await call('export.saveFrame', {
+        projectId: doc.id,
+        pngBase64: png.toString('base64'),
+      });
+      expect(saved).toEqual({ path: path.join(dir, 'Still.png') });
+      expect(deps.showSaveDialog).toHaveBeenCalledWith({
+        defaultPath: '/videos/CS/Exports/Lesson test frame.png',
+        senderId: 7,
+        kind: 'frame',
+      });
+      expect(await fs.readFile(path.join(dir, 'Still.png'))).toEqual(png);
+      await expect(
+        call('export.saveFrame', { projectId: doc.id, pngBase64: 'bm90IGEgcG5n' }),
+      ).rejects.toThrow(/not a PNG/);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('blocks with a clear message when a media file broke after the editor opened (R1.29)', async () => {

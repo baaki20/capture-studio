@@ -58,6 +58,16 @@
  * its pieces have ended. In-order projects keep one input per media.
  */
 import {
+  DEFAULT_GIF,
+  FORMATS,
+  checkAdvancedArgs,
+  formatOf,
+  gifFilters,
+  type ExportFormat,
+  type FormatInfo,
+  type GifOptions,
+} from '../../../shared/export/formats';
+import {
   LOUDNORM_MEASURE,
   loudnormApply,
   type LoudnormMeasured,
@@ -116,6 +126,11 @@ export interface ExportSettings {
   fps: number;
   quality: ExportQuality;
   encoder: ExportVideoEncoder;
+  /** Container and codecs; the encoder above applies to H.264 only. */
+  format: ExportFormat;
+  gif: GifOptions;
+  /** Extra output options (checked: `checkAdvancedArgs`). */
+  advancedArgs: string[];
 }
 
 /**
@@ -132,11 +147,16 @@ export function resolveExportSettings(
     options.encoder === 'auto' && hardwareEncoder && isExportVideoEncoder(hardwareEncoder)
       ? hardwareEncoder
       : null;
+  const format = formatOf(options);
   return {
     ...size,
     fps: options.fps === 'project' ? doc.timeline.frameRate : options.fps,
     quality: options.quality,
-    encoder: hardware ?? 'libx264',
+    // Hardware encoders are H.264 only.
+    encoder: format === 'mp4' ? (hardware ?? 'libx264') : 'libx264',
+    format,
+    gif: options.gif ?? DEFAULT_GIF,
+    advancedArgs: options.advancedArgs ?? [],
   };
 }
 
@@ -228,7 +248,7 @@ export interface ExportGraph {
 }
 
 export interface ExportGraphError {
-  code: 'empty' | 'offline' | 'unknown-media';
+  code: 'empty' | 'offline' | 'unknown-media' | 'invalid';
   message: string;
 }
 
@@ -495,6 +515,83 @@ export function loudnessMeasure(
     `${LOUDNORM_MEASURE}[aout]`,
   );
   return { args, scriptText };
+}
+
+/** The video codec and colour tags of the export's format (none for GIF and audio only). */
+function outputVideoArgs(settings: ExportSettings): string[] {
+  const video = FORMATS[settings.format].video;
+  if (video === null || video === 'gif') return [];
+  const q = QUALITY_SETTINGS[settings.quality];
+  const effort = { draft: 0, standard: 1, high: 2 }[settings.quality];
+  const codec =
+    video === 'h264'
+      ? videoEncoderArgs(settings)
+      : video === 'hevc'
+        ? [
+            '-c:v',
+            'libx265',
+            '-preset',
+            q.preset,
+            '-crf',
+            String(q.crf + 4),
+            '-tag:v',
+            'hvc1',
+            '-pix_fmt',
+            'yuv420p',
+          ]
+        : video === 'vp9'
+          ? [
+              '-c:v',
+              'libvpx-vp9',
+              '-crf',
+              String(q.crf + 10),
+              '-b:v',
+              '0',
+              '-row-mt',
+              '1',
+              '-deadline',
+              'good',
+              '-cpu-used',
+              String(6 - effort * 2),
+              '-pix_fmt',
+              'yuv420p',
+            ]
+          : [
+              '-c:v',
+              'libsvtav1',
+              '-crf',
+              String(q.crf + 12),
+              '-preset',
+              String(10 - effort * 2),
+              '-pix_fmt',
+              'yuv420p',
+            ];
+  return [
+    ...codec,
+    '-color_primaries',
+    'bt709',
+    '-color_trc',
+    'bt709',
+    '-colorspace',
+    'bt709',
+    '-color_range',
+    'tv',
+  ];
+}
+
+/** The audio codec of the export's format. */
+function outputAudioArgs(audio: FormatInfo['audio']): string[] {
+  const rate = ['-ar', String(EXPORT_SAMPLE_RATE), '-ac', '2'];
+  switch (audio) {
+    case 'aac':
+      return ['-c:a', 'aac', '-b:a', EXPORT_AUDIO_BITRATE, ...rate];
+    case 'opus':
+      return ['-c:a', 'libopus', '-b:a', '128k', ...rate];
+    case 'mp3':
+      return ['-c:a', 'libmp3lame', '-q:a', '2', ...rate];
+    case null:
+      return [];
+  }
 }
 
 function videoEncoderArgs(settings: ExportSettings): string[] {
@@ -966,40 +1063,28 @@ export function buildExportGraph(
     if (input.seek) args.push('-noaccurate_seek', '-ss', sec(input.seek.startUs));
     args.push('-i', input.path);
   }
+  const info = FORMATS[settings.format];
+  if (info.video === 'gif') videoLines.push(`;${gifFilters(settings.gif, 'vout', 'gout')}`);
+  const advanced = checkAdvancedArgs(settings.advancedArgs);
+  if (advanced) return err({ code: 'invalid', message: advanced });
   args.push(
-    '-/filter_complex',
-    options.filterScriptPath,
-    '-/filter_complex',
-    options.audioScriptPath,
-    '-map',
-    '[vout]',
-    '-map',
-    '[aout]',
-    ...videoEncoderArgs(settings),
-    '-color_primaries',
-    'bt709',
-    '-color_trc',
-    'bt709',
-    '-colorspace',
-    'bt709',
-    '-color_range',
-    'tv',
-    '-c:a',
-    'aac',
-    '-b:a',
-    EXPORT_AUDIO_BITRATE,
-    '-ar',
-    String(EXPORT_SAMPLE_RATE),
-    '-ac',
-    '2',
+    ...(info.video ? ['-/filter_complex', options.filterScriptPath] : []),
+    ...(info.audio ? ['-/filter_complex', options.audioScriptPath] : []),
+    ...(info.video ? ['-map', info.video === 'gif' ? '[gout]' : '[vout]'] : []),
+    ...(info.audio ? ['-map', '[aout]'] : []),
+    ...outputVideoArgs(settings),
+    ...outputAudioArgs(info.audio),
     '-t',
     sec(durationUs),
     // (`-map_metadata -1` here would also drop the chapter titles.)
-    ...(chaptersIndex !== null ? ['-map_chapters', String(chaptersIndex)] : []),
-    '-movflags',
-    '+faststart',
+    ...(chaptersIndex !== null &&
+    (info.muxer === 'mp4' || info.muxer === 'webm' || info.muxer === 'ipod')
+      ? ['-map_chapters', String(chaptersIndex)]
+      : []),
+    ...(info.muxer === 'mp4' || info.muxer === 'ipod' ? ['-movflags', '+faststart'] : []),
+    ...settings.advancedArgs,
     '-f',
-    'mp4',
+    info.muxer,
     options.outputPath,
   );
 
