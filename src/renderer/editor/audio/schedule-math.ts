@@ -4,6 +4,7 @@
  * (`planChunk`), merging decoded pieces into ~1 s chunks (`ChunkAccumulator`), per-track gains
  * after mute and solo, and the signature that decides when an edit needs rescheduling.
  */
+import { audioRenderKey, type AudioRenderSpec } from '../../../shared/project/audio-speed';
 import {
   audioSegments,
   dbToLinear,
@@ -219,9 +220,18 @@ export function trackGains(doc: Project): Map<string, number> {
 }
 
 /** A key that changes when the scheduled audio would change (not for gain-only edits). */
-export function scheduleSignature(doc: Project, mediaUrls: Record<string, string>): string {
+export function scheduleSignature(
+  doc: Project,
+  mediaUrls: Record<string, string>,
+  renders: ReadonlyMap<string, string> = new Map(),
+): string {
+  const { segments, urls } = playableSegments(
+    audioSegments(doc, { includeInaudible: true }),
+    mediaUrls,
+    renders,
+  );
   return JSON.stringify(
-    audioSegments(doc, { includeInaudible: true }).map((s) => [
+    segments.map((s) => [
       s.trackId,
       s.mediaId,
       s.timelineStartUs,
@@ -230,9 +240,64 @@ export function scheduleSignature(doc: Project, mediaUrls: Record<string, string
       s.fileEndUs,
       s.clockRatio,
       s.offline,
-      mediaUrls[s.mediaId] ?? null,
+      urls[s.mediaId] ?? null,
     ]),
   );
+}
+
+/** The preview renders a document's sped-up audio segments need (R2.18). */
+export function wantedRenders(segments: readonly AudioSegment[]): AudioRenderSpec[] {
+  return segments
+    .filter((s) => s.speed !== 1 && !s.offline)
+    .map((s) => ({
+      mediaId: s.mediaId,
+      fileStartUs: s.fileStartUs,
+      fileEndUs: s.fileEndUs,
+      speed: s.speed,
+    }));
+}
+
+/**
+ * What the preview can play: segments at speed 1 as they are, and each sped-up segment as its
+ * render (`renders`: key → URL), a file that already holds the range at that speed with its
+ * pitch kept, so it plays from 0 at the media's clock ratio. A sped-up segment whose render is
+ * not ready yet is left out (silent until it is). `urls` maps every segment's media ID (a render
+ * gets `render:<key>`) to its URL.
+ */
+export function playableSegments(
+  segments: readonly AudioSegment[],
+  mediaUrls: Record<string, string>,
+  renders: ReadonlyMap<string, string>,
+): { segments: AudioSegment[]; urls: Record<string, string> } {
+  const urls: Record<string, string> = { ...mediaUrls };
+  const out: AudioSegment[] = [];
+  for (const s of segments) {
+    if (s.speed === 1) {
+      out.push(s);
+      continue;
+    }
+    const key = audioRenderKey({
+      mediaId: s.mediaId,
+      fileStartUs: s.fileStartUs,
+      fileEndUs: s.fileEndUs,
+      speed: s.speed,
+    });
+    const url = renders.get(key);
+    if (!url) continue;
+    const mediaId = `render:${key}`;
+    urls[mediaId] = url;
+    const lengthSeconds = (s.fileEndSeconds - s.fileStartSeconds) / s.speed;
+    out.push({
+      ...s,
+      mediaId,
+      fileStartUs: 0,
+      fileEndUs: Math.round(lengthSeconds * 1_000_000),
+      fileStartSeconds: 0,
+      fileEndSeconds: lengthSeconds,
+      speed: 1,
+    });
+  }
+  return { segments: out, urls };
 }
 
 /** Decoded audio of one media file, as PCM chunks from a file time. */

@@ -45,6 +45,11 @@ describe('Capture Studio MCP tools', () => {
         'add_annotation',
         'edit_annotation',
         'remove_annotations',
+        'set_speed',
+        'freeze_frame',
+        'set_transition',
+        'set_marker',
+        'remove_marker',
         'apply_edits',
         'cancel_export',
         'cut_range',
@@ -341,6 +346,56 @@ describe('Capture Studio MCP tools', () => {
     expect(items().map((i) => i.kind)).toEqual(['blur']);
     const unknown = await call('edit_annotation', { project: doc.id, id: 'obj_nope', text: 'x' });
     expect(unknown).toMatchObject({ isError: true });
+  });
+
+  it('changes speed, freezes, adds a transition and chapter markers (R2.10, R2.18–R2.20)', async () => {
+    const { call, doc, fake } = await setup();
+    const sped = await call('set_speed', { project: doc.id, start: 2, end: 6, speed: 2 });
+    expect(sped.text).toMatch(/^Applied "Speed 2× 2 s–6 s"/);
+    const frozen = await call('freeze_frame', { project: doc.id, at: 10, seconds: 1.5 });
+    expect(frozen.isError).toBe(false);
+    const current = () => fake.editor()!.getState().doc!;
+    const screen = trackByName(current(), 'Screen').clips;
+    const later = screen.find((c) => c.timelineStartUs >= 4 * S && !c.freeze)!;
+    const faded = await call('set_transition', {
+      project: doc.id,
+      clipId: later.id,
+      type: 'fade-color',
+      seconds: 0.4,
+      color: '#FFFFFF',
+    });
+    expect(faded.text).toMatch(/^Applied "Transition fade-color"/);
+    const marked = await call('set_marker', {
+      project: doc.id,
+      at: 1,
+      label: 'Intro',
+      chapter: true,
+    });
+    expect(marked.isError).toBe(false);
+    const summary = JSON.parse((await call('get_project', { project: doc.id })).text) as {
+      markers?: { id: string; label: string; chapter: boolean }[];
+      tracks: { name: string; clips: { speed?: number; freeze?: true; transition?: unknown }[] }[];
+    };
+    const clips = summary.tracks.find((t) => t.name === 'Screen')!.clips;
+    expect(clips.some((c) => c.speed === 2)).toBe(true);
+    expect(clips.some((c) => c.freeze)).toBe(true);
+    expect(clips.some((c) => c.transition)).toBe(true);
+    expect(summary.markers).toEqual([expect.objectContaining({ label: 'Intro', chapter: true })]);
+    const renamed = await call('set_marker', {
+      project: doc.id,
+      id: summary.markers![0]!.id,
+      label: 'Hi',
+    });
+    expect(renamed.isError).toBe(false);
+    expect(current().timeline.markers?.[0]?.label).toBe('Hi');
+    await call('remove_marker', { project: doc.id, id: summary.markers![0]!.id });
+    expect(current().timeline.markers).toBeUndefined();
+    expect(await call('set_marker', { project: doc.id, label: 'no time' })).toMatchObject({
+      isError: true,
+    });
+    expect(await call('set_speed', { project: doc.id, start: 1, end: 3, speed: 3 })).toMatchObject({
+      isError: true,
+    });
   });
 
   it('explains mistakes and refusals', async () => {

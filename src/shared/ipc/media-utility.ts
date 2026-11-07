@@ -39,6 +39,15 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
     outDir: AbsPath,
     mediaId: Id,
   }),
+  /** A file range at a clip's speed, pitch kept, for the preview (`audio-render.ts`). */
+  z.object({
+    kind: z.literal('audioRender'),
+    input: AbsPath,
+    output: AbsPath,
+    startSeconds: z.number().nonnegative(),
+    endSeconds: z.number().positive(),
+    speed: z.number().min(0.25).max(4),
+  }),
   z.object({ kind: z.literal('encoders.probe') }),
   /**
    * Export a project snapshot to MP4 (§4.3.9). Main validated `doc` against the full schema;
@@ -58,7 +67,14 @@ export const JobSpecSchema = z.discriminatedUnion('kind', [
   }),
 ]);
 export type JobSpec = z.infer<typeof JobSpecSchema>;
-export const JOB_KINDS = ['finalize', 'peaks', 'thumbnails', 'encoders.probe', 'export'] as const;
+export const JOB_KINDS = [
+  'finalize',
+  'peaks',
+  'thumbnails',
+  'audioRender',
+  'encoders.probe',
+  'export',
+] as const;
 export type JobKind = JobSpec['kind'];
 
 export const SyncCheckpointsSchema = z.object({
@@ -120,6 +136,7 @@ export const JOB_RESULT_SCHEMAS = {
   finalize: z.object({ streams: z.array(FinalizedStreamSchema) }),
   peaks: PeaksResultSchema,
   thumbnails: z.object({ indexPath: AbsPath, index: ThumbnailIndexSchema }),
+  audioRender: z.object({ output: AbsPath }),
   'encoders.probe': FfmpegEncoderReportSchema,
   export: z.object({
     output: AbsPath,

@@ -35,6 +35,12 @@ export interface ClipSummary {
   /** Clips sharing a link ID (camera + mic) are edited together. */
   linkId: string | null;
   source: Media['role'] | 'unknown';
+  /** Playback speed when not 1 (audio keeps its pitch). */
+  speed?: number;
+  /** A freeze frame (one picture held, silent). */
+  freeze?: true;
+  /** The transition in from the previous clip. */
+  transition?: { kind: string; seconds: number };
 }
 
 interface TrackSummaryBase {
@@ -88,6 +94,8 @@ export interface ProjectSummary {
   /** Video tracks render bottom to top in this order. */
   tracks: TrackSummary[];
   components: ComponentSummary[];
+  /** Markers, by time; chapter markers become MP4 chapters. */
+  markers?: { id: string; at: TimeSummary; label: string; chapter: boolean }[];
   /** Text, callouts and privacy regions over the video, bottom to top. */
   annotations?: {
     id: string;
@@ -140,6 +148,16 @@ export function summarizeProject(doc: Project): ProjectSummary {
           durationSeconds: usToSeconds(clipDurationUs(clip)),
           linkId: clip.linkId,
           source: media.get(clip.mediaId)?.role ?? 'unknown',
+          ...(clip.speed !== undefined ? { speed: clip.speed } : {}),
+          ...(clip.freeze ? { freeze: true as const } : {}),
+          ...(clip.transitionIn
+            ? {
+                transition: {
+                  kind: clip.transitionIn.kind,
+                  seconds: usToSeconds(clip.transitionIn.durationUs),
+                },
+              }
+            : {}),
         })),
       };
       return track.type === 'video'
@@ -179,6 +197,16 @@ export function summarizeProject(doc: Project): ProjectSummary {
           : [];
       }),
     })),
+    ...(doc.timeline.markers
+      ? {
+          markers: doc.timeline.markers.map((m) => ({
+            id: m.id,
+            at: time(m.tUs),
+            label: m.label,
+            chapter: m.chapter,
+          })),
+        }
+      : {}),
     ...(doc.timeline.objectTracks?.some((t) => t.items.length > 0)
       ? {
           annotations: doc.timeline.objectTracks.flatMap((track) =>

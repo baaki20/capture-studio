@@ -16,6 +16,7 @@ import { webCodecsBackend } from '../editor/preview/media-backend';
 import { loadObjectFonts } from '../editor/preview/object-fonts';
 import { ObjectRasterizer } from '../editor/preview/object-raster';
 import { sceneObjectPlans } from '../../shared/project/objects';
+import { decoderSources } from '../../shared/project/render-plan';
 import { ExportFrameRenderer } from './frame-renderer';
 import { RenderSession } from './render-session';
 
@@ -39,12 +40,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   const { canvas } = doc.timeline;
   const compositor = new WebGlCompositor(new OffscreenCanvas(canvas.width, canvas.height));
   const pool = new DecoderPool<VideoFrame>(webCodecsBackend, new FrameCache<VideoFrame>());
-  pool.setSources(
-    doc.media.flatMap((m) => {
-      const url = mediaUrls[m.id];
-      return m.kind === 'video' && url ? [{ mediaId: m.id, url }] : [];
-    }),
-  );
+  pool.setSources(decoderSources(doc.media, (id) => mediaUrls[id] ?? null));
   const rasterizer = new ObjectRasterizer();
   const renderer = new ExportFrameRenderer<VideoFrame, OffscreenCanvas>(
     doc,

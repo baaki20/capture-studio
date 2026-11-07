@@ -142,6 +142,12 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   setObjectKeyframe: 'Change annotation keyframe',
   removeObjectKeyframe: 'Delete annotation keyframe',
   setObjectTrack: 'Change annotation track',
+  setSpeed: 'Change speed',
+  freezeFrame: 'Freeze frame',
+  setTransition: 'Change transition',
+  addMarker: 'Add marker',
+  updateMarker: 'Change marker',
+  removeMarker: 'Delete marker',
   nudge: 'Sync nudge',
   unlink: 'Unlink',
   relink: 'Link',
@@ -170,6 +176,10 @@ export function defaultCoalesceKey(op: TimelineOp): string | null {
       return `object:${op.objectId}:${Object.keys(op.patch).sort().join(',')}`;
     case 'moveObject':
       return `object-move:${op.objectId}`;
+    case 'updateMarker':
+      return `marker:${op.markerId}:${Object.keys(op).sort().join(',')}`;
+    case 'setTransition':
+      return `transition:${op.clipId}`;
     case 'setObjectKeyframe':
       return `object-key:${op.objectId}:${String(op.tUs)}`;
     case 'nudge':

@@ -11,6 +11,9 @@
  *   `GainNode`, then a master gain. `planChunk` computes when, from which offset and for how
  *   long; it skips into a chunk that is already late.
  * - **Gains.** Mute and solo are gains (0 when inaudible), so toggling them is immediate.
+ * - **Speed.** A sped-up segment plays a preview render of its range at that speed with its pitch
+ *   kept (`playableSegments`, rendered by the media utility with the export's `atempo`); it is
+ *   silent until the render is ready.
  * - **Seek / edit.** Seeking stops every node and reschedules from the new time; an edit that
  *   changes the segments does the same at the current time, a gain-only edit just ramps gains.
  *
@@ -23,6 +26,7 @@ import {
   chunkLatenessS,
   LOOKAHEAD_US,
   planChunk,
+  playableSegments,
   scheduleSignature,
   segmentFileAt,
   segmentTimelineAt,
@@ -64,7 +68,11 @@ export class AudioScheduler {
   private readonly nodes = new Set<PlayingNode>();
   private doc: Project | null = null;
   private mediaUrls: Record<string, string> = {};
+  /** Ready preview renders of sped-up segments: key → URL (`AudioRenders`). */
+  private renders: ReadonlyMap<string, string> = new Map();
   private signature = '';
+  /** URLs of what `start` scheduled: media and renders by segment media ID. */
+  private playUrls: Record<string, string> = {};
   private anchor: TransportAnchor | null = null;
   private generation = 0;
   private readonly lookaheadUs: number;
@@ -114,7 +122,19 @@ export class AudioScheduler {
       node.gain.cancelScheduledValues(now);
       node.gain.setTargetAtTime(gain, now, 0.01);
     }
-    const signature = scheduleSignature(doc, mediaUrls);
+    this.reschedule();
+  }
+
+  /** New ready renders of sped-up segments: they play from now on. */
+  setRenders(renders: ReadonlyMap<string, string>): void {
+    this.renders = renders;
+    this.reschedule();
+  }
+
+  /** Reschedules at the current time when what plays changed. */
+  private reschedule(): void {
+    if (!this.doc) return;
+    const signature = scheduleSignature(this.doc, this.mediaUrls, this.renders);
     if (signature !== this.signature) {
       this.signature = signature;
       const heard = this.heardTimeUs();
@@ -136,8 +156,14 @@ export class AudioScheduler {
     };
     this.anchor = anchor;
     if (rate > 0 && this.doc) {
-      const segments = audioSegments(this.doc, { includeInaudible: true }).filter(
-        (s) => !s.offline && s.timelineEndUs > fromUs && this.mediaUrls[s.mediaId],
+      const playable = playableSegments(
+        audioSegments(this.doc, { includeInaudible: true }),
+        this.mediaUrls,
+        this.renders,
+      );
+      this.playUrls = playable.urls;
+      const segments = playable.segments.filter(
+        (s) => !s.offline && s.timelineEndUs > fromUs && playable.urls[s.mediaId],
       );
       const byTrack = new Map<string, AudioSegment[]>();
       for (const s of segments) byTrack.set(s.trackId, [...(byTrack.get(s.trackId) ?? []), s]);
@@ -195,7 +221,7 @@ export class AudioScheduler {
     try {
       for (const segment of segments) {
         if (!live()) return;
-        const url = this.mediaUrls[segment.mediaId];
+        const url = this.playUrls[segment.mediaId];
         if (!url) continue;
         // Wait until the segment comes within the lookahead window.
         while (live() && segment.timelineStartUs > this.windowEndUs(anchor)) await this.sleep();

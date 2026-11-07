@@ -32,7 +32,7 @@
  * `-loop 1` image demuxer of §4.3.9 step 1: with the demuxer looping, FFmpeg n9.0.2 hung in about
  * 1–2 % of runs (stress test of the masked-overlay graph); with the in-graph loop, 0 of 864.
  * 5. Audio per clip: `atrim → asetpts → (asetrate + aresample when |ratio − 1| ≥ 1 ppm) →
- *    stereo → volume → adelay`, then `amix normalize=0`, `alimiter`, `aresample`, `apad`. The
+ *    (atempo at the clip's speed) → stereo → volume → adelay`, then `amix normalize=0`, `alimiter`, `aresample`, `apad`. The
  *    output length is set with `-t D`.
  * 6. Encoding: libx264 (preset and CRF from the quality), or a verified hardware encoder with
  *    equivalent settings; AAC-LC 192 kbps 48 kHz stereo, `+faststart`.
@@ -57,6 +57,8 @@
  * and picks exactly the frames the single input would have; FFmpeg stops reading an input once
  * its pieces have ended. In-order projects keep one input per media.
  */
+import { exportChapters, ffmetadataText } from '../../../shared/export/chapters';
+import { atempoFilters } from '../../../shared/project/audio-speed';
 import path from 'node:path';
 import { exportSize, QUALITY_SETTINGS, type ExportQuality } from '../../../shared/export/presets';
 import type { ExportOptions } from '../../../shared/ipc/contract';
@@ -130,8 +132,11 @@ export function resolveExportSettings(
 export interface ExportInput {
   /** Index of the `-i`. */
   index: number;
-  /** `pipe`: the frame-render path's raw frames on stdin (`path` is `pipe:0`). */
-  kind: 'media' | 'mask' | 'pipe';
+  /**
+   * `pipe`: the frame-render path's raw frames on stdin (`path` is `pipe:0`); `chapters`: the
+   * ffmetadata file with the MP4 chapters.
+   */
+  kind: 'media' | 'mask' | 'pipe' | 'chapters';
   path: string;
   /** Media id, for `kind: 'media'`. */
   mediaId: string | null;
@@ -205,6 +210,8 @@ export interface ExportGraph {
   filterScriptText: string;
   inputs: ExportInput[];
   masks: MaskSpec[];
+  /** The ffmetadata file to write at `chaptersPath`, or null without chapter markers. */
+  chaptersText: string | null;
   expectedDurationUs: number;
   settings: ExportSettings;
 }
@@ -227,6 +234,8 @@ export interface BuildExportGraphOptions {
    */
   filterScriptPath: string;
   audioScriptPath: string;
+  /** Where the job writes the chapters file (when the project has chapter markers). */
+  chaptersPath?: string;
   /** Where the job writes mask PNGs (`mask-<n>.png`). */
   maskDir: string;
   /** Probed colour properties of video media; missing entries are taken as BT.709. */
@@ -392,6 +401,8 @@ function audioChain(segment: AudioSegment, media: Media): string[] {
       `aresample=${String(EXPORT_SAMPLE_RATE)}`,
     );
   }
+  // A sped-up or slowed clip keeps its pitch (the preview plays a render with the same filters).
+  filters.push(...atempoFilters(segment.speed));
   // Mono plays on both channels at full level, as Web Audio up-mixes it in the preview.
   filters.push(
     (media.audio?.channels ?? 2) === 1
@@ -828,6 +839,19 @@ export function buildExportGraph(
     );
   }
 
+  // Chapters (R2.20): an ffmetadata input after the others.
+  const chapters = exportChapters(doc.timeline.markers, durationUs);
+  const chaptersIndex = chapters.length > 0 && options.chaptersPath ? inputs.length : null;
+  if (chaptersIndex !== null && options.chaptersPath) {
+    inputs.push({
+      index: chaptersIndex,
+      kind: 'chapters',
+      path: options.chaptersPath,
+      mediaId: null,
+      seek: null,
+    });
+  }
+
   // Command line.
   const args: string[] = ['-y', '-loglevel', 'warning'];
   if (settings.encoder === 'h264_vaapi') args.push('-vaapi_device', VAAPI_DEVICE);
@@ -844,6 +868,7 @@ export function buildExportGraph(
         String(F),
       );
     }
+    if (input.kind === 'chapters') args.push('-f', 'ffmetadata');
     if (input.seek) args.push('-noaccurate_seek', '-ss', sec(input.seek.startUs));
     args.push('-i', input.path);
   }
@@ -875,6 +900,8 @@ export function buildExportGraph(
     '2',
     '-t',
     sec(durationUs),
+    // (`-map_metadata -1` here would also drop the chapter titles.)
+    ...(chaptersIndex !== null ? ['-map_chapters', String(chaptersIndex)] : []),
     '-movflags',
     '+faststart',
     '-f',
@@ -891,6 +918,7 @@ export function buildExportGraph(
     filterScriptText: videoScriptText + audioScriptText,
     inputs,
     masks,
+    chaptersText: chaptersIndex !== null ? ffmetadataText(chapters) : null,
     expectedDurationUs: durationUs,
     settings,
   });

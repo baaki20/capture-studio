@@ -139,10 +139,12 @@ describe('Phase 1 projects', () => {
       fc.property(arbRecordedProject, fc.double({ min: 0, max: 1, noNaN: true }), (doc, f) => {
         const t = Math.floor(f * timelineDurationUs(doc));
         const scene = sceneAt(doc, t);
-        expect(scene.layers.map(({ opacity: _o, border: _b, shadow: _s, ...l }) => l)).toEqual(
-          layersAt(doc, t),
-        );
-        expect(scene.layers.every((l) => l.opacity === 1 && !l.border && !l.shadow)).toBe(true);
+        expect(
+          scene.layers.map(({ opacity: _o, tint: _t, border: _b, shadow: _s, ...l }) => l),
+        ).toEqual(layersAt(doc, t));
+        expect(
+          scene.layers.every((l) => l.opacity === 1 && !l.tint && !l.border && !l.shadow),
+        ).toBe(true);
         expect(scene.objects).toEqual([]);
         expect(scene.background).toEqual(doc.timeline.canvas.background);
       }),

@@ -2,7 +2,8 @@
  * Draws the timeline on a 2D canvas (§4.2 "canvas renderer + React chrome"): ruler with
  * timecodes, In/Out marks, clips with thumbnails (video) or waveforms (audio), selection and
  * link highlights, offline clips, parts a sync nudge left uncovered, face layout keyframes
- * (diamonds in the face row's lane), annotation objects (bars on the object rows, coloured by
+ * (diamonds in the face row's lane), transitions, speed and freeze badges, markers on the
+ * ruler, annotation objects (bars on the object rows, coloured by
  * family), the snap guide and the playhead. Geometry comes from `geometry.ts`, so drawing and hit testing agree.
  */
 import { clipRefAtExact } from '../../../shared/project/clip-time';
@@ -51,6 +52,12 @@ export interface TimelinePalette {
   snap: string;
   keyframe: string;
   keyframeLane: string;
+  /** Transition wedges, speed badges, markers and chapter markers. */
+  transition: string;
+  badge: string;
+  badgeText: string;
+  marker: string;
+  chapter: string;
   /** Object bars: text, callouts, privacy regions. */
   objectText: string;
   objectCallout: string;
@@ -77,6 +84,11 @@ export const DARK_PALETTE: TimelinePalette = {
   snap: '#7fd1ff',
   keyframe: '#e8e9ee',
   keyframeLane: 'rgba(0, 0, 0, 0.35)',
+  transition: 'rgba(255, 255, 255, 0.28)',
+  badge: 'rgba(0, 0, 0, 0.65)',
+  badgeText: '#f2c94c',
+  marker: '#7fd1ff',
+  chapter: '#7be08a',
   objectText: '#6b4fa3',
   objectCallout: '#a3593a',
   objectPrivacy: '#4a5563',
@@ -189,6 +201,25 @@ export function drawTimeline(ctx: CanvasRenderingContext2D, input: DrawInput): v
       const x1 = timeToX(view, item.outUs);
       if (x1 < 0 || x0 > width) continue;
       drawObjectBar(ctx, input, p, row, item, x0, x1);
+    }
+  }
+
+  // Markers on the ruler (R2.20): a flag each, chapters in their own colour, with the label.
+  for (const marker of doc.timeline.markers ?? []) {
+    const x = Math.round(timeToX(view, marker.tUs)) + 0.5;
+    if (x < -2 || x > width + 2) continue;
+    ctx.fillStyle = marker.chapter ? p.chapter : p.marker;
+    ctx.beginPath();
+    ctx.moveTo(x, RULER_HEIGHT - 12);
+    ctx.lineTo(x + 7, RULER_HEIGHT - 9);
+    ctx.lineTo(x, RULER_HEIGHT - 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(x - 0.5, RULER_HEIGHT - 12, 1, 12);
+    if (marker.label) {
+      ctx.font = '10px system-ui, sans-serif';
+      ctx.textBaseline = 'top';
+      ctx.fillText(marker.label, x + 9, RULER_HEIGHT - 13);
     }
   }
 
@@ -329,6 +360,29 @@ function drawClip(
     ctx.font = '11px system-ui, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.fillText('Offline', left + 6, top + h / 2);
+  }
+  // A transition in: a wedge over its length at the clip's start (R2.10).
+  if (clip.transitionIn) {
+    const tx = timeToX(input.view, clip.timelineStartUs + clip.transitionIn.durationUs);
+    ctx.fillStyle = p.transition;
+    ctx.beginPath();
+    ctx.moveTo(x0, top + h);
+    ctx.lineTo(tx, top);
+    ctx.lineTo(x0, top);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // Speed and freeze frames (R2.18, R2.19): a badge in the top-right corner.
+  const badge = clip.freeze ? 'Freeze' : clip.speed !== undefined ? `${String(clip.speed)}×` : null;
+  if (badge && w > 30) {
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.textBaseline = 'top';
+    const bw = ctx.measureText(badge).width + 8;
+    const bx = Math.min(right, input.width) - bw - 3;
+    ctx.fillStyle = p.badge;
+    ctx.fillRect(bx, top + 3, bw, 14);
+    ctx.fillStyle = p.badgeText;
+    ctx.fillText(badge, bx + 4, top + 5);
   }
   ctx.restore();
 

@@ -16,6 +16,7 @@
  */
 import { frameTimeUs, pickTimeUs, type FrameSpec } from '../../shared/export/frame-render';
 import type { Media, Project } from '../../shared/project/schema';
+import { decoderKey } from '../../shared/project/render-plan';
 import { sceneAt, type Scene, type SceneLayer } from '../../shared/project/scene';
 import type { SceneBackground } from '../editor/preview/compositor-math';
 import type { CompositeItemOf, CompositeObjectOf, Size } from '../editor/preview/compositor-math';
@@ -121,16 +122,17 @@ export class ExportFrameRenderer<F extends CacheableFrame, I = never> {
         if (layer.offline) {
           throw new RenderError(`Media is offline: ${this.mediaPath(layer.mediaId)}.`);
         }
-        const failed = this.pool.failed(layer.mediaId);
+        const key = decoderKey(layer);
+        const failed = this.pool.failed(key);
         if (failed) {
           throw new RenderError(
             `Cannot decode ${this.mediaPath(layer.mediaId)}: ${failed.message}`,
           );
         }
         const pick = pickTimeUs(layer.fileTimeUs, fps);
-        this.pool.request(layer.mediaId, pick);
-        const answer = this.pool.frameFor(layer.mediaId, pick);
-        const idle = !this.pool.decoder(layer.mediaId)?.busy;
+        this.pool.request(key, pick);
+        const answer = this.pool.frameFor(key, pick);
+        const idle = !this.pool.decoder(key)?.busy;
         if (!answer.exact && !(answer.frame && idle && now - lastEvent >= this.settleMs)) {
           waiting = true;
         } else if (!answer.exact) {

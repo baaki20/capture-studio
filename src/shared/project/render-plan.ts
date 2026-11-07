@@ -84,6 +84,36 @@ export interface VideoLayer extends LayerGeometry {
   refTimeUs: Us;
   /** File-local time to decode (`media-time.ts`), integer µs. */
   fileTimeUs: Us;
+  /**
+   * The decoder to use when not the media's own (`decoderKey`): a transition's outgoing picture
+   * decodes the same media at another time, on a second decoder (`outgoingDecoder`).
+   */
+  decoder?: string;
+}
+
+/** Suffix of the second decoder of a media, for transitions (`decoderKey`). */
+export const OUTGOING_DECODER_SUFFIX = '~out';
+
+/** The decoder a layer's frames come from. */
+export function decoderKey(layer: Pick<VideoLayer, 'mediaId' | 'decoder'>): string {
+  return layer.decoder ?? layer.mediaId;
+}
+
+/** The decoder sources for a document's video media: each media's own and its second one. */
+export function decoderSources(
+  media: readonly { id: string; kind: string }[],
+  urlOf: (mediaId: string) => string | null,
+): { mediaId: string; url: string }[] {
+  return media.flatMap((m) => {
+    const url = m.kind === 'video' ? urlOf(m.id) : null;
+    // Decoders open on first use, so the second one costs nothing without transitions.
+    return url
+      ? [
+          { mediaId: m.id, url },
+          { mediaId: m.id + OUTGOING_DECODER_SUFFIX, url },
+        ]
+      : [];
+  });
 }
 
 export interface SegmentLayer extends LayerGeometry {
@@ -95,6 +125,8 @@ export interface SegmentLayer extends LayerGeometry {
   /** File-local time at the segment start and end, integer µs. */
   fileStartUs: Us;
   fileEndUs: Us;
+  /** The clip's timing (speed, freeze), so times inside the segment match `layersAt` exactly. */
+  timing: Pick<Clip, 'timelineStartUs' | 'sourceStartUs' | 'speed' | 'freeze'>;
 }
 
 export interface Segment {
@@ -132,6 +164,11 @@ export interface AudioSegment {
   fileEndSeconds: number;
   /** Reference µs per file µs; play at `1 / clockRatio` (preview) or `asetrate` (export). */
   clockRatio: number;
+  /**
+   * The clip's speed (1 normally): the file range lasts `speed` times its timeline length and
+   * plays through `atempo` (`audio-speed.ts`), keeping its pitch.
+   */
+  speed: number;
   /** Track gain in dB (meaningful when `audible`). */
   gainDb: number;
   /** `10^(gainDb/20)` when audible, else 0. */
@@ -274,6 +311,27 @@ export function layersAt(doc: Project, tUs: Us): VideoLayer[] {
   return layers;
 }
 
+/**
+ * The layer of `clip` (on the video track at `trackIndex`) at `tUs`, which may lie past the
+ * clip's end: a transition's outgoing picture keeps playing the source (the media's last frame
+ * once it runs out). Null when the track or media is missing or the layer has no geometry.
+ */
+export function clipLayerAt(
+  doc: Project,
+  trackIndex: number,
+  clip: Clip,
+  tUs: Us,
+): VideoLayer | null {
+  const track = doc.timeline.tracks[trackIndex];
+  const m = mediaMap(doc).get(clip.mediaId);
+  if (track?.type !== 'video' || !m) return null;
+  const geometry = layerGeometry(doc, track, trackIndex, clip, m);
+  if (!geometry) return null;
+  const bounds = mediaRefBounds(m);
+  const refTimeUs = Math.min(Math.max(refAt(clip, tUs), bounds.startUs), bounds.endUs - 1);
+  return { ...geometry, refTimeUs, fileTimeUs: refToFileUs(m, refTimeUs) };
+}
+
 function segmentLayer(
   doc: Project,
   track: VideoTrack,
@@ -294,6 +352,12 @@ function segmentLayer(
     refEndUs,
     fileStartUs: refToFileUs(media, refStartUs),
     fileEndUs: refToFileUs(media, refEndUs),
+    timing: {
+      timelineStartUs: clip.timelineStartUs,
+      sourceStartUs: clip.sourceStartUs,
+      ...(clip.speed !== undefined ? { speed: clip.speed } : {}),
+      ...(clip.freeze ? { freeze: true } : {}),
+    },
   };
 }
 
@@ -353,8 +417,8 @@ export function segmentAt(list: readonly Segment[], tUs: Us): Segment | null {
 }
 
 /** File-local time of a segment layer at timeline time `tUs` inside the segment. */
-export function layerFileTimeUs(segment: Segment, layer: SegmentLayer, tUs: Us): Us {
-  return refToFileUs(layer.clock, layer.refStartUs + (tUs - segment.startUs));
+export function layerFileTimeUs(_segment: Segment, layer: SegmentLayer, tUs: Us): Us {
+  return refToFileUs(layer.clock, clipRefAt(layer.timing, tUs));
 }
 
 /** The layers of a segment at `tUs`, in the same form `layersAt` returns. */
@@ -362,13 +426,14 @@ export function segmentLayersAt(segment: Segment, tUs: Us): VideoLayer[] {
   return segment.layers.map((layer) => {
     const {
       clock: _clock,
-      refStartUs,
+      refStartUs: _rs,
       refEndUs: _re,
       fileStartUs: _fs,
       fileEndUs: _fe,
+      timing,
       ...g
     } = layer;
-    const refTimeUs = refStartUs + (tUs - segment.startUs);
+    const refTimeUs = clipRefAt(timing, tUs);
     return { ...g, refTimeUs, fileTimeUs: refToFileUs(layer.clock, refTimeUs) };
   });
 }
@@ -425,6 +490,8 @@ export function audioSegments(
     const audible = isTrackAudible(doc, track);
     if (!audible && !options.includeInaudible) return;
     for (const clip of track.clips) {
+      // A freeze frame holds a picture; its audio is silent.
+      if (clip.freeze) continue;
       const m = media.get(clip.mediaId);
       const span = m ? clipCoverage(clip, m) : null;
       if (!m || !span) continue;
@@ -446,6 +513,7 @@ export function audioSegments(
         fileStartSeconds: fileStart / 1_000_000,
         fileEndSeconds: fileEnd / 1_000_000,
         clockRatio: m.clockRatio,
+        speed: clip.speed ?? 1,
         gainDb: track.gainDb,
         linearGain: audible ? dbToLinear(track.gainDb) : 0,
         audible,

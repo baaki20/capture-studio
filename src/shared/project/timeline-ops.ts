@@ -43,6 +43,8 @@ import { frameDurationUs, type Us } from '../time';
 import { clampOverlayLayout, clampRectToFrame, type Size } from './face-layout';
 import { checkProjectInvariants } from './invariants';
 import {
+  SPEED_MAX,
+  SPEED_MIN,
   clipHead,
   clipMaxEndUs,
   clipMinStartUs,
@@ -52,6 +54,7 @@ import {
   clipTimelineDurationUs,
   clipWithEnd,
   clipWithStart,
+  fitTransition,
 } from './clip-time';
 import { mediaEditBounds } from './media-time';
 import type { ObjectPatch } from './object-patch';
@@ -91,6 +94,7 @@ import type {
   FaceMode,
   FRect,
   LayoutKeyframe,
+  Marker,
   Media,
   ObjectTrack,
   OverlayLayout,
@@ -150,6 +154,9 @@ export type LayoutPatch = Flatten<
 /** One object type instead of an intersection (so it equals the op schema's inferred type). */
 type Flatten<T> = { [K in keyof T]: T[K] };
 
+/** A clip's transition from the previous clip on its track (v2, R2.10). */
+export type Transition = NonNullable<Clip['transitionIn']>;
+
 export type NudgeTarget = { componentId: string } | { mediaIds: string[] };
 
 /** A serializable edit command; `applyOp` dispatches on `type`. */
@@ -202,6 +209,12 @@ export type TimelineOp =
   | { type: 'setObjectKeyframe'; objectId: string; tUs: Us; box?: FRect; easing?: Easing }
   | { type: 'removeObjectKeyframe'; objectId: string; tUs: Us }
   | { type: 'setObjectTrack'; trackId: string; hidden?: boolean; locked?: boolean }
+  | { type: 'setSpeed'; inUs: Us; outUs: Us; speed: number }
+  | { type: 'freezeFrame'; atUs: Us; durationUs: Us }
+  | { type: 'setTransition'; clipId: string; transition: Transition | null }
+  | { type: 'addMarker'; marker: Marker }
+  | { type: 'updateMarker'; markerId: string; tUs?: Us; label?: string; chapter?: boolean }
+  | { type: 'removeMarker'; markerId: string }
   | { type: 'nudge'; target: NudgeTarget; syncAdjustUs: Us }
   | { type: 'unlink'; clipIds: string[] }
   | { type: 'relink'; clipIds: string[] }
@@ -516,6 +529,24 @@ export const setObjectKeyframe = opFn('setObjectKeyframe');
 export const removeObjectKeyframe = opFn('removeObjectKeyframe');
 /** Hides or locks an object track. */
 export const setObjectTrack = opFn('setObjectTrack');
+/**
+ * Plays `[inUs, outUs)` at `speed` (0.25–4×, R2.18) on every unlocked track: clips are split at
+ * the range's edges, the range gets `(outUs − inUs) × old speed / speed` long, and what follows
+ * moves with it (keyframes, annotations, markers). Audio keeps its pitch. Linked clips stay in
+ * sync. Refused when the range mixes clips at different speeds.
+ */
+export const setSpeed = opFn('setSpeed');
+/**
+ * Holds the picture at `atUs` for `durationUs` (R2.19): every unlocked track opens a gap there,
+ * which video tracks fill with a freeze frame of what they showed; audio is silent meanwhile.
+ */
+export const freezeFrame = opFn('freezeFrame');
+/** Sets or removes a clip's transition from the previous clip (R2.10). */
+export const setTransition = opFn('setTransition');
+/** Adds a marker; `chapter` markers become MP4 chapters (R2.20). */
+export const addMarker = opFn('addMarker');
+export const updateMarker = opFn('updateMarker');
+export const removeMarker = opFn('removeMarker');
 /** Sets `syncAdjustUs` of a component's (or explicit) media; clip positions do not change. */
 export const nudge = opFn('nudge');
 export const unlink = opFn('unlink');
@@ -590,6 +621,20 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
     case 'removeObjectKeyframe':
     case 'setObjectTrack':
       objectDraft(draft, op, ctx);
+      return;
+    case 'setSpeed':
+      speedDraft(draft, op, ctx);
+      return;
+    case 'freezeFrame':
+      freezeDraft(draft, op, ctx);
+      return;
+    case 'setTransition':
+      transitionDraft(draft, op);
+      return;
+    case 'addMarker':
+    case 'updateMarker':
+    case 'removeMarker':
+      markerDraft(draft, op);
       return;
     case 'nudge':
       nudgeDraft(draft, op);
@@ -965,6 +1010,16 @@ function cutDraft(draft: Project, a: Us, b: Us, ctx: Ctx): void {
   const screenMoves = tracks.some((t) => t.type === 'video' && !t.locked);
   if (draft.timeline.camera && screenMoves) {
     setCamera(draft, keyframesThroughCut(plain(draft.timeline.camera), a, b));
+  }
+
+  if (draft.timeline.markers) {
+    setMarkers(
+      draft,
+      // Markers on removed content go with it.
+      plain(draft.timeline.markers)
+        .filter((m) => m.tUs <= a || m.tUs >= b)
+        .map((m) => ({ ...m, tUs: mapTimeThroughCut(m.tUs, a, b) })),
+    );
   }
 
   const marks = draft.timeline.marks;
@@ -1437,6 +1492,316 @@ function objectDraft(
         fail('unknown-track', `unknown object track ${op.trackId}`);
       if (op.hidden !== undefined) track.hidden = op.hidden;
       if (op.locked !== undefined) track.locked = op.locked;
+      return;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Speed, freeze frames, transitions, markers
+
+/** Splits every clip group under `at` on unlocked tracks (none there is fine). */
+function splitAllAt(draft: Project, at: Us, ctx: Ctx): void {
+  const ids = clipsAt(draft, at).map((l) => l.clip.id);
+  const groups = editGroups(draft, ids, true).filter((g) => g.every((m) => !m.track.locked));
+  for (const group of groups) {
+    const first = group[0]?.clip;
+    if (!first) continue;
+    const offset = at - first.timelineStartUs;
+    if (offset < ctx.minUs || clipDurationUs(first) - offset < ctx.minUs) continue;
+    const rightLink = first.linkId === null ? null : ctx.id('link');
+    for (const { track, clip } of group) {
+      const whole = plain(clip);
+      const right: Clip = { ...clipTail(whole, at), id: ctx.id('clip'), linkId: rightLink };
+      const index = track.clips.findIndex((c) => c.id === clip.id);
+      track.clips.splice(index, 1, clipHead(whole, at), right);
+    }
+  }
+}
+
+/**
+ * Moves every time on the timeline that follows the content through `map` (layout keyframes and
+ * clips of unlocked tracks are the caller's): camera keyframes, objects on unlocked object
+ * tracks, markers and the In/Out marks. `map` must keep the order of times.
+ */
+function remapTimes(draft: Project, map: (t: Us) => Us, minUs: Us): void {
+  for (const track of draft.timeline.tracks) {
+    if (track.locked || track.type !== 'video' || !track.layoutKeyframes) continue;
+    setKeyframes(
+      track,
+      dedupeTimes(plain(track.layoutKeyframes).map((k) => ({ ...k, tUs: map(k.tUs) }))),
+    );
+  }
+  if (draft.timeline.camera) {
+    setCamera(
+      draft,
+      dedupeTimes(plain(draft.timeline.camera).map((k) => ({ ...k, tUs: map(k.tUs) }))),
+    );
+  }
+  for (const track of draft.timeline.objectTracks ?? []) {
+    if (track.locked) continue;
+    track.items = plain(track.items).flatMap((item) => {
+      const inUs = map(item.inUs);
+      const outUs = map(item.outUs);
+      if (outUs - inUs < minUs) return [];
+      const keys = item.keyframes
+        ? dedupeTimes(item.keyframes.map((k) => ({ ...k, tUs: map(k.tUs) })))
+        : undefined;
+      return [withKeyframes({ ...item, inUs, outUs }, keys)];
+    });
+  }
+  if (draft.timeline.markers) {
+    setMarkers(
+      draft,
+      plain(draft.timeline.markers).map((m) => ({ ...m, tUs: map(m.tUs) })),
+    );
+  }
+  const marks = draft.timeline.marks;
+  if (marks.inUs !== null) marks.inUs = map(marks.inUs);
+  if (marks.outUs !== null) marks.outUs = map(marks.outUs);
+}
+
+/** Keyframes with distinct times (a squeezed range can bring two onto one; the later wins). */
+function dedupeTimes<K extends { tUs: Us }>(keys: K[]): K[] {
+  const out: K[] = [];
+  for (const key of keys) {
+    if (out.length > 0 && out[out.length - 1]?.tUs === key.tUs) out[out.length - 1] = key;
+    else out.push(key);
+  }
+  return out;
+}
+
+function speedDraft(draft: Project, op: OpOf<'setSpeed'>, ctx: Ctx): void {
+  const { inUs: a, outUs: b, speed } = op;
+  if (!isTime(a) || !isTime(b) || b <= a) fail('invalid-value', 'the range needs 0 ≤ in < out');
+  if (!Number.isFinite(speed) || speed < SPEED_MIN || speed > SPEED_MAX) {
+    fail('invalid-value', `speed must be ${String(SPEED_MIN)}–${String(SPEED_MAX)}×`);
+  }
+  splitAllAt(draft, a, ctx);
+  splitAllAt(draft, b, ctx);
+  const tracks = draft.timeline.tracks.filter((t) => !t.locked);
+  let old: number | null = null;
+  for (const track of tracks) {
+    for (const clip of track.clips) {
+      const end = clipEndUs(clip);
+      if (end <= a || clip.timelineStartUs >= b) continue;
+      if (clip.timelineStartUs < a || end > b) {
+        fail(
+          'invalid-value',
+          'a clip edge is less than a frame from the range edge; widen the range',
+        );
+      }
+      if (clip.freeze) continue;
+      const s = clip.speed ?? 1;
+      if (old !== null && Math.abs(s - old) > 1e-9) {
+        fail('invalid-value', 'the range has clips at different speeds; change them one at a time');
+      }
+      old = s;
+    }
+  }
+  if (old === null) fail('nothing-to-do', 'no clip in the range');
+  if (Math.abs(old - speed) < 1e-9)
+    fail('nothing-to-do', `the range already plays at ${String(speed)}×`);
+  const k = old / speed;
+  const newLength = Math.round((b - a) * k);
+  const map = (t: Us): Us =>
+    t <= a ? t : t >= b ? t + newLength - (b - a) : a + Math.round((t - a) * k);
+  for (const track of tracks) {
+    track.clips = plain(track.clips).map((clip) => {
+      const start = clip.timelineStartUs;
+      const end = clipEndUs(clip);
+      if (end <= a) return clip;
+      if (start >= b) return { ...clip, timelineStartUs: map(start) };
+      const newStart = map(start);
+      let duration = map(end) - newStart;
+      if (clip.freeze) return { ...clip, timelineStartUs: newStart, durationUs: duration };
+      const available = clip.sourceEndUs - clip.sourceStartUs;
+      let source = Math.round(duration * speed);
+      if (source > available) {
+        // Rounding asked for a few µs more than the clip has: end it that much earlier.
+        source = available;
+        duration = Math.max(1, Math.round(source / speed));
+      }
+      const { speed: _s, durationUs: _d, ...rest } = clip;
+      const next: Clip = {
+        ...rest,
+        timelineStartUs: newStart,
+        sourceEndUs: clip.sourceStartUs + source,
+      };
+      return fitTransition(
+        speed === 1
+          ? { ...next, sourceEndUs: clip.sourceStartUs + duration }
+          : { ...next, speed, durationUs: duration },
+        duration,
+      );
+    });
+  }
+  for (const track of tracks) {
+    if (track.clips.some((c) => clipEndUs(c) - c.timelineStartUs < ctx.minUs)) {
+      fail('invalid-value', `at ${String(speed)}× a clip would be shorter than one frame`);
+    }
+  }
+  remapTimes(draft, map, ctx.minUs);
+  normalizeLinks(draft);
+}
+
+function freezeDraft(draft: Project, op: OpOf<'freezeFrame'>, ctx: Ctx): void {
+  const { durationUs: d } = op;
+  if (!isTime(op.atUs)) fail('invalid-value', 'the freeze time must be ≥ 0');
+  if (!isTime(d) || d < ctx.minUs) fail('invalid-value', 'a freeze frame lasts at least one frame');
+  // Less than a frame from a clip edge (where clips are not split): freeze at that edge.
+  let at = op.atUs;
+  for (const track of draft.timeline.tracks) {
+    if (track.locked) continue;
+    for (const clip of track.clips) {
+      const start = clip.timelineStartUs;
+      const end = clipEndUs(clip);
+      if (at <= start || at >= end) continue;
+      if (at - start < ctx.minUs) at = start;
+      else if (end - at < ctx.minUs) at = end;
+    }
+  }
+  for (const track of draft.timeline.tracks) {
+    if (track.locked) continue;
+    for (const clip of track.clips) {
+      const start = clip.timelineStartUs;
+      const end = clipEndUs(clip);
+      if (at > start && at < end && (at - start < ctx.minUs || end - at < ctx.minUs)) {
+        fail('invalid-value', 'clip edges on different tracks are too close to freeze here');
+      }
+    }
+  }
+  // What each unlocked video track shows at `at`, before anything moves.
+  const stills = new Map<string, Clip>();
+  for (const track of draft.timeline.tracks) {
+    if (track.locked || track.type !== 'video') continue;
+    // The clip under `at`, or the one ending there (freezing at a clip's end holds its last frame).
+    const clip =
+      track.clips.find((c) => c.timelineStartUs <= at && at < clipEndUs(c)) ??
+      track.clips.find((c) => clipEndUs(c) === at);
+    if (!clip) continue;
+    const ref = clip.freeze
+      ? clip.sourceStartUs
+      : Math.min(clipRefAt(clip, at), clip.sourceEndUs - ctx.minUs);
+    stills.set(track.id, {
+      id: ctx.id('clip'),
+      mediaId: clip.mediaId,
+      timelineStartUs: at,
+      sourceStartUs: ref,
+      sourceEndUs: ref + ctx.minUs,
+      linkId: null,
+      freeze: true,
+      durationUs: d,
+    });
+  }
+  if (stills.size === 0) fail('nothing-to-do', 'no picture to freeze at this time');
+  splitAllAt(draft, at, ctx);
+  // A linked group with a member on a locked track is not split: it cannot open a gap.
+  for (const track of draft.timeline.tracks) {
+    if (track.locked) continue;
+    if (track.clips.some((c) => c.timelineStartUs < at && clipEndUs(c) > at)) {
+      fail('track-locked', 'a clip here is linked to a clip on a locked track');
+    }
+  }
+  for (const track of draft.timeline.tracks) {
+    if (track.locked) continue;
+    const moved = plain(track.clips).map((c) =>
+      c.timelineStartUs >= at ? { ...c, timelineStartUs: c.timelineStartUs + d } : c,
+    );
+    const still = stills.get(track.id);
+    if (still) moved.push(still);
+    track.clips = moved.sort((x, y) => x.timelineStartUs - y.timelineStartUs);
+  }
+  // Later times move by the freeze's length; an object showing at `at` (its end moves, its start
+  // does not) stays through it.
+  remapTimes(draft, (t) => (t < at ? t : t + d), ctx.minUs);
+  normalizeLinks(draft);
+}
+
+function transitionDraft(draft: Project, op: OpOf<'setTransition'>): void {
+  const { track, clip } = requireClip(draft, op.clipId);
+  if (track.locked) fail('track-locked', `track ${track.name} is locked`);
+  if (track.type !== 'video') fail('wrong-track-type', 'transitions are for video clips');
+  const index = track.clips.findIndex((c) => c.id === clip.id);
+  const target = track.clips[index] ?? fail('unknown-clip', `unknown clip ${op.clipId}`);
+  if (op.transition === null) {
+    if (!target.transitionIn) fail('nothing-to-do', 'the clip has no transition');
+    delete target.transitionIn;
+    return;
+  }
+  const t = op.transition;
+  if (!isTime(t.durationUs) || t.durationUs <= 0) {
+    fail('invalid-value', 'a transition lasts a positive time');
+  }
+  if (t.durationUs > clipDurationUs(target)) {
+    fail('invalid-value', 'a transition cannot be longer than its clip');
+  }
+  if (t.color !== undefined && !/^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/.test(t.color)) {
+    fail('invalid-value', 'the colour must be #RRGGBB');
+  }
+  target.transitionIn = plain(t);
+}
+
+/**
+ * Stores markers sorted by time, dropping the field when there are none. Markers an edit brought
+ * onto one time (a cut, a squeezed range) keep the first.
+ */
+function setMarkers(draft: Project, markers: Marker[]): void {
+  const sorted = [...markers].sort((a, b) => a.tUs - b.tUs);
+  const unique = sorted.filter((m, i) => i === 0 || sorted[i - 1]?.tUs !== m.tUs);
+  if (unique.length > 0) draft.timeline.markers = unique;
+  else delete draft.timeline.markers;
+}
+
+function markerDraft(
+  draft: Project,
+  op: OpOf<'addMarker' | 'updateMarker' | 'removeMarker'>,
+): void {
+  // A copy: `plain` may return the previous document's frozen array.
+  const markers = [...(draft.timeline.markers ? plain(draft.timeline.markers) : [])];
+  const checkLabel = (label: string) => {
+    if (label.length > 200) fail('invalid-value', 'a marker label has at most 200 characters');
+  };
+  switch (op.type) {
+    case 'addMarker': {
+      requireTime(op.marker.tUs, 'the marker time');
+      checkLabel(op.marker.label);
+      if (markers.some((m) => m.id === op.marker.id)) {
+        fail('invalid-value', `marker ${op.marker.id} already exists`);
+      }
+      if (markers.some((m) => m.tUs === op.marker.tUs)) {
+        fail('overlap', 'another marker is at this time');
+      }
+      setMarkers(draft, [...markers, plain(op.marker)]);
+      return;
+    }
+    case 'updateMarker': {
+      const index = markers.findIndex((m) => m.id === op.markerId);
+      const marker = markers[index] ?? fail('unknown-clip', `unknown marker ${op.markerId}`);
+      if (op.tUs !== undefined) {
+        requireTime(op.tUs, 'the marker time');
+        if (markers.some((m) => m.tUs === op.tUs && m.id !== op.markerId)) {
+          fail('overlap', 'another marker is at this time');
+        }
+      }
+      if (op.label !== undefined) checkLabel(op.label);
+      markers[index] = {
+        ...marker,
+        ...(op.tUs !== undefined ? { tUs: op.tUs } : {}),
+        ...(op.label !== undefined ? { label: op.label } : {}),
+        ...(op.chapter !== undefined ? { chapter: op.chapter } : {}),
+      };
+      setMarkers(draft, markers);
+      return;
+    }
+    case 'removeMarker': {
+      if (!markers.some((m) => m.id === op.markerId)) {
+        fail('unknown-clip', `unknown marker ${op.markerId}`);
+      }
+      setMarkers(
+        draft,
+        markers.filter((m) => m.id !== op.markerId),
+      );
       return;
     }
   }

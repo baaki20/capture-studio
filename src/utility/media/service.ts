@@ -22,6 +22,7 @@ import { timelineDurationUs } from '../../shared/project/timeline-ops';
 import { FrameFeed } from './export/frame-feed';
 import { ffmpegTooOldError } from './ffmpeg-runner';
 import { generatePeaks } from './peaks';
+import { renderAudio } from './audio-render';
 import { probeFfmpegVersion, type FfmpegVersion } from './probe';
 import {
   attachClockPort,
@@ -298,6 +299,17 @@ export class MediaService {
             mediaId: job.mediaId,
             signal,
             onProgress: progress,
+          });
+          break;
+        case 'audioRender':
+          result = await renderAudio({
+            ffmpegPath: ffmpeg.ffmpegPath,
+            input: job.input,
+            output: job.output,
+            startSeconds: job.startSeconds,
+            endSeconds: job.endSeconds,
+            speed: job.speed,
+            signal,
           });
           break;
         case 'encoders.probe':

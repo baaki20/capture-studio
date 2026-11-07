@@ -4,6 +4,7 @@
  * and thumbnail assets, the audio scheduler (master clock), the transport and the preview hub
  * the preview pane attaches its worker to.
  */
+import { AudioRenders } from './audio/audio-renders';
 import type { EditorPreloadApi } from '../../shared/ipc/preload-api';
 import type { Project } from '../../shared/project/schema';
 import { openAudioSource } from './audio/audio-source';
@@ -63,6 +64,8 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
   const preview = new PreviewHub();
   const context = new AudioContext({ latencyHint: 'interactive', sampleRate: 48_000 });
   const scheduler = new AudioScheduler(context, { openSource: openAudioSource });
+  const renders = new AudioRenders(api.media, projectId);
+  const offRenders = renders.onChange((ready) => scheduler.setRenders(ready));
   const playback = new Playback({
     docStore,
     ui,
@@ -86,6 +89,7 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
     scheduler.setDoc(state.doc, state.mediaUrls);
     preview.setDoc(state.doc, state.mediaUrls);
     assets.load(state.doc);
+    renders.load(state.doc);
     playback.refresh();
   });
 
@@ -105,6 +109,8 @@ export function createEditorServices(api: EditorPreloadApi, projectId: string): 
       scheduler.dispose();
       void context.close();
       assets.dispose();
+      offRenders();
+      renders.dispose();
       void autosave.flush().finally(() => autosave.dispose());
     },
   };

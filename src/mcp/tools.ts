@@ -315,6 +315,46 @@ export function registerTools(server: McpServer, app: AppApi): void {
   stepTool(
     server,
     app,
+    'set_speed',
+    'speed',
+    'Plays a time range faster or slower (0.25–4×) on every unlocked track, so face, voice and screen stay in sync; audio keeps its pitch. Everything after the range moves with it.',
+    (a) => `Speed ${String(a.speed)}× ${show(a.start)}–${show(a.end)}`,
+  );
+  stepTool(
+    server,
+    app,
+    'freeze_frame',
+    'freezeFrame',
+    'Holds the picture at a time for some seconds (audio is silent meanwhile); everything after moves later by that much.',
+    (a) => `Freeze ${String(a.seconds)} s at ${show(a.at)}`,
+  );
+  stepTool(
+    server,
+    app,
+    'set_transition',
+    'transition',
+    'Sets the transition into a video clip from the clip before it: dissolve, fade-color (through a colour) or slide; none removes it.',
+    (a) => (a.type === 'none' ? 'Remove transition' : `Transition ${a.type}`),
+  );
+  stepTool(
+    server,
+    app,
+    'set_marker',
+    'marker',
+    'Adds a marker at a time (or changes one by id): a label, and chapter: true to make it a chapter of the exported MP4.',
+    (a) => (a.id ? `Change marker ${a.id}` : `Marker at ${show(a.at ?? 0)}`),
+  );
+  stepTool(
+    server,
+    app,
+    'remove_marker',
+    'markerRemove',
+    'Removes a marker by id.',
+    (a) => `Remove marker ${a.id}`,
+  );
+  stepTool(
+    server,
+    app,
     'add_annotation',
     'annotation',
     'Adds an annotation over the video from start to end: text (titles, captions, labels, code), a callout (arrow, rectangle, ellipse, numbered step, highlight, spotlight) or a privacy region (blur, pixelate) to hide something. Boxes are fractions of the frame. get_project lists annotations with their IDs.',

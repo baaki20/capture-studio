@@ -202,6 +202,15 @@ export const ProjectSaveSchema = z.strictObject({
 });
 
 export const MediaAssetRequestSchema = z.strictObject({ projectId: Id, mediaId: Id });
+/** A sped-up clip's audio for the preview: a media's file range at a speed (R2.18). */
+export const AudioRenderRequestSchema = z.strictObject({
+  projectId: Id,
+  mediaId: Id,
+  fileStartUs: z.int().nonnegative(),
+  fileEndUs: z.int().positive(),
+  speed: z.number().min(0.25).max(4),
+});
+
 export const MediaAssetResultSchema = z.object({
   status: z.enum(['ready', 'pending', 'unavailable']),
   url: z.string().nullable(),
@@ -384,6 +393,7 @@ export const INVOKE_CHANNELS = {
 
   'media.peaks': invoke(MediaAssetRequestSchema, MediaAssetResultSchema, EDITOR),
   'media.thumbs': invoke(MediaAssetRequestSchema, MediaAssetResultSchema, EDITOR),
+  'media.audioRender': invoke(AudioRenderRequestSchema, MediaAssetResultSchema, EDITOR),
 
   'export.probeEncoders': invoke(NoPayload, FfmpegEncoderReportSchema, EDITOR),
   'export.start': invoke(ExportStartSchema, ExportStartResultSchema, EDITOR),

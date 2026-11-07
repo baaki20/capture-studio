@@ -133,6 +133,10 @@ export interface EditorPreloadApi extends PreloadBase {
   readonly media: {
     peaks(projectId: string, mediaId: string): Promise<InvokeResponse<'media.peaks'>>;
     thumbs(projectId: string, mediaId: string): Promise<InvokeResponse<'media.thumbs'>>;
+    /** A sped-up clip's audio rendered for the preview (optional for test doubles). */
+    audioRender?(
+      request: InvokeRequest<'media.audioRender'>,
+    ): Promise<InvokeResponse<'media.audioRender'>>;
     /** A project's background peaks and thumbnails are done (optional for test doubles). */
     onCachesReady?(listener: Listener<EventPayload<'media.cachesReady'>>): Unsubscribe;
   };

@@ -3,6 +3,7 @@
  * the UI store and the transport. Edits go through `DocumentStore.apply`, so each is one undo
  * step and every refusal lands in the status line.
  */
+import { newId } from '../../shared/ids';
 import { findClip, timelineDurationUs, type TimelineOp } from '../../shared/project/timeline-ops';
 import type { EditorCommand } from './keyboard';
 import type { DocumentStore, EditError } from './store/document-store';
@@ -155,6 +156,16 @@ export function runCommand(command: EditorCommand, ctx: CommandContext): void {
       }
       return;
     }
+    case 'add-marker':
+      apply(
+        ctx,
+        {
+          type: 'addMarker',
+          marker: { id: newId('marker'), tUs: playhead, label: '', chapter: false },
+        },
+        command,
+      );
+      return;
     case 'mark-in':
       apply(
         ctx,

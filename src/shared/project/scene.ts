@@ -17,11 +17,14 @@
  * extend past the canvas (the compositor clips). Without any v2 field the layers are exactly
  * `layersAt`'s, so Phase 1 projects render as before.
  *
- * Transitions and speed are resolved by the render plan's time mapping and by later steps.
+ * - **Transitions** (`transitionIn` on a clip): dissolve, fade through a colour and slide, drawn
+ *   from the incoming layer and the previous clip's layer continued past its end.
+ *
+ * Speed and freeze frames are resolved by the render plan's time mapping.
  */
 import type { Us } from '../time';
 import { cameraAt } from './camera-keyframes';
-import { interpolate, keyframeSpan, lerp, lerpRect } from './easing';
+import { ease, interpolate, keyframeSpan, lerp, lerpRect } from './easing';
 import {
   overlayDestRect,
   overlayRadiusPx,
@@ -30,9 +33,18 @@ import {
   type PixelRect,
   type Size,
 } from './face-layout';
-import { containRect, layersAt, type LayerMask, type VideoLayer } from './render-plan';
+import {
+  OUTGOING_DECODER_SUFFIX,
+  clipLayerAt,
+  containRect,
+  layersAt,
+  type LayerMask,
+  type VideoLayer,
+} from './render-plan';
+import { clipTimelineDurationUs } from './clip-time';
 import type {
   Beautify,
+  Clip,
   FaceMode,
   FRect,
   LayoutKeyframe,
@@ -61,6 +73,8 @@ export interface SceneShadow {
 export interface SceneLayer extends VideoLayer {
   /** 0–1. */
   opacity: number;
+  /** Mixes the picture toward a colour (fade-to-colour transitions); null when none. */
+  tint: { color: string; amount: number } | null;
   border: { widthPx: number; color: string } | null;
   shadow: SceneShadow | null;
 }
@@ -237,6 +251,7 @@ function faceLayer(
       ...layer,
       sourceRect: zoomCrop(layer.sourceRect, layout.zoom ?? 1),
       opacity: 1,
+      tint: null,
       ...faceStyle(layout, canvas),
     };
   }
@@ -275,6 +290,7 @@ function faceLayer(
     sourceRect: zoomCrop(base, zoom),
     destRect,
     mask,
+    tint: null,
     mirror: key.layout.mirror,
     opacity: state.opacity,
     ...faceStyle(key.layout, canvas),
@@ -326,7 +342,7 @@ function screenLayer(layer: VideoLayer, doc: Project, tUs: Us): SceneLayer {
   const area = screenAreaAt(doc, tUs);
   const full =
     area.x === 0 && area.y === 0 && area.width === canvas.width && area.height === canvas.height;
-  if (full && !beautify) return { ...layer, opacity: 1, border: null, shadow: null };
+  if (full && !beautify) return { ...layer, opacity: 1, tint: null, border: null, shadow: null };
   const s = shortSide(canvas);
   const pad = (beautify?.padding ?? 0) * s;
   const inner = {
@@ -347,6 +363,7 @@ function screenLayer(layer: VideoLayer, doc: Project, tUs: Us): SceneLayer {
     destRect,
     mask: { shape: radiusPx > 0 ? 'rounded' : 'rectangle', radiusPx },
     opacity: 1,
+    tint: null,
     border: null,
     shadow: shadow
       ? {
@@ -408,6 +425,83 @@ export function objectsAt(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Transitions
+
+/** A clip's transition in progress at `tUs`, or null. */
+export interface TransitionState {
+  kind: 'fade-color' | 'dissolve' | 'slide';
+  /** 0 at the clip's start, 1 when the transition is over. */
+  progress: number;
+  color: string;
+  direction: 'left' | 'right' | 'up' | 'down';
+}
+
+export function transitionAt(clip: Clip, tUs: Us): TransitionState | null {
+  const t = clip.transitionIn;
+  if (!t) return null;
+  const into = tUs - clip.timelineStartUs;
+  if (into < 0 || into >= t.durationUs) return null;
+  return {
+    kind: t.kind,
+    progress: into / t.durationUs,
+    color: t.color ?? '#000000',
+    direction: t.direction ?? 'left',
+  };
+}
+
+/**
+ * The layers a transition draws, bottom to top, from the incoming clip's layer and the
+ * outgoing one (null after a gap or at the start: the transition comes from the background).
+ * - dissolve: the incoming picture fades in over the outgoing one;
+ * - fade-color: the outgoing picture fades to the colour over the first half, the incoming one
+ *   from it over the second (without an outgoing picture, from the colour throughout);
+ * - slide: the incoming picture slides in over the outgoing one from the side it moves away
+ *   from (`left`: it enters from the right and moves left), eased in and out.
+ */
+export function transitionLayers(
+  state: TransitionState,
+  incoming: SceneLayer,
+  outgoing: SceneLayer | null,
+  canvas: Size,
+): SceneLayer[] {
+  const p = state.progress;
+  switch (state.kind) {
+    case 'dissolve':
+      return [...(outgoing ? [outgoing] : []), { ...incoming, opacity: incoming.opacity * p }];
+    case 'fade-color': {
+      if (!outgoing) return [{ ...incoming, tint: { color: state.color, amount: 1 - p } }];
+      return p < 0.5
+        ? [{ ...outgoing, tint: { color: state.color, amount: p * 2 } }]
+        : [{ ...incoming, tint: { color: state.color, amount: (1 - p) * 2 } }];
+    }
+    case 'slide': {
+      const left = 1 - ease('ease-in-out', p);
+      const dx =
+        state.direction === 'left'
+          ? canvas.width * left
+          : state.direction === 'right'
+            ? -canvas.width * left
+            : 0;
+      const dy =
+        state.direction === 'up'
+          ? canvas.height * left
+          : state.direction === 'down'
+            ? -canvas.height * left
+            : 0;
+      const moved = {
+        ...incoming,
+        destRect: {
+          ...incoming.destRect,
+          x: incoming.destRect.x + Math.round(dx),
+          y: incoming.destRect.y + Math.round(dy),
+        },
+      };
+      return [...(outgoing ? [outgoing] : []), moved];
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
 // Scene
 
 /** Everything drawn at timeline time `tUs`. */
@@ -416,32 +510,52 @@ export function sceneAt(doc: Project, tUs: Us): Scene {
   const camera = cameraRectAt(doc, tUs);
   const media = new Map(doc.media.map((m) => [m.id, m]));
   const layers: SceneLayer[] = [];
-  for (const layer of layersAt(doc, tUs)) {
+  /** A video layer placed on the canvas: face layout, or screen area, beautify and camera. */
+  const place = (layer: VideoLayer): SceneLayer | null => {
     const track = doc.timeline.tracks[layer.trackIndex];
     const m = media.get(layer.mediaId);
-    if (track?.type !== 'video' || !m?.video) continue;
+    if (track?.type !== 'video' || !m?.video) return null;
     if (layer.kind === 'overlay') {
       const frame = { width: m.video.width, height: m.video.height };
-      layers.push(faceLayer(layer, track, frame, canvas, tUs));
-      continue;
+      return faceLayer(layer, track, frame, canvas, tUs);
     }
     const screen = screenLayer(layer, doc, tUs);
-    if (isFullFrame(camera)) {
-      layers.push(screen);
-    } else {
-      const scale = 1 / camera.width;
-      layers.push({
-        ...screen,
-        destRect: roundRect(applyCamera(screen.destRect, camera, canvas)),
-        mask: { ...screen.mask, radiusPx: screen.mask.radiusPx * scale },
-        shadow: screen.shadow && {
-          ...screen.shadow,
-          blurPx: screen.shadow.blurPx * scale,
-          offsetXPx: screen.shadow.offsetXPx * scale,
-          offsetYPx: screen.shadow.offsetYPx * scale,
-        },
-      });
+    if (isFullFrame(camera)) return screen;
+    const scale = 1 / camera.width;
+    return {
+      ...screen,
+      destRect: roundRect(applyCamera(screen.destRect, camera, canvas)),
+      mask: { ...screen.mask, radiusPx: screen.mask.radiusPx * scale },
+      shadow: screen.shadow && {
+        ...screen.shadow,
+        blurPx: screen.shadow.blurPx * scale,
+        offsetXPx: screen.shadow.offsetXPx * scale,
+        offsetYPx: screen.shadow.offsetYPx * scale,
+      },
+    };
+  };
+  for (const layer of layersAt(doc, tUs)) {
+    const placed = place(layer);
+    if (!placed) continue;
+    const track = doc.timeline.tracks[layer.trackIndex];
+    const clip = track?.clips.find((c) => c.id === layer.clipId);
+    const transition = clip ? transitionAt(clip, tUs) : null;
+    if (!track || !clip || !transition) {
+      layers.push(placed);
+      continue;
     }
+    // The clip before, if it ends where this one starts, keeps playing under the transition.
+    const prev = track.clips.find(
+      (c) => c.timelineStartUs + clipTimelineDurationUs(c) === clip.timelineStartUs,
+    );
+    const continued = prev ? clipLayerAt(doc, layer.trackIndex, prev, tUs) : null;
+    // A second decoder: the incoming clip may show the same media at another time.
+    const outgoingLayer = continued && {
+      ...continued,
+      decoder: continued.mediaId + OUTGOING_DECODER_SUFFIX,
+    };
+    const outgoing = outgoingLayer ? place(outgoingLayer) : null;
+    layers.push(...transitionLayers(transition, placed, outgoing, canvas));
   }
   return {
     tUs,

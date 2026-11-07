@@ -19,6 +19,8 @@ import type { Clip } from './schema';
 
 type ClipTiming = Pick<Clip, 'sourceStartUs' | 'sourceEndUs' | 'speed' | 'durationUs' | 'freeze'>;
 type PlacedClip = ClipTiming & Pick<Clip, 'timelineStartUs'>;
+/** What the reference time inside a clip depends on. */
+export type ClipRefTiming = Pick<Clip, 'timelineStartUs' | 'sourceStartUs' | 'speed' | 'freeze'>;
 
 /** Speed range (§5 P2). */
 export const SPEED_MIN = 0.25;
@@ -49,13 +51,13 @@ export function clipSpeed(clip: Pick<Clip, 'speed' | 'freeze'>): number {
 }
 
 /** Exact (unrounded) reference time shown at timeline time `tUs`. */
-export function clipRefAtExact(clip: PlacedClip, tUs: Us): number {
+export function clipRefAtExact(clip: ClipRefTiming, tUs: Us): number {
   if (clip.freeze) return clip.sourceStartUs;
   return clip.sourceStartUs + (tUs - clip.timelineStartUs) * (clip.speed ?? 1);
 }
 
 /** Reference time shown at timeline time `tUs`, in integer µs. */
-export function clipRefAt(clip: PlacedClip, tUs: Us): Us {
+export function clipRefAt(clip: ClipRefTiming, tUs: Us): Us {
   return Math.round(clipRefAtExact(clip, tUs));
 }
 
@@ -77,7 +79,15 @@ function sourceLengthFor(clip: ClipTiming, lengthUs: Us): Us {
 }
 
 function withStoredLength(clip: Clip, lengthUs: Us): Clip {
-  return hasStoredLength(clip) ? { ...clip, durationUs: lengthUs } : clip;
+  return fitTransition(hasStoredLength(clip) ? { ...clip, durationUs: lengthUs } : clip, lengthUs);
+}
+
+/** The clip with its transition shortened to fit a clip `lengthUs` long (an invariant). */
+export function fitTransition(clip: Clip, lengthUs: Us): Clip {
+  const t = clip.transitionIn;
+  return t && t.durationUs > lengthUs
+    ? { ...clip, transitionIn: { ...t, durationUs: Math.max(1, lengthUs) } }
+    : clip;
 }
 
 /**
@@ -89,7 +99,7 @@ function withNewStart(clip: Clip, timelineStartUs: Us, sourceStartUs: Us, length
   const moved = { ...clip, timelineStartUs, sourceStartUs };
   if (clip.speed === undefined || clip.freeze) return withStoredLength(moved, lengthUs);
   const sourceEndUs = Math.min(clip.sourceEndUs, sourceStartUs + sourceLengthFor(clip, lengthUs));
-  return { ...moved, sourceEndUs, durationUs: lengthUs };
+  return fitTransition({ ...moved, sourceEndUs, durationUs: lengthUs }, lengthUs);
 }
 
 /**

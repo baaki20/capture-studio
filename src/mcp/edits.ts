@@ -264,6 +264,38 @@ export const SHAPES = {
       .optional()
       .describe('How it changes to the next keyframe; hold keeps it, then cuts'),
   },
+  speed: {
+    start: TimeInput,
+    end: TimeInput,
+    speed: z
+      .number()
+      .min(0.25)
+      .max(4)
+      .describe('0.25–4 (2 = twice as fast); audio keeps its pitch; every unlocked track'),
+  },
+  freezeFrame: {
+    at: TimeInput,
+    seconds: z.number().positive().max(60).describe('How long the picture holds (silent)'),
+  },
+  transition: {
+    clipId: ClipId.describe('A video clip (clp_…); the transition is from the clip before it'),
+    type: z.enum(['none', 'dissolve', 'fade-color', 'slide']),
+    seconds: z.number().positive().max(10).optional().describe('Default 0.5'),
+    color: z.string().optional().describe('fade-color: #RRGGBB, default black'),
+    direction: z
+      .enum(['left', 'right', 'up', 'down'])
+      .optional()
+      .describe('slide: where the incoming picture moves; default left (in from the right)'),
+  },
+  marker: {
+    id: z.string().optional().describe('An existing marker (mrk_…) to change; omit to add one'),
+    at: TimeInput.optional().describe('Required when adding'),
+    label: z.string().max(200).optional(),
+    chapter: z.boolean().optional().describe('Exported as an MP4 chapter (titled by the label)'),
+  },
+  markerRemove: {
+    id: z.string().min(1).describe('A marker (mrk_…) from get_project'),
+  },
   annotation: {
     type: z
       .enum(OBJECT_KINDS)
@@ -336,6 +368,11 @@ export const EditStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('background'), ...SHAPES.background }),
   z.object({ kind: z.literal('zoom'), ...SHAPES.zoom }),
   z.object({ kind: z.literal('zoomKeyframe'), ...SHAPES.zoomKeyframe }),
+  z.object({ kind: z.literal('speed'), ...SHAPES.speed }),
+  z.object({ kind: z.literal('freezeFrame'), ...SHAPES.freezeFrame }),
+  z.object({ kind: z.literal('transition'), ...SHAPES.transition }),
+  z.object({ kind: z.literal('marker'), ...SHAPES.marker }),
+  z.object({ kind: z.literal('markerRemove'), ...SHAPES.markerRemove }),
   z.object({ kind: z.literal('annotation'), ...SHAPES.annotation }),
   z.object({ kind: z.literal('annotationEdit'), ...SHAPES.annotationEdit }),
   z.object({ kind: z.literal('annotationRemove'), ...SHAPES.annotationRemove }),
@@ -682,6 +719,63 @@ export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
         },
       ];
     }
+    case 'speed': {
+      const inUs = time(step.start);
+      const outUs = time(step.end);
+      if (outUs <= inUs) throw new ToolInputError('The range must end after it starts.');
+      return [{ type: 'setSpeed', inUs, outUs, speed: step.speed }];
+    }
+    case 'freezeFrame':
+      return [
+        { type: 'freezeFrame', atUs: time(step.at), durationUs: Math.round(step.seconds * 1e6) },
+      ];
+    case 'transition': {
+      if (step.type === 'none') {
+        return [{ type: 'setTransition', clipId: step.clipId, transition: null }];
+      }
+      return [
+        {
+          type: 'setTransition',
+          clipId: step.clipId,
+          transition: {
+            kind: step.type,
+            durationUs: Math.round((step.seconds ?? 0.5) * 1e6),
+            ...(step.type === 'fade-color' && step.color ? { color: step.color } : {}),
+            ...(step.type === 'slide' ? { direction: step.direction ?? 'left' } : {}),
+          },
+        },
+      ];
+    }
+    case 'marker': {
+      if (step.id) {
+        if (!doc.timeline.markers?.some((m) => m.id === step.id)) {
+          throw new ToolInputError(`No marker "${step.id}". get_project lists them.`);
+        }
+        const change = {
+          ...(step.at !== undefined ? { tUs: time(step.at) } : {}),
+          ...(step.label !== undefined ? { label: step.label } : {}),
+          ...(step.chapter !== undefined ? { chapter: step.chapter } : {}),
+        };
+        if (Object.keys(change).length === 0) {
+          throw new ToolInputError('Give a time, label or chapter to change.');
+        }
+        return [{ type: 'updateMarker', markerId: step.id, ...change }];
+      }
+      if (step.at === undefined) throw new ToolInputError('A new marker needs a time (at).');
+      return [
+        {
+          type: 'addMarker',
+          marker: {
+            id: newId('marker'),
+            tUs: time(step.at),
+            label: step.label ?? '',
+            chapter: step.chapter ?? false,
+          },
+        },
+      ];
+    }
+    case 'markerRemove':
+      return [{ type: 'removeMarker', markerId: step.id }];
     case 'annotation': {
       const inUs = time(step.start);
       const outUs = step.end === undefined ? inUs + DEFAULT_OBJECT_US : time(step.end);

@@ -209,6 +209,12 @@ const OP_KINDS = [
   'object-move',
   'object-key',
   'object-track',
+  'speed',
+  'freeze',
+  'transition',
+  'marker-add',
+  'marker-update',
+  'marker-remove',
   'nudge',
   'unlink',
   'relink',
@@ -427,7 +433,8 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
         { opacity: t.flag ? null : t.c },
         { fadeInUs: t.flag ? null : Math.round(t.c * 1e6) },
         { text: 'Hello', style: { size: t.c * 0.6, background: t.flag ? null : '#000000' } },
-        { stroke: { color: '#FF0000', width: t.c * 0.06 } },
+        // Within the stroke schema's range (the op schema checks it).
+        { stroke: { color: '#FF0000', width: t.c * 0.05 } },
         { radius: t.c * 0.06 },
         { value: Math.round(t.c * 1200) },
         { dim: t.c },
@@ -453,6 +460,51 @@ export function resolveOp(doc: Project, t: OpTemplate): TimelineOp {
         // Mostly unlocked, so edits keep reaching the objects.
         locked: t.flag && t.c < 0.3,
         hidden: t.b < 0.3,
+      };
+    }
+    case 'speed': {
+      const x = time(Math.min(t.b, t.c));
+      const y = time(Math.max(t.b, t.c));
+      const speeds = [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 4];
+      return { type: 'setSpeed', inUs: x, outUs: y === x ? x + 1 : y, speed: pick(speeds, t.a) };
+    }
+    case 'freeze':
+      return { type: 'freezeFrame', atUs: time(t.b), durationUs: Math.round(t.c * 3_000_000) };
+    case 'transition': {
+      const kinds = ['fade-color', 'dissolve', 'slide'] as const;
+      return {
+        type: 'setTransition',
+        clipId,
+        transition: t.flag
+          ? null
+          : {
+              kind: pick(kinds, t.b),
+              durationUs: 1 + Math.round(t.c * 2_000_000),
+              ...(t.b < 0.3 ? { color: '#FFFFFF' } : {}),
+              ...(t.b > 0.7 ? { direction: 'left' as const } : {}),
+            },
+      };
+    }
+    case 'marker-add':
+      return {
+        type: 'addMarker',
+        marker: {
+          id: `mrk_F${String(Math.round(t.a * 1e9))}`,
+          tUs: time(t.b),
+          label: t.flag ? 'Intro' : '',
+          chapter: t.c < 0.5,
+        },
+      };
+    case 'marker-update': {
+      const markers = doc.timeline.markers ?? [];
+      const id = markers[Math.floor(t.a * markers.length)]?.id ?? 'mrk_none';
+      return { type: 'updateMarker', markerId: id, tUs: time(t.b), chapter: t.flag };
+    }
+    case 'marker-remove': {
+      const markers = doc.timeline.markers ?? [];
+      return {
+        type: 'removeMarker',
+        markerId: markers[Math.floor(t.a * markers.length)]?.id ?? 'mrk_none',
       };
     }
     case 'crop':

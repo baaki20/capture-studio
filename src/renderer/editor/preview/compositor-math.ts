@@ -18,10 +18,11 @@ export interface Size {
  */
 export interface CompositeItemOf<F> {
   /**
-   * `opacity` multiplies the layer (1 when absent); `border` is drawn inside the mask's edge and
+   * `opacity` multiplies the layer (1 when absent); `tint` mixes it toward a colour (fade-to-colour
+   * transitions); `border` is drawn inside the mask's edge and
    * `shadow` under the layer (scene layers, `sceneAt`).
    */
-  layer: VideoLayer & Partial<Pick<SceneLayer, 'opacity' | 'border' | 'shadow'>>;
+  layer: VideoLayer & Partial<Pick<SceneLayer, 'opacity' | 'tint' | 'border' | 'shadow'>>;
   /** The decoded picture, or null for a placeholder. */
   frame: F | null;
   /** The media's picture size (`Media.video`), the space of `layer.sourceRect`. */

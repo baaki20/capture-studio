@@ -188,6 +188,7 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
         outputPath: temp,
         filterScriptPath: path.join(work, 'video.txt'),
         audioScriptPath: path.join(work, 'audio.txt'),
+        chaptersPath: path.join(work, 'chapters.txt'),
         maskDir: work,
         ...(mediaColor ? { mediaColor } : {}),
         video: options.frames ? 'pipe' : 'graph',
@@ -213,6 +214,9 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
       }
       await fs.writeFile(path.join(work, 'video.txt'), graph.videoScriptText);
       await fs.writeFile(path.join(work, 'audio.txt'), graph.audioScriptText);
+      if (graph.chaptersText !== null) {
+        await fs.writeFile(path.join(work, 'chapters.txt'), graph.chaptersText);
+      }
       await Promise.all(graph.masks.map((m) => writeMaskPng(m.path, m.mask, m.width, m.height)));
       logger.info(
         `export: ${String(settings.width)}x${String(settings.height)}@${String(settings.fps)} ${settings.encoder} ${settings.quality} → ${output}`,

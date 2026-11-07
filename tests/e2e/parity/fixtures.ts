@@ -16,7 +16,7 @@ import { TEXT_PRESETS, newObject, type ObjectKind } from '../../../src/shared/pr
 import type { RectF } from '../../../src/shared/project/scene';
 import { sceneAt } from '../../../src/shared/project/scene';
 import type { FRect, Project, TimelineObject } from '../../../src/shared/project/schema';
-import { applyOp } from '../../../src/shared/project/timeline-ops';
+import { applyOp, type TimelineOp } from '../../../src/shared/project/timeline-ops';
 import { unwrap } from '../../../src/shared/result';
 import { counterIds, recordedProject, trackByName } from '../../fixtures/editor-project';
 
@@ -587,6 +587,54 @@ const privacy: ParityFixture = {
   },
 };
 
+/**
+ * Phase 2: time edits (R2.10, R2.18, R2.19): a fade from white at the start, 2× over 0.5–1.5 s,
+ * a 0.5 s freeze frame, a dissolve across a cut (the outgoing clip keeps playing the cut part),
+ * and a slide. Samples inside each.
+ */
+const timeEdits: ParityFixture = {
+  name: 'p2-time',
+  frames: [5, 20, 28, 50, 70, 95, 105, 112, 125, 133],
+  minSsim: 0.98,
+  regions: [],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    let doc = recorded(seconds, '8', 'Parity time edits');
+    const ids = { generateId: counterIds('E') };
+    const op = (o: TimelineOp) => {
+      doc = unwrap(applyOp(doc, o, ids));
+    };
+    op({ type: 'setHidden', trackId: trackByName(doc, 'Face').id, hidden: true });
+    op({ type: 'setSpeed', inUs: 500_000, outUs: 1_500_000, speed: 2 });
+    op({ type: 'freezeFrame', atUs: 1_500_000, durationUs: 500_000 });
+    op({ type: 'cutRange', inUs: 3_000_000, outUs: 4_000_000 });
+    op({ type: 'split', atUs: 4_000_000 });
+    const screen = () => trackByName(doc, 'Screen').clips;
+    const startingAt = (t: number) => {
+      const clip = screen().find((c) => c.timelineStartUs === t);
+      if (!clip) throw new Error(`no screen clip at ${String(t)}`);
+      return clip.id;
+    };
+    op({
+      type: 'setTransition',
+      clipId: startingAt(0),
+      transition: { kind: 'fade-color', durationUs: 400_000, color: '#FFFFFF' },
+    });
+    op({
+      type: 'setTransition',
+      clipId: startingAt(3_000_000),
+      transition: { kind: 'dissolve', durationUs: 800_000 },
+    });
+    op({
+      type: 'setTransition',
+      clipId: startingAt(4_000_000),
+      transition: { kind: 'slide', durationUs: 600_000, direction: 'left' },
+    });
+    return save(projectsDir, doc, seconds);
+  },
+};
+
 export const FIXTURES: readonly ParityFixture[] = [
   roundedFace,
   faceKeyframes,
@@ -595,6 +643,7 @@ export const FIXTURES: readonly ParityFixture[] = [
   textObjects,
   callouts,
   privacy,
+  timeEdits,
 ];
 
 /** Timeline time of an output frame. */

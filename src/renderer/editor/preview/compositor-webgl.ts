@@ -80,6 +80,8 @@ uniform int u_pass;
 uniform float u_border;
 uniform vec4 u_borderColor;
 uniform float u_blur;
+// Fade-to-colour transitions: rgb and how far toward it (0 = none).
+uniform vec4 u_tint;
 out vec4 outColor;
 ${MASK_COVERAGE_GLSL}
 void main() {
@@ -98,6 +100,8 @@ void main() {
     float inner = 1.0 - smoothstep(-0.5, 0.5, d + u_border);
     color.rgb = mix(color.rgb, u_borderColor.rgb, (1.0 - inner) * u_borderColor.a);
   }
+  // Tint the picture only (an object picture is premultiplied: tint its colour, keep its alpha).
+  color.rgb = mix(color.rgb, u_tint.rgb * color.a, u_tint.a);
   outColor = color * coverage;
 }
 `;
@@ -317,6 +321,7 @@ export class WebGlCompositor {
         'u_border',
         'u_borderColor',
         'u_blur',
+        'u_tint',
       ].map((name) => [name, gl.getUniformLocation(this.program, name)]),
     );
   }
@@ -424,6 +429,13 @@ export class WebGlCompositor {
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
       gl.uniform1i(this.uniforms.u_pass ?? null, 0);
+      const tint = item.layer.tint;
+      if (tint && tint.amount > 0) {
+        const [tr, tg, tb] = parseHexColor(tint.color);
+        gl.uniform4f(this.uniforms.u_tint ?? null, tr, tg, tb, Math.min(1, tint.amount));
+      } else {
+        gl.uniform4f(this.uniforms.u_tint ?? null, 0, 0, 0, 0);
+      }
       const border = item.layer.border;
       gl.uniform1f(this.uniforms.u_border ?? null, border ? border.widthPx : 0);
       const borderColor = border ? parseHexColor(border.color) : NO_COLOR;
@@ -496,6 +508,7 @@ export class WebGlCompositor {
     gl.uniform1f(this.uniforms.u_border ?? null, 0);
     gl.uniform1i(this.uniforms.u_solid ?? null, 0);
     gl.uniform1i(this.uniforms.u_alpha ?? null, 1);
+    gl.uniform4f(this.uniforms.u_tint ?? null, 0, 0, 0, 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.uniform1i(this.uniforms.u_alpha ?? null, 0);
   }

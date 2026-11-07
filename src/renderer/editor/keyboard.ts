@@ -16,6 +16,7 @@
  * | Ctrl+Shift+X               | cut range [In, Out)           |
  * | Alt+X                      | clear marks                   |
  * | N                          | snapping on / off             |
+ * | M                          | marker at the playhead        |
  * | Ctrl+Z                     | undo                          |
  * | Ctrl+Shift+Z, Ctrl+Y       | redo                          |
  * | Shift+Z                    | zoom to fit                   |
@@ -41,6 +42,7 @@ export type EditorCommand =
   | 'cut-range'
   | 'clear-marks'
   | 'toggle-snap'
+  | 'add-marker'
   | 'undo'
   | 'redo'
   | 'zoom-fit'
@@ -105,6 +107,8 @@ export function commandForKey(event: KeyInput): EditorCommand | null {
       return 'mark-out';
     case 'n':
       return 'toggle-snap';
+    case 'm':
+      return 'add-marker';
     case 'Escape':
       return 'deselect';
     default:

@@ -3,7 +3,8 @@
  * overlay (corner and size presets, size, shape, radius, mirror, crop, zoom); its border and
  * shadow; its layout over time (face mode for the In–Out range or from the playhead, and the
  * keyframe list); the screen crop; annotations (R2.5–R2.8, in `ObjectSections.tsx`: the selected
- * one's editor on top, the add buttons below the screen); the background and zoom (R2.9, R2.11,
+ * one's editor on top, the add buttons below the screen); speed, freeze frames, the selected
+ * clip's transition and markers (R2.10, R2.18–R2.20, in `TimeSections.tsx`); the background and zoom (R2.9, R2.11,
  * in `ScreenStyleSections.tsx`); and the sync nudge of Face + Voice and System audio with the
  * recorded clock information. Every control maps to a timeline operation through
  * `inspector-ops.ts`; sliders group a whole drag into one undo step. Geometry shown and edited is
@@ -47,6 +48,7 @@ import { useUi } from '../ui-store';
 import { useApply, useGesture } from './hooks';
 import { AnnotationsSection, ObjectSection } from './ObjectSections';
 import { BackgroundSection, CameraSection } from './ScreenStyleSections';
+import { MarkersSection, SpeedSection, TransitionSection } from './TimeSections';
 import {
   DEFAULT_BORDER,
   DEFAULT_SHADOW,
@@ -101,12 +103,15 @@ export function InspectorPanel() {
     <aside className={styles.inspector} aria-label="Inspector" data-testid="inspector">
       {/* The selected annotation first: it shows only while one is selected. */}
       <ObjectSection doc={doc} />
+      <TransitionSection doc={doc} />
       <TracksSection doc={doc} />
       <FaceSection doc={doc} />
       <FaceStyleSection doc={doc} />
       <FaceTimeSection doc={doc} />
       <ScreenSection doc={doc} />
       <AnnotationsSection doc={doc} />
+      <SpeedSection doc={doc} />
+      <MarkersSection doc={doc} />
       <BackgroundSection doc={doc} />
       <CameraSection doc={doc} />
       <SyncSection doc={doc} />

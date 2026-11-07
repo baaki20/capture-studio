@@ -11,7 +11,7 @@
  * - Objects (text, callouts, blur and pixelate) are drawn from their draw plans; until the
  *   bundled fonts load, text is left out and the render is not exact.
  */
-import type { VideoLayer } from '../../../shared/project/render-plan';
+import { decoderKey, decoderSources, type VideoLayer } from '../../../shared/project/render-plan';
 import { sceneObjectPlans } from '../../../shared/project/objects';
 import { sceneAt } from '../../../shared/project/scene';
 import type { Media, Project } from '../../../shared/project/schema';
@@ -68,12 +68,10 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
     this.doc = doc;
     this.media = new Map(doc.media.map((m) => [m.id, m]));
     this.pool.setSources(
-      doc.media
-        .filter((m) => m.kind === 'video' && m.status !== 'missing' && m.status !== 'failed')
-        .flatMap((m) => {
-          const url = mediaUrls[m.id];
-          return url ? [{ mediaId: m.id, url }] : [];
-        }),
+      decoderSources(
+        doc.media.filter((m) => m.status !== 'missing' && m.status !== 'failed'),
+        (id) => mediaUrls[id] ?? null,
+      ),
     );
     this.compositor.resize(doc.timeline.canvas);
   }
@@ -94,10 +92,10 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
       items.push({ layer, frame: answer.frame, mediaSize: this.mediaSize(layer.mediaId) });
     }
     if (playing) {
-      const shown = new Set(layers.map((l) => l.mediaId));
+      const shown = new Set(layers.map(decoderKey));
       for (const next of sceneAt(doc, tUs + PREROLL_US).layers) {
-        if (!next.offline && !shown.has(next.mediaId)) {
-          this.pool.request(next.mediaId, next.fileTimeUs);
+        if (!next.offline && !shown.has(decoderKey(next))) {
+          this.pool.request(decoderKey(next), next.fileTimeUs);
         }
       }
     }
@@ -137,10 +135,11 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
   }
 
   private frameFor(layer: VideoLayer): { frame: F | null; exact: boolean } {
-    if (layer.offline || this.pool.failed(layer.mediaId)) return { frame: null, exact: true };
-    this.pool.request(layer.mediaId, layer.fileTimeUs);
-    const answer = this.pool.frameFor(layer.mediaId, layer.fileTimeUs);
-    if (!answer.exact) this.waitingFor.add(layer.mediaId);
+    const key = decoderKey(layer);
+    if (layer.offline || this.pool.failed(key)) return { frame: null, exact: true };
+    this.pool.request(key, layer.fileTimeUs);
+    const answer = this.pool.frameFor(key, layer.fileTimeUs);
+    if (!answer.exact) this.waitingFor.add(key);
     return answer;
   }
 
