@@ -847,15 +847,12 @@ function trackInfo(track: AcquiredTrack): TrackInfo {
   };
 }
 
-/** The camera's capture latency from its delivered rate and reported exposure. */
+/** The camera's capture latency from its delivered rate (`camera-latency.ts`). */
 function cameraLatency(track: VideoTrack): number {
-  const settings = track.track.getSettings() as MediaTrackSettings & { exposureTime?: number };
-  const latency = cameraCaptureLatencyUs({
-    frameRate: track.deliveredFps ?? track.fps,
-    exposureTime: settings.exposureTime ?? null,
-  });
+  const fps = track.deliveredFps ?? track.fps;
+  const latency = cameraCaptureLatencyUs(fps);
   console.info(
-    `engine: camera capture latency ${(latency / 1000).toFixed(1)} ms (${(track.deliveredFps ?? track.fps).toFixed(1)} fps, exposure ${settings.exposureTime === undefined ? 'unknown' : `${(settings.exposureTime / 10).toFixed(1)} ms`})`,
+    `engine: camera capture latency ${(latency / 1000).toFixed(1)} ms (${fps.toFixed(1)} fps)`,
   );
   return latency;
 }

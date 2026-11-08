@@ -1,0 +1,177 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-08T21:17:52.398Z",
+  "finishedAt": "2026-11-08T21:20:52.774Z",
+  "machine": {
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v22.23.2",
+    "git": "875ec1b (phase2, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W1",
+      "title": "Full screen, all components, sync-check pattern",
+      "requirements": ["R1.24", "R1.22", "R1.11", "R1.13", "R1.25"],
+      "humanActions": [
+        "1 portal click (pick the monitor, Share)",
+        "camera sees the screen (small mirror by the webcam) or the room lit only by the screen",
+        "speakers on",
+        "clap 5 times in view of the camera when asked"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R1.11",
+          "name": "controls window minimized while recording",
+          "status": "pass",
+          "value": "minimized"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "290 ms",
+          "detail": "includes starting the second instance (487 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.4 s"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.13",
+          "name": "one file per enabled stream",
+          "status": "pass",
+          "value": "screen, camera, microphone, system-audio"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "screen dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "camera dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "screen encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "camera encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "mic encoder",
+          "status": "info",
+          "value": "Opus (WebCodecs)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "system encoder",
+          "status": "info",
+          "value": "Opus (FFmpeg libopus)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen flashes found",
+          "status": "info",
+          "value": "30"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ system audio",
+          "status": "pass",
+          "value": "18.3 ms",
+          "limit": "≤ 40 ms",
+          "detail": "30 pairs, p10 -41.8 ms, p90 38.1 ms, trend -685.9 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ mic",
+          "status": "pass",
+          "value": "-30.6 ms",
+          "limit": "≤ 40 ms",
+          "detail": "30 pairs, p10 -114.6 ms, p90 1.3 ms, trend -1823.4 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "camera ↔ mic (clap)",
+          "status": "pass",
+          "value": "-34.5 ms",
+          "limit": "≤ 60 ms",
+          "detail": "5 pairs; claps are accurate to about a third of a frame on synthetic claps"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "camera capture latency applied",
+          "status": "info",
+          "value": "67.8 ms",
+          "detail": "project.json camera sync.captureLatencyUs"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "claps heard / paired",
+          "status": "info",
+          "value": "5 / 5",
+          "detail": "camera − mic -34.5 ms"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "export: screen ↔ audio mix",
+          "status": "pass",
+          "value": "15.0 ms",
+          "limit": "≤ 40 ms",
+          "detail": "30 pairs"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261108-211752/projects/Lesson 2026-11-08 21-19.cstudio"
+      ],
+      "startedAt": "2026-11-08T21:18:32.388Z",
+      "durationS": 140.385
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 0,
+    "error": 0,
+    "not-testable": 0,
+    "info": 0
+  }
+}

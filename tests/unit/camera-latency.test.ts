@@ -5,25 +5,19 @@ import {
 } from '../../src/shared/recording/camera-latency';
 
 describe('camera capture latency', () => {
-  it('is one frame interval plus half the exposure', () => {
-    // The live webcam: 30 fps, exposureTime 157 (× 100 µs = 15.7 ms).
-    expect(cameraCaptureLatencyUs({ frameRate: 30, exposureTime: 157 })).toBe(41_183);
-    expect(cameraCaptureLatencyUs({ frameRate: 60, exposureTime: 50 })).toBe(19_167);
+  it('is one frame interval at 30 fps and above', () => {
+    expect(cameraCaptureLatencyUs(30)).toBe(33_333);
+    expect(cameraCaptureLatencyUs(60)).toBe(16_667);
   });
 
-  it('assumes the longest exposure (one frame) when the camera does not report it', () => {
-    expect(cameraCaptureLatencyUs({ frameRate: 30, exposureTime: null })).toBe(50_000);
+  it('stays at one 30 fps interval when a dim room slows the camera', () => {
+    // Live W1, 2026-11-08: 16.5 fps, claps put the latency at about 33 ms.
+    expect(cameraCaptureLatencyUs(16.46)).toBe(MAX_CAMERA_LATENCY_US);
+    expect(cameraCaptureLatencyUs(5)).toBe(MAX_CAMERA_LATENCY_US);
   });
 
-  it('caps the exposure at one frame interval and falls back to 30 fps', () => {
-    expect(cameraCaptureLatencyUs({ frameRate: 30, exposureTime: 5_000 })).toBe(50_000);
-    expect(cameraCaptureLatencyUs({ frameRate: null, exposureTime: 157 })).toBe(41_183);
-    expect(cameraCaptureLatencyUs({ frameRate: 0, exposureTime: 0 })).toBe(50_000);
-  });
-
-  it('never exceeds the bound, even for a very slow camera', () => {
-    expect(cameraCaptureLatencyUs({ frameRate: 2, exposureTime: null })).toBe(
-      MAX_CAMERA_LATENCY_US,
-    );
+  it('assumes the bound when the rate is unknown', () => {
+    expect(cameraCaptureLatencyUs(null)).toBe(MAX_CAMERA_LATENCY_US);
+    expect(cameraCaptureLatencyUs(0)).toBe(MAX_CAMERA_LATENCY_US);
   });
 });
