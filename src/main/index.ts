@@ -6,6 +6,7 @@
  * window.
  */
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import type { BrowserWindow, MessagePortMain } from 'electron';
@@ -21,6 +22,7 @@ import {
   protocol,
   safeStorage,
   shell,
+  systemPreferences,
   webContents,
 } from 'electron';
 import type { FfmpegEncoderReport } from '../shared/capabilities/types';
@@ -31,6 +33,7 @@ import { appMenuTemplate } from './app-menu';
 import { CapabilityService, defaultExec } from './capabilities/detect';
 import { estimateSinkOutputLatencyUs } from './system-audio/linux-latency';
 import { inferOzonePlatform } from './capabilities/linux';
+import { readMacPermissions } from './capabilities/mac-permissions';
 import { parseCliArgs } from './cli';
 import {
   FreeSpaceOverride,
@@ -333,6 +336,8 @@ async function start(): Promise<void> {
               app.commandLine.getSwitchValue('ozone-platform') || null,
             )
           : null,
+      osRelease: os.release(),
+      macPermissions: process.platform === 'darwin' ? readMacPermissions(systemPreferences) : null,
       secrets: secrets.status,
       encoders: null,
     },

@@ -15,12 +15,10 @@ import {
 } from '../../shared/capabilities/types';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
-import {
-  detectLinuxCapabilities,
-  type ExecFn,
-  type ExecResult,
-  type SecretsStatusLike,
-} from './linux';
+import type { SecretsStatusLike } from './common';
+import { detectLinuxCapabilities, type ExecFn, type ExecResult } from './linux';
+import { detectMacCapabilities, type MacPermissions } from './macos';
+import { detectWindowsCapabilities } from './windows';
 
 export type { ExecFn, ExecResult } from './linux';
 
@@ -53,6 +51,10 @@ export interface DetectOptions {
   env: Partial<Record<string, string>>;
   /** Linux only: what Electron runs on. */
   ozonePlatform: 'wayland' | 'x11' | null;
+  /** `os.release()`; Windows and macOS read their version from it. */
+  osRelease?: string;
+  /** macOS only: privacy permission states (null before they are read). */
+  macPermissions?: MacPermissions | null;
   secrets: SecretsStatusLike | null;
   encoders: FfmpegEncoderReport | null;
   exec?: ExecFn;
@@ -61,27 +63,46 @@ export interface DetectOptions {
 
 function placeholderCapabilities(platform: NodeJS.Platform): CapabilityMap {
   const map = {} as CapabilityMap;
-  for (const key of CAPABILITY_KEYS) {
-    map[key] = unavailable(`Not implemented on ${platform} until Phase 3.`);
-  }
+  for (const key of CAPABILITY_KEYS) map[key] = unavailable(`Not supported on ${platform}.`);
   map['capture.screen.source'] = available('desktopCapturer');
   map['audio.mic'] = available('getUserMedia');
   map['video.camera'] = available('getUserMedia');
   return map;
 }
 
+async function detectPlatformCapabilities(
+  options: DetectOptions,
+  exec: ExecFn,
+): Promise<CapabilityMap> {
+  const { secrets, encoders } = options;
+  const osRelease = options.osRelease ?? '';
+  switch (options.platform) {
+    case 'linux':
+      return detectLinuxCapabilities({
+        env: options.env,
+        ozonePlatform: options.ozonePlatform ?? 'x11',
+        secrets,
+        encoders,
+        exec,
+      });
+    case 'win32':
+      return detectWindowsCapabilities({ osRelease, secrets, encoders });
+    case 'darwin':
+      return detectMacCapabilities({
+        osRelease,
+        permissions: options.macPermissions ?? null,
+        secrets,
+        encoders,
+      });
+    default:
+      return placeholderCapabilities(options.platform);
+  }
+}
+
 export async function detectCapabilities(options: DetectOptions): Promise<CapabilityReport> {
   const exec = options.exec ?? defaultExec;
   const linux = options.platform === 'linux';
-  const capabilities = linux
-    ? await detectLinuxCapabilities({
-        env: options.env,
-        ozonePlatform: options.ozonePlatform ?? 'x11',
-        secrets: options.secrets,
-        encoders: options.encoders,
-        exec,
-      })
-    : placeholderCapabilities(options.platform);
+  const capabilities = await detectPlatformCapabilities(options, exec);
 
   return {
     generatedAt: (options.now ?? (() => new Date()))().toISOString(),
@@ -143,6 +164,12 @@ export class CapabilityService {
 
   setSecretsStatus(secrets: SecretsStatusLike | null): Promise<CapabilityReport> {
     this.options = { ...this.options, secrets };
+    return this.refresh();
+  }
+
+  /** macOS: permission states change while the app runs (System Settings). */
+  setMacPermissions(macPermissions: MacPermissions | null): Promise<CapabilityReport> {
+    this.options = { ...this.options, macPermissions };
     return this.refresh();
   }
 

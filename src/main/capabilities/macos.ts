@@ -1,0 +1,164 @@
+/**
+ * macOS capability detection (§1.4, Phase 3). A pure function of the macOS version and the
+ * privacy (TCC) permission states main reads with `systemPreferences`, so tests can describe any
+ * Mac without running anything.
+ *
+ * - Screen capture goes through Chromium (ScreenCaptureKit) and needs Screen Recording
+ *   permission. Camera and microphone need their own permissions; macOS asks on first use.
+ * - `ui.excludeFromCapture`: reports say ScreenCaptureKit on macOS 15 and later captures windows
+ *   that set `NSWindowSharingNone`, so it is degraded there (the controls minimize) until spike
+ *   S10 checks it.
+ * - Features that need the native helper or later Phase 3 steps stay unavailable until then.
+ */
+import {
+  available,
+  degraded,
+  unavailable,
+  type Capability,
+  type CapabilityMap,
+  type FfmpegEncoderReport,
+} from '../../shared/capabilities/types';
+import {
+  ffmpegHardwareCapability,
+  secretsCapability,
+  webcodecsPending,
+  type SecretsStatusLike,
+} from './common';
+
+/** `systemPreferences.getMediaAccessStatus` results. */
+export type MacAccessStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown';
+
+export interface MacPermissions {
+  screen: MacAccessStatus;
+  camera: MacAccessStatus;
+  microphone: MacAccessStatus;
+  /** `systemPreferences.isTrustedAccessibilityClient(false)`. */
+  accessibility: boolean;
+}
+
+export interface MacDetectInput {
+  /** `os.release()`: the Darwin version, for example `24.1.0` on macOS 15. */
+  osRelease: string;
+  permissions: MacPermissions | null;
+  secrets: SecretsStatusLike | null;
+  encoders: FfmpegEncoderReport | null;
+}
+
+/** The macOS major version from the Darwin version (Darwin 25 is macOS 26), or null. */
+export function macosMajor(osRelease: string): number | null {
+  const darwin = Number(osRelease.split('.')[0]);
+  if (!Number.isInteger(darwin) || darwin < 20) return null;
+  return darwin >= 25 ? darwin + 1 : darwin - 9;
+}
+
+const SETTINGS_HINT = 'System Settings → Privacy & Security';
+
+/** A capability that depends on one TCC permission. */
+function permissionGated(
+  status: MacAccessStatus | undefined,
+  strategy: string,
+  pane: string,
+  firstUse: string,
+): Capability {
+  switch (status) {
+    case 'granted':
+      return available(strategy);
+    case 'denied':
+      return unavailable(
+        `${pane} permission is off. Turn on Capture Studio in ${SETTINGS_HINT} → ${pane}.`,
+        strategy,
+      );
+    case 'restricted':
+      return unavailable(
+        `${pane} is blocked on this Mac (for example by a device policy).`,
+        strategy,
+      );
+    default:
+      return degraded(strategy, firstUse);
+  }
+}
+
+export function detectMacCapabilities(input: MacDetectInput): CapabilityMap {
+  const major = macosMajor(input.osRelease);
+  const p = input.permissions;
+  const screen = permissionGated(
+    p?.screen,
+    'screencapturekit',
+    'Screen Recording',
+    'macOS asks for Screen Recording permission on the first recording.',
+  );
+  const sharingNoneHonoured = major !== null && major < 15;
+
+  return {
+    'capture.screen.source': screen,
+    'capture.screen.restoreToken': available('not-needed', 'Permission is kept once granted.'),
+    'capture.screen.allMonitors': unavailable(
+      'macOS captures one display per stream; one display is captured.',
+      'one-display',
+    ),
+    'capture.window.enumerate':
+      screen.state === 'available' ? available('desktopCapturer') : screen,
+    'capture.region.onScreenOverlay': unavailable(
+      'The on-screen region overlay is not available yet; the in-app frozen-frame picker is used.',
+      'in-app-picker',
+    ),
+    'capture.cursor.hide': unavailable(
+      'Hiding the cursor is not verified on macOS yet.',
+      'cursor-visible',
+    ),
+    'capture.cursor.track': unavailable(
+      'Cursor tracking is not available yet; cursor effects are disabled, manual zoom works.',
+    ),
+    'capture.screenshot.silent': screen,
+    'audio.system': unavailable(
+      'System audio is not supported on macOS in this build yet. Recording continues without it.',
+    ),
+    'audio.mic': permissionGated(
+      p?.microphone,
+      'getUserMedia',
+      'Microphone',
+      'macOS asks for microphone permission the first time a microphone is used.',
+    ),
+    'video.camera': permissionGated(
+      p?.camera,
+      'getUserMedia',
+      'Camera',
+      'macOS asks for camera permission the first time a camera is used.',
+    ),
+    'encode.webcodecs.hw': webcodecsPending,
+    'encode.ffmpeg.hw': ffmpegHardwareCapability(input.encoders),
+    'hotkeys.global': available('globalShortcut'),
+    'ui.tray': available('tray'),
+    'ui.alwaysOnTop': available('setAlwaysOnTop'),
+    'ui.windowPositioning': available('setBounds'),
+    'ui.excludeFromCapture': sharingNoneHonoured
+      ? available('setContentProtection')
+      : degraded(
+          'minimize-controls',
+          'Hiding windows from captures is not verified on this macOS version; the controls minimize when recording starts.',
+        ),
+    'ui.customToast': available('toast-window'),
+    'input.synthetic': unavailable(
+      'Needs the native helper and Accessibility permission (later phase); manual-scroll stitching is used.',
+      'manual-scroll',
+    ),
+    'window.foregroundInfo': unavailable(
+      'Needs the native helper (not available yet); %t and %pn resolve to empty.',
+    ),
+    'window.manipulate': unavailable(
+      'macOS does not let apps change other apps’ windows; the tool is hidden.',
+    ),
+    'colorPicker.screen': screen.state === 'available' ? available('overlay') : screen,
+    'clipboard.writeImageUnfocused': available('clipboard'),
+    'secrets.persistent': secretsCapability(input.secrets),
+    'startup.login': available('setLoginItemSettings'),
+    'shell.contextMenu': unavailable(
+      'A Finder share extension is in the backlog; drag and drop works.',
+      'drag-drop',
+    ),
+    'ocr.native': unavailable(
+      'macOS Vision OCR is not used yet; tesseract.js is used.',
+      'tesseract.js',
+    ),
+  };
+}

@@ -7,6 +7,9 @@ import {
   type ExecFn,
   type ExecResult,
 } from '../../src/main/capabilities/linux';
+import { readMacPermissions } from '../../src/main/capabilities/mac-permissions';
+import { macosMajor, type MacPermissions } from '../../src/main/capabilities/macos';
+import { windowsBuild } from '../../src/main/capabilities/windows';
 import {
   CAPABILITY_KEYS,
   CapabilityReportSchema,
@@ -168,13 +171,133 @@ describe('Linux capability detection (§1.4, §9)', () => {
     expect(report.capabilities['encode.ffmpeg.hw'].reason).toContain('has not finished');
   });
 
-  it('gives placeholders off Linux without running tools', async () => {
+  it('runs no tools off Linux and leaves the Linux session fields empty', async () => {
     const exec = machine();
-    const report = await detect(exec, { platform: 'win32', ozonePlatform: null });
+    const report = await detect(exec, {
+      platform: 'win32',
+      ozonePlatform: null,
+      osRelease: '10.0.22631',
+    });
     expect(exec.calls).toEqual([]);
-    expect(report.capabilities['audio.mic'].state).toBe('available');
-    expect(report.capabilities['audio.system'].reason).toContain('Phase 3');
     expect(report.session).toEqual({ type: null, desktop: null, ozonePlatform: null });
+  });
+
+  it('gives placeholders on platforms without a detector', async () => {
+    const report = await detect(machine(), { platform: 'freebsd', ozonePlatform: null });
+    expect(report.capabilities['audio.mic'].state).toBe('available');
+    expect(report.capabilities['audio.system'].state).toBe('unavailable');
+  });
+});
+
+describe('Windows capability detection (Phase 3)', () => {
+  const win = (osRelease: string) =>
+    detect(machine(), { platform: 'win32', ozonePlatform: null, osRelease });
+
+  it('describes Windows 11', async () => {
+    const report = await win('10.0.22631');
+    expect(CapabilityReportSchema.safeParse(report).success).toBe(true);
+    const c = report.capabilities;
+    expect(Object.keys(c).sort()).toEqual([...CAPABILITY_KEYS].sort());
+    expect(c['capture.screen.source']).toMatchObject({
+      state: 'available',
+      strategy: 'desktopCapturer',
+    });
+    expect(c['capture.window.enumerate'].state).toBe('available');
+    expect(c['ui.excludeFromCapture']).toMatchObject({
+      state: 'available',
+      strategy: 'setContentProtection',
+    });
+    expect(c['hotkeys.global'].state).toBe('available');
+    expect(c['secrets.persistent'].state).toBe('available');
+    // Not built yet: no capability may claim what the app cannot do.
+    expect(c['audio.system'].state).toBe('unavailable');
+    expect(c['capture.cursor.track'].state).toBe('unavailable');
+    expect(c['capture.region.onScreenOverlay'].strategy).toBe('in-app-picker');
+  });
+
+  it('minimizes the controls on builds before 19041, which only black windows out', async () => {
+    expect((await win('10.0.18363')).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
+    expect((await win('10.0.19041')).capabilities['ui.excludeFromCapture'].state).toBe('available');
+    expect((await win('garbage')).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
+  });
+});
+
+describe('macOS capability detection (Phase 3)', () => {
+  const granted = {
+    screen: 'granted',
+    camera: 'granted',
+    microphone: 'granted',
+    accessibility: false,
+  } as const;
+  const mac = (osRelease: string, macPermissions: MacPermissions | null = granted) =>
+    detect(machine(), { platform: 'darwin', ozonePlatform: null, osRelease, macPermissions });
+
+  it('describes macOS 14 with every permission granted', async () => {
+    const report = await mac('23.6.0');
+    expect(CapabilityReportSchema.safeParse(report).success).toBe(true);
+    const c = report.capabilities;
+    expect(c['capture.screen.source']).toMatchObject({
+      state: 'available',
+      strategy: 'screencapturekit',
+    });
+    expect(c['audio.mic'].state).toBe('available');
+    expect(c['ui.excludeFromCapture'].state).toBe('available');
+    expect(c['capture.screen.allMonitors'].state).toBe('unavailable');
+    expect(c['window.manipulate'].state).toBe('unavailable');
+  });
+
+  it('does not trust content protection from macOS 15', async () => {
+    expect((await mac('24.1.0')).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
+    expect((await mac('25.0.0')).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
+  });
+
+  it('follows the privacy permissions', async () => {
+    const report = await mac('24.1.0', {
+      screen: 'denied',
+      camera: 'not-determined',
+      microphone: 'restricted',
+      accessibility: false,
+    });
+    const c = report.capabilities;
+    expect(c['capture.screen.source'].state).toBe('unavailable');
+    expect(c['capture.screen.source'].reason).toContain('Screen Recording');
+    expect(c['capture.window.enumerate'].state).toBe('unavailable');
+    expect(c['capture.screenshot.silent'].state).toBe('unavailable');
+    expect(c['video.camera'].state).toBe('degraded');
+    expect(c['audio.mic'].reason).toContain('blocked');
+  });
+
+  it('treats unread permissions as not asked yet', async () => {
+    const c = (await mac('23.0.0', null)).capabilities;
+    expect(c['capture.screen.source'].state).toBe('degraded');
+    expect(c['capture.screen.source'].reason).toContain('first recording');
+  });
+});
+
+describe('platform versions', () => {
+  it('reads the Windows build and the macOS major version', () => {
+    expect(windowsBuild('10.0.22631')).toBe(22631);
+    expect(windowsBuild('10.0')).toBeNull();
+    expect(macosMajor('22.6.0')).toBe(13);
+    expect(macosMajor('24.1.0')).toBe(15);
+    expect(macosMajor('25.0.0')).toBe(26);
+    expect(macosMajor('19.6.0')).toBeNull();
+  });
+
+  it('reads macOS permissions without prompting', () => {
+    const prompts: boolean[] = [];
+    const permissions = readMacPermissions({
+      getMediaAccessStatus: (t) =>
+        ({ screen: 'granted', camera: 'denied', microphone: 'weird' })[t],
+      isTrustedAccessibilityClient: (prompt) => (prompts.push(prompt), true),
+    });
+    expect(permissions).toEqual({
+      screen: 'granted',
+      camera: 'denied',
+      microphone: 'unknown',
+      accessibility: true,
+    });
+    expect(prompts).toEqual([false]);
   });
 });
 

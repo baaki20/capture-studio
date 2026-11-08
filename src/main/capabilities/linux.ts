@@ -15,6 +15,14 @@ import {
   type CapabilityMap,
   type FfmpegEncoderReport,
 } from '../../shared/capabilities/types';
+import {
+  ffmpegHardwareCapability,
+  secretsCapability,
+  webcodecsPending,
+  type SecretsStatusLike,
+} from './common';
+
+export { ffmpegHardwareCapability, secretsCapability, type SecretsStatusLike } from './common';
 
 export interface ExecResult {
   /** Exit code, or null when the program could not be started or was killed. */
@@ -30,12 +38,6 @@ export type ExecFn = (
   args: readonly string[],
   options?: { timeoutMs?: number },
 ) => Promise<ExecResult>;
-
-export interface SecretsStatusLike {
-  persistent: boolean;
-  backend: string;
-  reason: string | null;
-}
 
 export interface LinuxDetectInput {
   env: Partial<Record<string, string>>;
@@ -145,28 +147,6 @@ export async function detectTray(exec: ExecFn, gnome: boolean): Promise<Capabili
   );
 }
 
-export function ffmpegHardwareCapability(report: FfmpegEncoderReport | null): Capability {
-  if (!report) return unavailable('Encoder probe has not finished; libx264 is used.', 'libx264');
-  if (report.hardware) return available(report.hardware, 'Verified with a 1 s test encode.');
-  const failed = report.encoders
-    .filter((e) => e.kind !== 'software')
-    .map((e) => `${e.name}: ${e.listed ? (e.error ?? 'failed') : 'not in this build'}`);
-  return unavailable(
-    `No working hardware encoder${failed.length ? ` (${failed.join('; ')})` : ''}. libx264 is used.`,
-    'libx264',
-  );
-}
-
-export function secretsCapability(status: SecretsStatusLike | null): Capability {
-  if (!status) return unavailable('Secret storage has not been checked yet.');
-  return status.persistent
-    ? available(`safeStorage:${status.backend}`)
-    : unavailable(
-        status.reason ?? `Backend ${status.backend} does not encrypt; secrets stay in memory.`,
-        `memory (backend ${status.backend})`,
-      );
-}
-
 export async function detectLinuxCapabilities(input: LinuxDetectInput): Promise<CapabilityMap> {
   const wayland = input.ozonePlatform === 'wayland';
   const gnome = isGnome(input.env);
@@ -214,10 +194,7 @@ export async function detectLinuxCapabilities(input: LinuxDetectInput): Promise<
     'audio.system': systemAudio,
     'audio.mic': available('getUserMedia', 'Devices are listed in the setup panel.'),
     'video.camera': available('getUserMedia', 'Devices are listed in the setup panel.'),
-    'encode.webcodecs.hw': unavailable(
-      'Probed by the capture engine when recording starts; software H.264 (WebCodecs) is used meanwhile.',
-      'webcodecs-software',
-    ),
+    'encode.webcodecs.hw': webcodecsPending,
     'encode.ffmpeg.hw': ffmpegHardwareCapability(input.encoders),
     'hotkeys.global': wayland
       ? unavailable(
