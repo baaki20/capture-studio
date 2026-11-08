@@ -575,8 +575,7 @@ describe('session manager', () => {
       'acquiring',
       'countdown',
       'countdown',
-      'recording',
-      'recording',
+      'recording', // announced once the engine has started
       'finalizing',
       'completed',
     ]);
@@ -697,6 +696,9 @@ describe('session manager', () => {
     });
     expect(h.manager.state).toBe('failed');
     expect(h.states.at(-1)?.failureReason).toContain('encoder configuration failed');
+    // The UI never sees "recording" for a start the engine refused: countdown → failed.
+    expect(h.states.map((s) => s.state)).not.toContain('recording');
+    expect(h.states.at(-2)?.state).toBe('countdown');
     expect(await projectDirs(h)).toEqual([]);
   });
 
