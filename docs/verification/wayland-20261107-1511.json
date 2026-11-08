@@ -1,0 +1,494 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-07T15:11:53.989Z",
+  "finishedAt": "2026-11-08T20:36:23.270Z",
+  "machine": {
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v22.23.2",
+    "git": "ed62e08 (phase2, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W1",
+      "title": "Full screen, all components, sync-check pattern",
+      "requirements": ["R1.24", "R1.22", "R1.11", "R1.13", "R1.25"],
+      "humanActions": [
+        "1 portal click (pick the monitor, Share)",
+        "camera sees the screen (small mirror by the webcam) or the room lit only by the screen",
+        "speakers on",
+        "clap 5 times in view of the camera when asked"
+      ],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R1.11",
+          "name": "controls window minimized while recording",
+          "status": "pass",
+          "value": "minimized"
+        },
+        {
+          "requirement": "R1.2",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "261 ms",
+          "detail": "includes starting the second instance (460 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.4 s"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R1.25",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "4/4"
+        },
+        {
+          "requirement": "R1.13",
+          "name": "one file per enabled stream",
+          "status": "pass",
+          "value": "screen, camera, microphone, system-audio"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "screen dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.22",
+          "name": "camera dropped frames < 1 %",
+          "status": "pass",
+          "value": "0.00 %",
+          "limit": "< 1 %",
+          "detail": "metrics.json at 1.2 min"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "screen encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "camera encoder",
+          "status": "info",
+          "value": "H.264 (software)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "mic encoder",
+          "status": "info",
+          "value": "Opus (WebCodecs)"
+        },
+        {
+          "requirement": "R1.19",
+          "name": "system encoder",
+          "status": "info",
+          "value": "Opus (FFmpeg libopus)"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen flashes found",
+          "status": "info",
+          "value": "31"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ system audio",
+          "status": "pass",
+          "value": "7.7 ms",
+          "limit": "≤ 40 ms",
+          "detail": "31 pairs, p10 -7.6 ms, p90 23.7 ms, trend -187.4 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "start: screen ↔ mic",
+          "status": "pass",
+          "value": "-5.6 ms",
+          "limit": "≤ 40 ms",
+          "detail": "31 pairs, p10 -23.0 ms, p90 10.6 ms, trend -41.9 ppm"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "camera ↔ mic (flash)",
+          "status": "fail",
+          "value": "79.4 ms",
+          "limit": "≤ 60 ms",
+          "detail": "31 pairs"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "claps heard / paired",
+          "status": "info",
+          "value": "3 / 2"
+        },
+        {
+          "requirement": "R1.24",
+          "name": "export: screen ↔ audio mix",
+          "status": "pass",
+          "value": "2.5 ms",
+          "limit": "≤ 40 ms",
+          "detail": "31 pairs"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261107-151153/projects/Lesson 2026-11-07 15-14.cstudio"
+      ],
+      "startedAt": "2026-11-07T15:13:42.735Z",
+      "durationS": 145.029
+    },
+    {
+      "id": "W11",
+      "title": "Window recording: resize the window, letterbox (acceptance f)",
+      "requirements": ["R2.29"],
+      "humanActions": [
+        "open a text editor",
+        "1 portal click (Window tab)",
+        "resize the window twice when asked",
+        "look at three saved frames"
+      ],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R2.29",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "797 ms",
+          "detail": "includes starting the second instance (1197 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.3 s"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "no error notices",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "the recording names a window source",
+          "status": "pass",
+          "value": "window 1920×1040"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "recording size",
+          "status": "info",
+          "value": "1920×1040"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "edge luma at the first size",
+          "status": "info",
+          "value": "left 201, right 55, top 44, bottom 29",
+          "detail": "brightest pixel per 1 % edge strip"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "narrower window: black bars left and right",
+          "status": "fail",
+          "value": "left 201, right 55, top 44, bottom 29",
+          "limit": "left, right ≤ 24"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "wider and shorter window: black bars top and bottom",
+          "status": "fail",
+          "value": "left 201, right 55, top 44, bottom 29",
+          "limit": "top, bottom ≤ 24"
+        },
+        {
+          "requirement": "R2.29",
+          "name": "the operator confirms: whole, centred, not stretched",
+          "status": "fail"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261107-151153/projects/Lesson 2026-11-08 20-22.cstudio"
+      ],
+      "startedAt": "2026-11-07T15:16:07.765Z",
+      "durationS": 104961.162
+    },
+    {
+      "id": "W12",
+      "title": "Audio only, Stop after 10 s",
+      "requirements": ["R2.30", "R2.32"],
+      "humanActions": ["nothing (the harness plays a tone); no portal must appear"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R2.30",
+          "name": "recording starts without asking for a screen",
+          "status": "pass",
+          "value": "recording",
+          "limit": "recording",
+          "detail": "went through acquiring"
+        },
+        {
+          "requirement": "R2.32",
+          "name": "it stops by itself after 10 s",
+          "status": "pass",
+          "value": "finalizing after 10.2 s",
+          "limit": "9.5–11.5 s"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "2/2"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "no error notices",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "microphone and system audio, no screen or camera",
+          "status": "pass",
+          "value": "microphone, system-audio"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "Voice and System audio tracks",
+          "status": "pass",
+          "value": "Voice, System audio"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "system audio holds the tone",
+          "status": "pass",
+          "value": "-28.4 dBFS peak",
+          "limit": "> −30 dBFS"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "the editor plays it (audio chunks, no underruns)",
+          "status": "pass",
+          "value": "12 chunks, 0 underruns"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "MP3 export: one MP3 stream, about 10 s",
+          "status": "pass",
+          "value": "mp3, 10.2 s"
+        },
+        {
+          "requirement": "R2.30",
+          "name": "MP3 export has sound",
+          "status": "pass",
+          "value": "-27.6 dBFS peak",
+          "limit": "> −30 dBFS"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261107-151153/projects/Lesson 2026-11-08 20-25.cstudio"
+      ],
+      "startedAt": "2026-11-08T20:25:28.929Z",
+      "durationS": 21.125
+    },
+    {
+      "id": "W13",
+      "title": "Record only the region, then a small GIF",
+      "requirements": ["R2.31", "R2.33"],
+      "humanActions": [
+        "1 portal click (the region is dragged automatically)",
+        "say whether the file manager showed the GIF"
+      ],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R2.33",
+          "name": "CLI --action stop-recording → finalizing",
+          "status": "info",
+          "value": "945 ms",
+          "detail": "includes starting the second instance (1316 ms to exit, code 0)"
+        },
+        {
+          "requirement": "R1.20",
+          "name": "finalizing → project ready",
+          "status": "info",
+          "value": "0.2 s"
+        },
+        {
+          "requirement": "R2.33",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R2.33",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R2.33",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R2.33",
+          "name": "the screen file has the recorded source size, with no crop left",
+          "status": "pass",
+          "value": "768×456",
+          "limit": "768×456 (±2)"
+        },
+        {
+          "requirement": "R2.33",
+          "name": "that size is the dragged region (40 % × 30 % of the display)",
+          "status": "fail",
+          "value": "768×456",
+          "limit": "≈ 768×324",
+          "detail": "display 1920×1080"
+        },
+        {
+          "requirement": "R2.31",
+          "name": "a GIF appears in the exports folder",
+          "status": "pass",
+          "value": "Lesson 2026-11-08 20-26.gif, 128 KB",
+          "detail": "480×286"
+        },
+        {
+          "requirement": "R2.31",
+          "name": "no error notices",
+          "status": "pass",
+          "value": "0",
+          "limit": "0"
+        },
+        {
+          "requirement": "R2.31",
+          "name": "the file manager shows the GIF",
+          "status": "pass"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261107-151153/projects/Lesson 2026-11-08 20-26.cstudio"
+      ],
+      "startedAt": "2026-11-08T20:25:50.054Z",
+      "durationS": 40.093
+    },
+    {
+      "id": "W14",
+      "title": "Require a hardware encoder (with and without one)",
+      "requirements": ["R2.34a"],
+      "humanActions": ["1–2 portal clicks"],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R2.34a",
+          "name": "scenario run",
+          "status": "error",
+          "detail": "the recording stopped before the harness asked (state failed); app.log names the source (\"action: stop (from …)\")"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261107-151153/projects/Lesson 2026-11-08 20-26 (2).cstudio"
+      ],
+      "startedAt": "2026-11-08T20:26:30.148Z",
+      "durationS": 13.794
+    },
+    {
+      "id": "G",
+      "title": "4K preview through the 720p proxy (acceptance g)",
+      "requirements": ["R2.23"],
+      "humanActions": ["nothing; leave the machine alone while it plays"],
+      "status": "fail",
+      "checks": [
+        {
+          "requirement": "R2.23",
+          "name": "4K project made",
+          "status": "info",
+          "value": "160 s"
+        },
+        {
+          "requirement": "R2.23",
+          "name": "the preview switches to the 720p proxy",
+          "status": "pass",
+          "value": "after 114 s"
+        },
+        {
+          "requirement": "R2.23",
+          "name": "late frames < 1 %",
+          "status": "fail",
+          "value": "n/a",
+          "limit": "< 1 %",
+          "detail": "0 of 0 (superseded 0, stand-in 0)"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261107-151153/projects/G 4K preview.cstudio"
+      ],
+      "startedAt": "2026-11-08T20:26:43.942Z",
+      "durationS": 579.328
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 4,
+    "error": 1,
+    "not-testable": 0,
+    "info": 0
+  }
+}

@@ -42,7 +42,7 @@ export interface Context {
   projectsDir: string;
   devices: Devices;
   /** Starts the app for this run's profile (logs go to the run folder). */
-  launch(env?: Record<string, string>): Promise<AppSession>;
+  launch(env?: Record<string, string>, args?: string[]): Promise<AppSession>;
   log(text: string): void;
 }
 
@@ -112,6 +112,11 @@ export async function configure(
       minimizeControlsOnStart: 'auto',
       afterRecording: 'show-in-library',
       micProcessing: { ec: false, ns: false, agc: false },
+      // Settings persist in the harness profile: reset every P2 option a scenario may have set
+      // (a W14 run left "require a hardware encoder" on and the next W11 could not record).
+      durationLimitSec: 0,
+      cropAtRecord: false,
+      requireHardware: false,
       ...recorder,
     },
   });
@@ -133,7 +138,7 @@ export function portalHint(mode: Mode): string[] {
 /**
  * Clicks Record and waits until recording runs: the human answers the portal (real mode); in
  * region mode the picker gets a drag over `region` (fractions) and Enter. Returns the project
- * folder and when recording started.
+ * folder, when recording started and, in region mode, the size the picker showed.
  */
 export async function startRecording(
   ctx: Context,
@@ -142,7 +147,7 @@ export async function startRecording(
     region?: { from: [number, number]; to: [number, number] };
     portalSteps?: string[];
   } = {},
-): Promise<{ root: string; startedAt: number }> {
+): Promise<{ root: string; startedAt: number; picked: PickedSize | null }> {
   const mark = app.mark();
   await app.clickRecord();
   const acquiring = await app.waitState(
@@ -160,8 +165,9 @@ export async function startRecording(
         180_000,
       )
     : app.waitState(past, 60_000, acquiring.index));
+  let picked: PickedSize | null = null;
   if (first.value.state === 'picking-region') {
-    await pickRegion(app, options.region ?? { from: [0.25, 0.25], to: [0.75, 0.75] });
+    picked = await pickRegion(app, options.region ?? { from: [0.25, 0.25], to: [0.75, 0.75] });
   } else if (['failed', 'configuring', 'idle'].includes(first.value.state)) {
     throw new Error(
       `recording did not start (${first.value.state}${first.value.failureReason ? `: ${first.value.failureReason}` : ''})`,
@@ -170,14 +176,23 @@ export async function startRecording(
   const recording = await app.waitState((s) => s.state === 'recording', 60_000, first.index);
   const root = await app.waitRoot(30_000);
   ctx.log(`recording into ${root}`);
-  return { root, startedAt: recording.at };
+  return { root, startedAt: recording.at, picked };
 }
 
-/** Drags a region in the picker window and confirms it with Enter (W2, W6, soak). */
+/** The region size in source pixels, as the picker's label showed it. */
+export interface PickedSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * Drags a region in the picker window and confirms it with Enter (W2, W6, W13, soak). Returns
+ * the size the picker showed for the selection (null when its label could not be read).
+ */
 export async function pickRegion(
   app: AppSession,
   region: { from: [number, number]; to: [number, number] },
-): Promise<void> {
+): Promise<PickedSize | null> {
   const end = Date.now() + 15_000;
   while (Date.now() < end) {
     const windows = await app.windows();
@@ -191,10 +206,17 @@ export async function pickRegion(
     const mark = app.mark();
     await app.call('drag', { window: 'picker', from: region.from, to: region.to });
     await sleep(300);
+    const label = await app
+      .evalIn<string>(
+        'picker',
+        `document.querySelector('[data-testid="region-size"]')?.textContent ?? ''`,
+      )
+      .catch(() => '');
+    const size = /(\d+)\s*×\s*(\d+)/.exec(label);
     await app.call('key', { window: 'picker', key: 'Enter' });
     try {
       await app.waitState((s) => s.state !== 'picking-region', 3_000, mark);
-      return;
+      return size ? { width: Number(size[1]), height: Number(size[2]) } : null;
     } catch (error) {
       if (attempt >= 5)
         throw new Error('the region picker did not take the drag and Enter', { cause: error });

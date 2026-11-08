@@ -1,0 +1,150 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-08T20:37:32.022Z",
+  "finishedAt": "2026-11-08T20:51:46.870Z",
+  "machine": {
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v22.23.2",
+    "git": "ed62e08 (phase2, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W11",
+      "title": "Window recording: resize the window, letterbox (acceptance f)",
+      "requirements": ["R2.29"],
+      "humanActions": [
+        "open a text editor",
+        "1 portal click (Window tab)",
+        "resize the window twice when asked",
+        "look at three saved frames"
+      ],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R2.29",
+          "name": "scenario run",
+          "status": "error",
+          "detail": "no recording folder"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-11-08T20:38:17.309Z",
+      "durationS": 113.934
+    },
+    {
+      "id": "W13",
+      "title": "Record only the region, then a small GIF",
+      "requirements": ["R2.31", "R2.33"],
+      "humanActions": [
+        "1 portal click (the region is dragged automatically)",
+        "say whether the file manager showed the GIF"
+      ],
+      "status": "error",
+      "checks": [
+        {
+          "requirement": "R2.31",
+          "name": "scenario run",
+          "status": "error",
+          "detail": "no recording folder"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-11-08T20:40:11.243Z",
+      "durationS": 47.846
+    },
+    {
+      "id": "W14",
+      "title": "Require a hardware encoder (with and without one)",
+      "requirements": ["R2.34a"],
+      "humanActions": ["1–2 portal clicks"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R2.34a",
+          "name": "this machine: refused (no working hardware encoder here)",
+          "status": "info",
+          "value": "refused, says why",
+          "detail": "Recording could not start: engine.start: no hardware screen encoder works, and the setting requires one (H.264 (hardware): unsupported, VP9 (hardware): unsupported, AV1 (hardware): unsupported)"
+        },
+        {
+          "requirement": "R2.34a",
+          "name": "this machine: the refusal says no hardware encoder works",
+          "status": "pass",
+          "value": "Recording could not start: engine.start: no hardware screen encoder works, and the setting requires one (H.264 (hardware): unsupported, VP9 (hardware): unsupported, AV1 (hardware): unsupported)"
+        },
+        {
+          "requirement": "R2.34a",
+          "name": "hardware encoders off: the refusal says no hardware encoder works",
+          "status": "pass",
+          "value": "Recording could not start: engine.start: no hardware screen encoder works, and the setting requires one (H.264 (hardware): unsupported, VP9 (hardware): unsupported, AV1 (hardware): unsupported)"
+        }
+      ],
+      "notes": [],
+      "projects": [],
+      "startedAt": "2026-11-08T20:40:59.089Z",
+      "durationS": 58.889
+    },
+    {
+      "id": "G",
+      "title": "4K preview through the 720p proxy (acceptance g)",
+      "requirements": ["R2.23"],
+      "humanActions": ["nothing; leave the machine alone while it plays"],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R2.23",
+          "name": "4K project made",
+          "status": "info",
+          "value": "151 s"
+        },
+        {
+          "requirement": "R2.23",
+          "name": "the preview switches to the 720p proxy",
+          "status": "pass",
+          "value": "after 132 s"
+        },
+        {
+          "requirement": "R2.23",
+          "name": "editor window before playing",
+          "status": "info",
+          "value": "visible, not minimized, not focused"
+        },
+        {
+          "requirement": "R2.23",
+          "name": "playback advanced over the whole run",
+          "status": "pass",
+          "value": "299.8 s",
+          "limit": "≥ 270 s",
+          "detail": "audio 301 chunks, 0 underruns"
+        },
+        {
+          "requirement": "R2.23",
+          "name": "late frames < 1 %",
+          "status": "pass",
+          "value": "0.10 %",
+          "limit": "< 1 %",
+          "detail": "17 of 17195 (superseded 0, stand-in 17)"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261108-203732/projects/G 4K preview.cstudio"
+      ],
+      "startedAt": "2026-11-08T20:41:57.978Z",
+      "durationS": 588.892
+    }
+  ],
+  "totals": {
+    "pass": 2,
+    "fail": 0,
+    "error": 2,
+    "not-testable": 0,
+    "info": 0
+  }
+}

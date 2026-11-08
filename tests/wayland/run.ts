@@ -7,8 +7,8 @@
  * analyzes the recorded projects and prints PASS/FAIL with numbers. Reports go to
  * `docs/verification/wayland-<date>-<time>.{json,md}`.
  *
- * Scenarios: R1.20 (no human), W1–W7, W9, W10 by default; W8 (30 min) and soak (60 min) only when
- * named (`npm run test:soak` runs the soak). Options:
+ * Scenarios: R1.20 (no human), W1–W7, W9–W14 by default; W8 (30 min), G (4K preview, ~10 min)
+ * and soak (60 min) only when named (`npm run test:soak` runs the soak). Options:
  *   --dry-run            X11 test mode, fake camera/mic, no portal, no human (proves the harness)
  *   --yes                answer every prompt automatically (implied by --dry-run)
  *   --quick              shorter recordings (W1 20 s, W8 1 min, soak 2 min, preview 20 s)
@@ -44,8 +44,28 @@ import { w6 } from './scenarios/w6-scaling';
 import { w7 } from './scenarios/w7-kill';
 import { soak, w8 } from './scenarios/w8-soak';
 import { w9, w10 } from './scenarios/w9-w10';
+import { w11, w12, w13, w14 } from './scenarios/w11-w14';
+import { g } from './scenarios/g-proxy';
 
-const SCENARIOS: Scenario[] = [finalize, w1, w2, w3, w4, w5, w6, w7, w8, w9, w10, soak];
+const SCENARIOS: Scenario[] = [
+  finalize,
+  w1,
+  w2,
+  w3,
+  w4,
+  w5,
+  w6,
+  w7,
+  w8,
+  w9,
+  w10,
+  w11,
+  w12,
+  w13,
+  w14,
+  g,
+  soak,
+];
 
 interface Options {
   ids: string[];
@@ -291,8 +311,14 @@ async function main(): Promise<void> {
   await fs.mkdir(projectsDir, { recursive: true });
   const appLog = path.join(runDir, 'app.log');
   const log = (text: string) => console.log(`  ${text}`);
-  const launch = (env?: Record<string, string>) =>
-    AppSession.launch({ mode, profileDir, logFile: appLog, ...(env ? { env } : {}) });
+  const launch = (env?: Record<string, string>, args?: string[]) =>
+    AppSession.launch({
+      mode,
+      profileDir,
+      logFile: appLog,
+      ...(env ? { env } : {}),
+      ...(args ? { args } : {}),
+    });
 
   console.log(
     `\nCapture Studio Wayland harness — ${mode === 'dry-run' ? 'DRY RUN (X11 test mode, no portal)' : 'real run'}`,

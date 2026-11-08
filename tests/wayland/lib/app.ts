@@ -80,6 +80,8 @@ export interface LaunchOptions {
   /** Where main's stdout/stderr go. */
   logFile: string;
   env?: Record<string, string>;
+  /** Extra Chromium switches (W14 hides the hardware encoders). */
+  args?: string[];
 }
 
 /** Environment and switches of a mode (dry runs match `tests/e2e/recorder-ui.spec.ts`). */
@@ -130,7 +132,8 @@ export class AppSession {
   static async launch(options: LaunchOptions): Promise<AppSession> {
     await fs.mkdir(options.profileDir, { recursive: true });
     const socket = path.join(options.profileDir, 'control.sock');
-    const { args, env: modeEnv } = modeLaunch(options.mode);
+    const { args: modeArgs, env: modeEnv } = modeLaunch(options.mode);
+    const args = [...modeArgs, ...(options.args ?? [])];
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       ...modeEnv,

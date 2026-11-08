@@ -20,7 +20,7 @@ import {
 } from '@playwright/test';
 import type { Project } from '../../src/shared/project/schema';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
-import { recordedProject } from '../fixtures/editor-project';
+import { buildRecordedProject } from '../fixtures/recorded-media';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG, FFMPEG_DIR, FPS } from './parity/fixtures';
 
@@ -40,63 +40,7 @@ function buildProject(
   size: [number, number],
   seconds: number,
 ): { root: string; doc: Project } {
-  const doc: Project = {
-    ...recordedProject({
-      durationUs: seconds * S,
-      pauses: [],
-      system: false,
-      screenSize: { width: size[0], height: size[1] },
-      cameraSize: { width: 640, height: 480 },
-      offsets: { screen: 0, camera: 0, microphone: 0 },
-    }),
-    id,
-    name,
-  };
-  for (const m of doc.media) m.clockRatio = 1;
-  doc.timeline.canvas = { ...doc.timeline.canvas, width: 1280, height: 720 };
-  const root = path.join(dir, `${name}.cstudio`);
-  const media = path.join(root, 'media');
-  mkdirSync(media, { recursive: true });
-  const d = String(seconds);
-  ff([
-    '-f',
-    'lavfi',
-    '-i',
-    `testsrc2=size=${String(size[0])}x${String(size[1])}:rate=${String(FPS)}:duration=${d}`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'ultrafast',
-    '-g',
-    '30',
-    '-pix_fmt',
-    'yuv420p',
-    path.join(media, 'screen.mp4'),
-  ]);
-  ff([
-    '-f',
-    'lavfi',
-    '-i',
-    `color=c=0xFF00FF:s=640x480:r=${String(FPS)}:d=${d}`,
-    '-c:v',
-    'libx264',
-    '-preset',
-    'ultrafast',
-    '-pix_fmt',
-    'yuv420p',
-    path.join(media, 'camera.mp4'),
-  ]);
-  ff([
-    '-f',
-    'lavfi',
-    '-i',
-    `sine=f=440:r=48000:d=${d}`,
-    '-c:a',
-    'aac',
-    path.join(media, 'microphone.mp4'),
-  ]);
-  writeFileSync(path.join(root, 'project.json'), JSON.stringify(doc, null, 2));
-  return { root, doc };
+  return buildRecordedProject({ ffmpeg: FFMPEG, fps: FPS, dir, id, name, size, seconds });
 }
 
 async function launch(userData: string, projects: string) {

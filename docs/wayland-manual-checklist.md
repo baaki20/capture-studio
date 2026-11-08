@@ -10,8 +10,9 @@ engine or the acquisition path.
 
 ```bash
 npm run fetch:ffmpeg          # once
-npm run test:wayland          # R1.20, W1–W7, W9, W10 (about 15 minutes, 11–13 clicks)
+npm run test:wayland          # R1.20, W1–W7, W9–W14 (about 25 minutes, 15–18 clicks)
 npm run test:wayland -- W8    # the 30-minute drift run
+npm run test:wayland -- G     # 4K preview through the proxy (about 10 minutes, no clicks)
 npm run test:soak             # the 60-minute soak (R1.22, R1.23, W8 at 30 min, preview, export)
 npm run test:wayland -- --list
 npm run test:wayland -- --dry-run --quick   # X11 test mode, fake devices, nobody needed
@@ -39,16 +40,17 @@ which microphone you will unplug in W4 (the USB headset); the choices are rememb
 Not automated: controls-window input latency (R1.22; the main-process event-loop delay is
 reported as a proxy) and whether the TTS phrase is audible in W2 (listen to the mic track).
 
-## Phase 2 additions (by hand; not in the harness yet)
+## Phase 2 additions
 
-These need the real portal or a real display, so CI covers only their logic (unit tests) and the
-X11 paths (E2E under Xvfb). Do them before tagging 0.2.0 and note the result in
-`docs/verification/`.
+In the harness since 0.2.0 (`tests/wayland/scenarios/w11-w14.ts`, `g-proxy.ts`). W12 and W13 also
+run in a dry run; W11, W14 and the G late-frame figure need the real portal or a real display.
+W14 checks this machine as it is, then again with Chromium's hardware encoders switched off
+(`--disable-accelerated-video-encode`), which stands in for a machine without one.
 
-| #   | You do                                                                                                                                                                                                              | Expect                                                                                                                                                  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| W11 | Setup: Window. Record; in the portal's Window tab pick a text editor. Resize it narrower, then wider and shorter, 5 s each. Stop.                                                                                   | Acceptance (f): the recording keeps its first size; after each resize the window is whole, centred, with black bars, never stretched or cut. No errors. |
-| W12 | Setup: Audio only, microphone and system audio on, Stop after 10 s. Record; play a sound.                                                                                                                           | No portal appears; it stops by itself at 10 s; the project has Voice and System audio tracks and no screen; the editor and an MP3 export play it.       |
-| W13 | Setup: Region, "Record only the region", When done: Export a small GIF. Record a 5 s region.                                                                                                                        | `media/screen.*` is the region's size; the GIF appears in the exports folder and the file manager shows it.                                             |
-| W14 | On a machine with VA-API: setup "Require a hardware encoder". Record 5 s. Then the same on a machine without one.                                                                                                   | With: `project.json` names a hardware encoder. Without: the recording does not start and the notice says no hardware encoder works.                     |
-| G   | Open a 4K project once its proxy is ready, on a real display. In the editor's DevTools run `csEditorDebug.resetPlaybackCounters(); csEditorDebug.play(0)`, wait 5 minutes, then `csEditorDebug.playbackCounters()`. | Acceptance (g): `video.late / video.requested` under 1 %. Under Xvfb this cannot be measured.                                                           |
+| #   | You do                                                                                                                                   | Checked                                                                                                                                                 |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| W11 | Open a text editor; portal: Window tab, pick it. Resize it narrower, then wider and shorter, when asked. Look at the three saved frames. | Acceptance (f): the recording keeps its first size; after each resize the window is whole, centred, with black bars, never stretched or cut. No errors. |
+| W12 | nothing (the harness plays a tone)                                                                                                       | No portal appears; it stops by itself at 10 s; the project has Voice and System audio tracks and no screen; the editor and an MP3 export play it.       |
+| W13 | portal click (the region is dragged for you); say whether the file manager showed the GIF                                                | `media/screen.*` is the region's size; the GIF appears in the exports folder and the file manager shows it.                                             |
+| W14 | 1–2 portal clicks                                                                                                                        | With: `project.json` names a hardware encoder. Without: the recording does not start and the notice says no hardware encoder works.                     |
+| G   | nothing (the harness makes a 4K project, waits for the proxy and plays 5 minutes)                                                        | Acceptance (g): `video.late / video.requested` under 1 %. Under Xvfb this cannot be measured.                                                           |
