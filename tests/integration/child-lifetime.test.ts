@@ -3,9 +3,9 @@
  * hours). A Node parent starts a never-ending export, or a system-audio capture with its Opus
  * encoder, through the real runner; the parent is then SIGKILLed (no JavaScript runs) or exits,
  * and every child pid must be gone within 2 s. Both parent-death mechanisms are exercised:
- * `setpriv --pdeathsig` and the `sh` watchdog fallback.
+ * `setpriv --pdeathsig` and the `sh` watchdog fallback (the only one on macOS).
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +16,7 @@ import { deathSignalMode } from '../../src/utility/media/child-processes';
 const ROOT = path.join(import.meta.dirname, '../..');
 const PARENT = path.join(import.meta.dirname, 'helpers/orphan-parent.ts');
 const linux = process.platform === 'linux';
+const mac = process.platform === 'darwin';
 
 let ffmpegPath: string;
 let work: string;
@@ -51,6 +52,10 @@ function alive(pid: number): boolean {
     process.kill(pid, 0);
   } catch {
     return false;
+  }
+  if (!linux) {
+    const state = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
+    return state.status === 0 && !state.stdout.trim().startsWith('Z');
   }
   try {
     const stat = readFileSync(`/proc/${String(pid)}/stat`, 'utf8');
@@ -140,5 +145,22 @@ describe.skipIf(!linux)('media children die with their parent', () => {
         500,
       ),
     ).toEqual([]);
+  });
+});
+
+describe.skipIf(!mac)('media children die with their parent (macOS)', () => {
+  it('uses the sh watchdog', () => {
+    expect(deathSignalMode()).toBe('watchdog');
+  });
+
+  it('export: SIGKILL of the parent kills FFmpeg within 2 s (watchdog)', async () => {
+    const { parent, children } = await startParent('export', 'watchdog');
+    expect(children.length).toBe(2);
+    const pids = children.map((c) => c.pid);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(pids.filter(alive)).toEqual(pids);
+
+    parent.kill('SIGKILL');
+    expect(await waitGone(pids, 2000)).toEqual([]);
   });
 });

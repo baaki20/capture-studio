@@ -17,6 +17,7 @@ import {
   AUTOMATION_METHODS,
   AutomationRequestSchema,
   isAutomationMethod,
+  isNamedPipe,
   type AutomationError,
   type AutomationErrorCode,
   type AutomationMethod,
@@ -73,10 +74,13 @@ export class AutomationServer {
   async start(): Promise<void> {
     if (this.server) return;
     const { socketPath } = this.options;
-    const dir = path.dirname(socketPath);
-    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-    await fs.chmod(dir, 0o700);
-    await fs.rm(socketPath, { force: true });
+    const pipe = isNamedPipe(socketPath);
+    if (!pipe) {
+      const dir = path.dirname(socketPath);
+      await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+      await fs.chmod(dir, 0o700);
+      await fs.rm(socketPath, { force: true });
+    }
     const server = net.createServer((socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -85,7 +89,7 @@ export class AutomationServer {
         resolve();
       });
     });
-    await fs.chmod(socketPath, 0o600);
+    if (!pipe) await fs.chmod(socketPath, 0o600);
     this.server = server;
     this.logger.info(`automation: listening on ${socketPath}`);
   }
@@ -99,7 +103,8 @@ export class AutomationServer {
       await new Promise<void>((resolve) => server.close(() => resolve()));
       this.logger.info('automation: stopped');
     }
-    await fs.rm(this.options.socketPath, { force: true }).catch(() => undefined);
+    if (!isNamedPipe(this.options.socketPath))
+      await fs.rm(this.options.socketPath, { force: true }).catch(() => undefined);
   }
 
   private accept(socket: net.Socket): void {

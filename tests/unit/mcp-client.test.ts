@@ -12,6 +12,8 @@ import {
   type AutomationHandlers,
 } from '../../src/main/automation/automation-server';
 import { AppClient } from '../../src/mcp/app-client';
+import { automationSocketPath as mainSocketPath } from '../../src/main/ipc/automation-handlers';
+import { isNamedPipe } from '../../src/shared/automation/protocol';
 import { automationSocketPath } from '../../src/mcp/socket-path';
 import { toUs } from '../../src/mcp/units';
 import { fakeApp } from '../fixtures/automation-app';
@@ -116,5 +118,15 @@ describe('socket path', () => {
     expect(automationSocketPath({}, 'darwin', '/Users/u')).toBe(
       '/Users/u/Library/Application Support/Capture Studio/automation/automation.sock',
     );
+    // Windows: a named pipe named after the profile folder, the same one main listens on.
+    const pipe = automationSocketPath(
+      { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' },
+      'win32',
+      'C:\\Users\\u',
+    );
+    expect(pipe).toMatch(/^\\\\\.\\pipe\\capture-studio-automation-[0-9a-f]{8}$/);
+    expect(pipe).toBe(mainSocketPath('C:\\Users\\U\\AppData\\Roaming\\Capture Studio', 'win32'));
+    expect(isNamedPipe(pipe)).toBe(true);
+    expect(isNamedPipe('/home/u/.config/Capture Studio/automation/automation.sock')).toBe(false);
   });
 });

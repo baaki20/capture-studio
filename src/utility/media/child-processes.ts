@@ -10,8 +10,10 @@
  * - **Crash or SIGKILL of the parent**, where no JavaScript runs: on Linux each child is started
  *   through `setpriv --pdeathsig KILL`, which sets `PR_SET_PDEATHSIG` and then execs the real
  *   program (same pid, same stdio, same exit status), so the kernel kills it when its parent
- *   dies. Without `setpriv` a small `sh` watchdog per child polls the parent instead (every
- *   0.5 s) and kills the child once it is reparented.
+ *   dies. Without `setpriv`, and always on macOS (no `PR_SET_PDEATHSIG`), a small `sh` watchdog
+ *   per child polls the parent instead (every 0.5 s) and kills the child once it is reparented.
+ *   Windows has neither: only the first two layers apply until a job object (native helper)
+ *   ties children to the utility.
  */
 import {
   spawn as nodeSpawn,
@@ -40,19 +42,32 @@ let forcedMode: DeathSignalMode | null = null;
  * The watchdog script: `$1` is the parent pid, `$2` the child pid. It ends quietly when the
  * child is gone and kills it when the watchdog itself has been reparented, which happens exactly
  * when the parent died (a zombie parent still answers `kill -0`, so the pid alone is not
- * enough). `/proc/<pid>/stat` field 4 is the ppid; the comm field of `sh` holds no spaces.
+ * enough). `readPpid` sets `ppid` to the watchdog's own parent pid.
  */
-const WATCHDOG_SCRIPT = [
-  'while :; do',
-  '  read -r _ _ _ ppid _ < /proc/$$/stat || break',
-  '  [ "$ppid" = "$1" ] || break',
-  '  kill -0 "$2" 2>/dev/null || exit 0',
-  '  sleep 0.5 2>/dev/null || sleep 1',
-  'done',
-  'kill -9 "$2" 2>/dev/null',
-].join('\n');
+function watchdogScript(readPpid: string): string {
+  return [
+    'while :; do',
+    `  ${readPpid} || break`,
+    '  [ "$ppid" = "$1" ] || break',
+    '  kill -0 "$2" 2>/dev/null || exit 0',
+    '  sleep 0.5 2>/dev/null || sleep 1',
+    'done',
+    'kill -9 "$2" 2>/dev/null',
+  ].join('\n');
+}
+
+/** Linux: `/proc/<pid>/stat` field 4 is the ppid; the comm field of `sh` holds no spaces. */
+const PROC_PPID = 'read -r _ _ _ ppid _ < /proc/$$/stat';
+/** macOS (no `/proc`): ask `ps`, stripping its padding. */
+const PS_PPID = 'ppid=$(ps -o ppid= -p $$ 2>/dev/null | tr -d " ") && [ -n "$ppid" ]';
+
+const WATCHDOG_SCRIPT = watchdogScript(process.platform === 'linux' ? PROC_PPID : PS_PPID);
 
 function probeMode(): DeathSignalMode {
+  if (process.platform === 'darwin') {
+    const sh = spawnSync('sh', ['-c', PS_PPID], { stdio: 'ignore', timeout: 5000 });
+    return sh.status === 0 ? 'watchdog' : 'none';
+  }
   if (process.platform !== 'linux') return 'none';
   const probe = spawnSync('setpriv', ['--pdeathsig', 'KILL', '--', 'true'], {
     stdio: 'ignore',

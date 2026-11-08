@@ -18,6 +18,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { spawnChild } from './child-processes';
 import { probeMedia, type ProbeResult } from './probe';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export interface ImportedFile {
   kind: 'video' | 'audio';
@@ -263,6 +264,6 @@ export async function makeProxy(options: {
     ],
     options.signal,
   );
-  await fs.rename(tmp, options.output);
+  await retryTransientFsErrors(() => fs.rename(tmp, options.output), process.platform);
   return { output: options.output };
 }

@@ -12,6 +12,7 @@ import {
   type NoiseMode,
 } from '../../shared/project/audio-cleanup';
 import { spawnChild } from './child-processes';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export interface CleanAudioOptions {
   ffmpegPath: string;
@@ -104,6 +105,6 @@ export async function cleanAudio(options: CleanAudioOptions): Promise<{ output: 
     ],
     options.signal,
   );
-  await fs.rename(tmp, options.output);
+  await retryTransientFsErrors(() => fs.rename(tmp, options.output), process.platform);
   return { output: options.output };
 }

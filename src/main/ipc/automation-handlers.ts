@@ -5,7 +5,11 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { AUTOMATION_DIR_NAME, AUTOMATION_SOCKET_NAME } from '../../shared/automation/protocol';
+import {
+  AUTOMATION_DIR_NAME,
+  AUTOMATION_SOCKET_NAME,
+  automationPipeName,
+} from '../../shared/automation/protocol';
 import type { Logger } from '../../shared/logger';
 import type { Settings } from '../../shared/settings/schema';
 import { AutomationServer } from '../automation/automation-server';
@@ -13,7 +17,11 @@ import { AutomationService, type AutomationServiceDeps } from '../automation/aut
 import { EditorLinks, type EditorContentsLike } from '../automation/editor-link';
 import type { IpcRouter } from './router';
 
-export function automationSocketPath(userDataDir: string): string {
+export function automationSocketPath(
+  userDataDir: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === 'win32') return automationPipeName(userDataDir);
   return path.join(userDataDir, AUTOMATION_DIR_NAME, AUTOMATION_SOCKET_NAME);
 }
 

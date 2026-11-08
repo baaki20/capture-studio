@@ -18,6 +18,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export const METRICS_FILE = 'metrics.json';
 export const METRICS_INTERVAL_MS = 60_000;
@@ -233,7 +234,7 @@ export class MetricsSampler {
 async function replaceFile(file: string, text: string): Promise<void> {
   const tmp = `${file}.tmp`;
   await fs.writeFile(tmp, text);
-  await fs.rename(tmp, file);
+  await retryTransientFsErrors(() => fs.rename(tmp, file), process.platform);
 }
 
 async function defaultRootExists(root: string): Promise<boolean> {

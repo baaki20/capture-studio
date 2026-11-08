@@ -7,6 +7,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { spawnChild } from './child-processes';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export const PEAKS_SAMPLE_RATE = 8000;
 export const PEAKS_WINDOW_SAMPLES = 80;
@@ -113,7 +114,7 @@ export async function generatePeaks(
   await fs.mkdir(path.dirname(options.output), { recursive: true });
   const tmp = `${options.output}.tmp`;
   await fs.writeFile(tmp, bytes);
-  await fs.rename(tmp, options.output);
+  await retryTransientFsErrors(() => fs.rename(tmp, options.output), process.platform);
   return {
     output: options.output,
     pairs: bytes.length / 4,

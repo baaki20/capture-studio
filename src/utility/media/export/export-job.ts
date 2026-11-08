@@ -54,6 +54,7 @@ import {
   type MediaColor,
 } from './graph-builder';
 import { writeMaskPng } from './mask-png';
+import { retryTransientFsErrors } from '../../../shared/fs-retry';
 
 export type ExportJobResult = JobResult<'export'>;
 
@@ -445,7 +446,7 @@ export async function runExportJob(options: ExportJobOptions): Promise<ExportJob
     if (!options.overwrite && (await exists(output))) {
       throw new ExportError('exists', `${path.basename(output)} already exists.`);
     }
-    await fs.rename(temp, output);
+    await retryTransientFsErrors(() => fs.rename(temp, output), process.platform);
     return {
       output,
       encoder,

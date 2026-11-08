@@ -141,10 +141,33 @@ describe('application menu (F-7)', () => {
   it('routes File → Quit and Ctrl+Q through the interactive quit', async () => {
     const { appMenuTemplate } = await import('../../src/main/app-menu');
     const quit = vi.fn();
-    const file = appMenuTemplate(quit)[0]!;
+    const file = appMenuTemplate(quit, 'linux')[0]!;
     const item = (file.submenu as { accelerator?: string; click?: () => void }[])[0]!;
     expect(item.accelerator).toBe('CmdOrCtrl+Q');
     item.click?.();
     expect(quit).toHaveBeenCalledOnce();
+  });
+
+  it('puts Quit in the application menu on macOS', async () => {
+    const { appMenuTemplate } = await import('../../src/main/app-menu');
+    const quit = vi.fn();
+    const menu = appMenuTemplate(quit, 'darwin');
+    expect(menu[0]!.label).toBe('Capture Studio');
+    const items = menu[0]!.submenu as {
+      label?: string;
+      accelerator?: string;
+      click?: () => void;
+    }[];
+    const item = items.find((i) => i.label === 'Quit Capture Studio')!;
+    expect(item.accelerator).toBe('CmdOrCtrl+Q');
+    item.click?.();
+    expect(quit).toHaveBeenCalledOnce();
+    expect(menu.map((m) => m.label ?? m.role)).toEqual([
+      'Capture Studio',
+      'File',
+      'editMenu',
+      'viewMenu',
+      'windowMenu',
+    ]);
   });
 });

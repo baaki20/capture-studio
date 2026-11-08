@@ -28,6 +28,7 @@ import {
   ProjectStoreError,
   type ProjectStore,
 } from './project-store';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export type LibraryEntry = z.infer<typeof LibraryEntrySchema>;
 type Badge = (typeof COMPONENT_BADGES)[number];
@@ -176,7 +177,7 @@ export class Library {
       const taken = new Set((await fs.readdir(parent)).map((n) => n.toLowerCase()));
       const folder = uniqueName(wanted, PROJECT_EXTENSION, (c) => taken.has(c.toLowerCase()));
       target = path.join(parent, folder);
-      await fs.rename(root, target);
+      await retryTransientFsErrors(() => fs.rename(root, target), process.platform);
       this.options.store.register(id, target);
       if (this.imported().some((r) => samePath(r, root))) {
         await this.setImported(this.imported().map((r) => (samePath(r, root) ? target : r)));

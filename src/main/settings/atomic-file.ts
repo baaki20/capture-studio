@@ -7,6 +7,7 @@
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export const TMP_SUFFIX = '.tmp';
 export const BAK_SUFFIX = '.bak';
@@ -71,11 +72,11 @@ export async function writeFileAtomic(
       const bakPath = filePath + BAK_SUFFIX;
       const bakTmpPath = bakPath + TMP_SUFFIX;
       await writeAndSync(bakTmpPath, current, options.mode);
-      await fs.rename(bakTmpPath, bakPath);
+      await retryTransientFsErrors(() => fs.rename(bakTmpPath, bakPath), process.platform);
     }
   }
 
-  await fs.rename(tmpPath, filePath);
+  await retryTransientFsErrors(() => fs.rename(tmpPath, filePath), process.platform);
   await syncDir(dir);
 }
 
@@ -229,7 +230,7 @@ export async function quarantineFile(
 ): Promise<string | null> {
   const target = `${filePath}.corrupt-${stamp(now)}`;
   try {
-    await fs.rename(filePath, target);
+    await retryTransientFsErrors(() => fs.rename(filePath, target), process.platform);
     return target;
   } catch (error) {
     if (isNotFound(error)) return null;

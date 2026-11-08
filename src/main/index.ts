@@ -885,6 +885,11 @@ if (relaunchX11 || !app.requestSingleInstanceLock(secondInstanceData)) {
     else showShell();
   });
 
+  // macOS: clicking the Dock icon with no window open shows the main window.
+  app.on('activate', () => {
+    if (app.isReady() && ElectronWindow.getAllWindows().every((w) => !w.isVisible())) showShell();
+  });
+
   app.on('window-all-closed', () => {
     // With a tray the app keeps running in it; without one, closing the window quits (R1.3).
     if (!tray) quitGuard.quitInteractively();

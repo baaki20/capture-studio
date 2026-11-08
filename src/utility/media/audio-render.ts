@@ -8,6 +8,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { atempoFilters } from '../../shared/project/audio-speed';
 import { spawnChild } from './child-processes';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 export interface AudioRenderOptions {
   ffmpegPath: string;
@@ -67,6 +68,6 @@ export async function renderAudio(options: AudioRenderOptions): Promise<{ output
       else reject(new Error(`audio render: ffmpeg exited with ${String(code)}: ${stderr.trim()}`));
     });
   });
-  await fs.rename(tmp, options.output);
+  await retryTransientFsErrors(() => fs.rename(tmp, options.output), process.platform);
   return { output: options.output };
 }

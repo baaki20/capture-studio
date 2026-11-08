@@ -1,6 +1,7 @@
 /** Small file helpers for the media utility (main's `atomic-file.ts` is out of reach by design). */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 /** Writes JSON through a temp file, fsync and rename, so readers see the old or the new file. */
 export async function writeJsonAtomic(file: string, value: unknown): Promise<void> {
@@ -12,7 +13,7 @@ export async function writeJsonAtomic(file: string, value: unknown): Promise<voi
   } finally {
     await handle.close();
   }
-  await fs.rename(tmp, file);
+  await retryTransientFsErrors(() => fs.rename(tmp, file), process.platform);
 }
 
 export async function fileSize(file: string): Promise<number> {

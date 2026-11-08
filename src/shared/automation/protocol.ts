@@ -27,10 +27,29 @@ import { ProjectStructureSchema, prefixedId } from '../project/schema';
 export const AUTOMATION_PROTOCOL_VERSION = 1;
 /**
  * The socket is `<userData>/automation/automation.sock`; the folder is private to the user (0700)
- * and the socket itself is 0600.
+ * and the socket itself is 0600. Windows has no Unix sockets in Node's sense: there it is a named
+ * pipe whose name is derived from the user-data folder, so each profile gets its own (a pipe's
+ * default security lets only its creator, administrators and SYSTEM write to it).
  */
 export const AUTOMATION_DIR_NAME = 'automation';
 export const AUTOMATION_SOCKET_NAME = 'automation.sock';
+export const AUTOMATION_PIPE_PREFIX = '\\\\.\\pipe\\capture-studio-automation-';
+
+/** The Windows named pipe for a user-data folder (case-insensitive, like Windows paths). */
+export function automationPipeName(userDataDir: string): string {
+  // FNV-1a, 32 bits: a stable short name, not a secret.
+  let hash = 0x811c9dc5;
+  for (const char of userDataDir.toLowerCase()) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return `${AUTOMATION_PIPE_PREFIX}${hash.toString(16).padStart(8, '0')}`;
+}
+
+/** True for a Windows named-pipe path (no folder to create, nothing to chmod or unlink). */
+export function isNamedPipe(socketPath: string): boolean {
+  return socketPath.startsWith('\\\\.\\pipe\\') || socketPath.startsWith('//./pipe/');
+}
 /** Longest request line accepted; longer input closes the connection. */
 export const AUTOMATION_MAX_LINE_BYTES = 1_048_576;
 /** Most operations in one `project.edit`. */

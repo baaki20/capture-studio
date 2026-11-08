@@ -20,6 +20,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable, Writable } from 'node:stream';
 import zlib from 'node:zlib';
 import { PROJECT_EXTENSION } from '../../shared/project/schema';
+import { retryTransientFsErrors } from '../../shared/fs-retry';
 
 /** Folders and files Pack leaves out (relative to the project folder). */
 const SKIPPED_DIRS = new Set(['cache']);
@@ -277,7 +278,7 @@ export async function packProject(
     throw error;
   }
   await handle.close();
-  await fs.rename(partial, output);
+  await retryTransientFsErrors(() => fs.rename(partial, output), process.platform);
   return { files: records.length, bytes: totalBytes };
 }
 
@@ -516,7 +517,7 @@ export async function unpackProject(
         if (!target.startsWith(temp + path.sep)) throw new PackError(`unsafe name “${entry.name}”`);
         await extractEntry(handle, entry, target);
       }
-      await fs.rename(temp, final);
+      await retryTransientFsErrors(() => fs.rename(temp, final), process.platform);
     } catch (error) {
       await fs.rm(temp, { recursive: true, force: true });
       throw error;
