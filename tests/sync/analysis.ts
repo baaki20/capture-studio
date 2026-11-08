@@ -8,7 +8,7 @@
  * - **Beeps:** 1 kHz tone energy (Goertzel, 10 ms windows, 2.5 ms hop).
  * - **Claps** (camera ↔ mic fallback when the camera cannot see the flash): the mic's
  *   broadband transient (energy above 3 kHz, where the 1 kHz beep is filtered out) paired with
- *   the camera frame where the hands' motion energy falls most steeply (they stop at contact).
+ *   the moment the hands' motion stops (contact), placed within the frame (`visualClapNear`).
  * - Every event is mapped onto the session clock with the project's own media mapping
  *   (`fileToRefUs`: start offset, sync adjust, clock ratio), so offsets measure the project as
  *   the editor and export will play it.
@@ -294,24 +294,45 @@ export function clapOnsets(transients: Series): number[] {
 
 /**
  * The visual clap instant near `audioS` (both in session seconds). Motion energy at frame i is
- * the change since frame i−1; where it falls most steeply (within ±`searchS`), nothing moved
- * between i−1 and i, so the hands had met by frame i−1: that frame's time is the estimate (it
- * is late by up to one frame interval). Null without a clear stop.
+ * the change during the interval (t[i−1], t[i]]. A clap is fast motion that stops: frame s is the
+ * first still one (the hands touch), frame s−2 still moves for its whole interval, and the hands
+ * met inside interval s−1, which holds the approach only until contact c. So
+ * `c = t[s−2] + Δ·(m[s−1] − still) / (m[s−2] − still)`, which places the contact within the frame
+ * instead of on the frame grid. Among such stops with s in [audioS − `beforeS`, audioS + `afterS`]
+ * the deepest wins; the camera can trail the sound, so the window reaches further after it. Null
+ * without a clear stop.
  */
-export function visualClapNear(motion: Series, audioS: number, searchS = 0.35): number | null {
+export function visualClapNear(
+  motion: Series,
+  audioS: number,
+  beforeS = 0.2,
+  afterS = 0.35,
+): number | null {
+  const m = motion.values;
+  const peak = Math.max(0, ...m);
+  if (peak <= 0) return null;
   let best: number | null = null;
-  let steepest = 0;
-  for (let i = 1; i < motion.values.length; i++) {
-    const t = motion.times[i] ?? 0;
-    if (Math.abs(t - audioS) > searchS) continue;
-    const fall = (motion.values[i - 1] ?? 0) - (motion.values[i] ?? 0);
-    if (fall > steepest) {
-      steepest = fall;
-      best = motion.times[i - 1] ?? t;
-    }
+  let deepest = 0;
+  for (let s = 2; s < m.length; s++) {
+    const t = motion.times[s] ?? 0;
+    if (t < audioS - beforeS || t > audioS + afterS) continue;
+    const still = Math.min(m[s] ?? 0, m[s + 1] ?? Infinity);
+    const before = m[s - 1] ?? 0;
+    const full = Math.max(m[s - 2] ?? 0, before);
+    const depth = full - still;
+    // The approach must be strong, and s the first frame that has (nearly) stopped.
+    if (depth < 0.2 * peak || (m[s] ?? 0) > still + 0.15 * depth || depth <= deepest) continue;
+    if (before <= still + 0.15 * depth) continue; // s − 1 had already stopped
+    const fraction = Math.min(
+      1,
+      Math.max(0, (before - still) / ((m[s - 2] ?? before) - still || 1)),
+    );
+    const from = motion.times[s - 2] ?? t;
+    const interval = (motion.times[s - 1] ?? t) - from;
+    deepest = depth;
+    best = from + fraction * interval;
   }
-  const peak = Math.max(0, ...motion.values);
-  return best !== null && steepest >= 0.2 * peak ? best : null;
+  return best;
 }
 
 export interface OffsetPair {

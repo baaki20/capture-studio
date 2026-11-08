@@ -752,6 +752,9 @@ function SyncRow({ sync }: { sync: ComponentSync }) {
             {m.outputLatencyMs !== null
               ? `, output latency ${m.outputLatencyMs.toFixed(1)} ms applied`
               : ''}
+            {m.captureLatencyMs !== null
+              ? `, camera latency ${m.captureLatencyMs.toFixed(1)} ms applied`
+              : ''}
             {m.clockHandshakeMs !== null ? `, handshake ${m.clockHandshakeMs.toFixed(2)} ms` : ''}
             {m.driftPpm !== 0
               ? `, drift ${m.driftPpm > 0 ? '+' : ''}${String(m.driftPpm)} ppm corrected`

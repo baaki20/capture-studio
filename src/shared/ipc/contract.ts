@@ -756,6 +756,8 @@ export const EngineStreamResultSchema = EngineStreamStatsSchema.extend({
   firstTimestampUs: z.number().optional(),
   /** `RecordedStream.startOffsetUs`: µs since t0 of the file's first sample. */
   startOffsetUs: z.int().optional(),
+  /** Camera: capture latency already subtracted from `startOffsetUs` (`camera-latency.ts`). */
+  captureLatencyUs: z.int().nonnegative().optional(),
   /** The calibrator's full decision (for `logs/recording.json`). */
   sync: EngineStreamSyncSchema.optional(),
   /** `RecordedStream.sync` (the subset of `sync` the manifest stores). */

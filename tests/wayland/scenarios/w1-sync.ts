@@ -7,6 +7,7 @@
  */
 import { analyzeExport, analyzeProject } from '../../sync/analysis';
 import {
+  cameraDetailChecks,
   cameraMicCheck,
   check,
   droppedChecks,
@@ -102,6 +103,8 @@ export const w1: Scenario = {
       const report = analyzeProject(stopped.root, { clapWindow: [clapFrom - 0.5, clapTo + 0.5] });
       out.checks.push(...syncChecks(report, { label: 'start', limitMs: 40 }));
       out.checks.push(cameraMicCheck(report));
+      const camera = project.doc?.media.find((m) => m.role === 'camera');
+      out.checks.push(...cameraDetailChecks(report, camera?.sync?.captureLatencyUs ?? null));
       if (report.clap) {
         out.checks.push(
           info(

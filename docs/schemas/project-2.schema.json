@@ -412,6 +412,12 @@
                 "type": "integer",
                 "minimum": -9007199254740991,
                 "maximum": 9007199254740991
+              },
+              "captureLatencyUs": {
+                "description": "Camera capture latency subtracted from startOffsetUs (frames are stamped on delivery)",
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
               }
             },
             "required": [

@@ -286,6 +286,51 @@ export function syncChecks(
   return out;
 }
 
+/**
+ * What stands behind the camera ↔ mic figure. The camera sees the flash on the panel, while the
+ * screen recording takes the frame from the compositor before scan-out, so camera ↔ screen (and
+ * the flash camera ↔ mic) include the display's own latency, which the recording never has.
+ * Claps are a physical event both see directly; when both methods ran, flash − clap estimates
+ * that display latency.
+ */
+export function cameraDetailChecks(
+  report: ProjectSyncReport,
+  captureLatencyUs: number | null,
+): Check[] {
+  const out: Check[] = [
+    info(
+      'R1.24',
+      'camera capture latency applied',
+      captureLatencyUs === null ? 'none recorded' : ms(captureLatencyUs / 1000, 1),
+      'project.json camera sync.captureLatencyUs',
+    ),
+  ];
+  const camera = report.offsets.camera?.summary;
+  if (camera) {
+    out.push(
+      info(
+        'R1.24',
+        'camera ↔ screen (flash)',
+        ms(camera.medianMs, 1),
+        `${String(camera.pairs)} pairs, p10 ${ms(camera.p10Ms, 1)}, p90 ${ms(camera.p90Ms, 1)}; includes the display's latency`,
+      ),
+    );
+  }
+  const mic = (report.offsets.microphone ?? report.offsets.mic)?.summary;
+  const clap = report.clap?.summary;
+  if (camera && mic && clap) {
+    out.push(
+      info(
+        'R1.24',
+        'flash − clap camera ↔ mic (≈ display latency)',
+        ms(camera.medianMs - mic.medianMs - clap.medianMs, 1),
+        `clap ${ms(clap.medianMs, 1)} over ${String(clap.pairs)} pairs`,
+      ),
+    );
+  }
+  return out;
+}
+
 export function cameraMicCheck(report: ProjectSyncReport): Check {
   const cm = report.cameraMic;
   if (cm.method === 'none' || cm.medianMs === null) {
@@ -301,6 +346,6 @@ export function cameraMicCheck(report: ProjectSyncReport): Check {
     Math.abs(cm.medianMs) <= 60,
     ms(cm.medianMs, 1),
     '≤ 60 ms',
-    `${String(cm.pairs)} pairs${cm.method === 'clap' ? '; claps are accurate to about one camera frame' : ''}`,
+    `${String(cm.pairs)} pairs${cm.method === 'clap' ? '; claps are accurate to about a third of a frame on synthetic claps' : ''}`,
   );
 }

@@ -60,6 +60,8 @@ export const StreamSyncSchema = z.object({
   clockHandshakeUs: z.int().nullable(),
   /** System audio: sink output latency included in `startOffsetUs`, for logs. */
   outputLatencyUs: z.int().optional(),
+  /** Camera: capture latency subtracted from `startOffsetUs`, for logs. */
+  captureLatencyUs: z.int().optional(),
 });
 
 const RecordedRole = z.enum(['screen', 'camera', 'microphone', 'system-audio']);
@@ -265,6 +267,7 @@ export function mediaSync(sync: StreamSync): MediaSync {
     offsetUs: sync.offsetUs,
     ...(sync.clockHandshakeUs === null ? {} : { clockHandshakeUs: sync.clockHandshakeUs }),
     ...(sync.outputLatencyUs === undefined ? {} : { outputLatencyUs: sync.outputLatencyUs }),
+    ...(sync.captureLatencyUs === undefined ? {} : { captureLatencyUs: sync.captureLatencyUs }),
   };
 }
 

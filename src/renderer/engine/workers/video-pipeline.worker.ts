@@ -81,7 +81,8 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
         this.counters.framesDropped += 1;
         return;
       }
-      const sessionUs = this.stamper.toSession(frame.timestamp, arrivalUs);
+      const sessionUs =
+        this.stamper.toSession(frame.timestamp, arrivalUs) - this.video.captureLatencyUs;
       if (this.pauses.isPaused(sessionUs)) {
         this.counters.framesPaused += 1;
         // Not encoded, but a still screen after the resume repeats what is on it now.

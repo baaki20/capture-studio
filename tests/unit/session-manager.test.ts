@@ -289,6 +289,7 @@ class FakeEngine implements EngineLike {
               discontinuities: 0,
               queueDepth: 0,
               startOffsetUs: 41_200,
+              captureLatencyUs: 38_100,
               calibration: { mode: 'shared', offsetUs: 123_456 },
             },
             {
@@ -535,6 +536,9 @@ describe('session manager', () => {
     expect(screen!.stats).toEqual({ framesEncoded: 297, framesDropped: 3 });
     expect(screen!.encoder).toEqual({ name: 'H.264 (software)', hardware: false });
     expect(camera!.device).toEqual({ label: 'HD Webcam' });
+    // The engine already moved the camera earlier by its capture latency; the project records it.
+    expect(camera!.startOffsetUs).toBe(41_200);
+    expect(camera!.sync).toEqual({ mode: 'shared', offsetUs: 123_456, captureLatencyUs: 38_100 });
     expect(mic!.clockRatio).toBeCloseTo(1.00005, 6);
     expect(mic!.audio?.syncCheckpointsPath).toBe('media/mic.sync.json');
     expect(mic!.audio?.discontinuities).toBe(1);

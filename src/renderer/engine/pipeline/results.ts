@@ -71,11 +71,15 @@ export function missingResult(
   };
 }
 
-/** The `engine.stop` entry: unknown fields are omitted (see `EngineStreamResultSchema`). */
+/**
+ * The `engine.stop` entry: unknown fields are omitted (see `EngineStreamResultSchema`). A
+ * camera's `captureLatencyUs` moves its file earlier (`camera-latency.ts`).
+ */
 export function streamResult(
   result: WorkerResult,
   sync: StreamSync | null,
   t0Us: Us,
+  captureLatencyUs: number | null = null,
 ): EngineStreamResult {
   const entry: EngineStreamResult = {
     ...result.stats,
@@ -102,6 +106,10 @@ export function streamResult(
     };
     if (result.firstTimestampUs !== null) {
       entry.startOffsetUs = startOffsetUs(result.firstTimestampUs, sync.offsetUs, t0Us);
+      if (captureLatencyUs !== null) {
+        entry.startOffsetUs -= captureLatencyUs;
+        entry.captureLatencyUs = captureLatencyUs;
+      }
     }
   }
   if (result.video) {

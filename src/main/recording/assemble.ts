@@ -155,6 +155,8 @@ export const EngineStreamReportSchema = z.looseObject({
   bytes: z.number().optional(),
   /** Session time (µs since t0) of the stream's first sample. */
   startOffsetUs: z.number().optional(),
+  /** Camera: capture latency already subtracted from `startOffsetUs`. */
+  captureLatencyUs: z.number().nonnegative().optional(),
   calibration: CalibrationReportSchema.optional(),
   /** The calibrator's reason and warm-up stats (kept in `logs/recording.json` for diagnosis). */
   sync: z.looseObject({ reason: z.string() }).optional(),
@@ -201,6 +203,7 @@ export const StreamLogSchema = z.object({
     offsetUs: z.int(),
     clockHandshakeUs: z.int().nullable(),
     outputLatencyUs: z.int().optional(),
+    captureLatencyUs: z.int().optional(),
   }),
   /** Why the calibrator chose the mode, with its warm-up stats. */
   calibrationDetail: z.looseObject({ reason: z.string() }).optional(),

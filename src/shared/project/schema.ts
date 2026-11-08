@@ -115,6 +115,9 @@ export const MediaSyncSchema = z.object({
   outputLatencyUs: Us.optional().describe(
     'Sink output latency added to system audio (the monitor runs ahead of the speakers)',
   ),
+  captureLatencyUs: Us.optional().describe(
+    'Camera capture latency subtracted from startOffsetUs (frames are stamped on delivery)',
+  ),
 });
 
 export const MediaSchema = z.object({

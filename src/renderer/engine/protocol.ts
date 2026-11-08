@@ -42,6 +42,8 @@ export interface VideoInit extends InitBase {
   sourceHeight: number;
   /** Crop at record time (P2): only this rect of the source, in source pixels, is encoded. */
   crop: NRect | null;
+  /** Camera: capture latency (`camera-latency.ts`), so pauses cut where the picture was seen; 0 otherwise. */
+  captureLatencyUs: number;
 }
 
 export interface AudioInit extends InitBase {

@@ -320,6 +320,8 @@ export interface SyncMediaInfo {
   mode: string | null;
   /** System audio: the sink output latency added at recording time, ms. */
   outputLatencyMs: number | null;
+  /** Camera: the capture latency subtracted at recording time, ms. */
+  captureLatencyMs: number | null;
   /** Cross-process clock handshake applied, ms. */
   clockHandshakeMs: number | null;
   /** Drift correction: deviation of `clockRatio` from 1 in ppm. */
@@ -363,6 +365,8 @@ export function syncComponents(doc: Project): ComponentSync[] {
           mode: m.sync?.mode ?? null,
           outputLatencyMs:
             m.sync?.outputLatencyUs === undefined ? null : m.sync.outputLatencyUs / 1_000,
+          captureLatencyMs:
+            m.sync?.captureLatencyUs === undefined ? null : m.sync.captureLatencyUs / 1_000,
           clockHandshakeMs:
             m.sync?.clockHandshakeUs === undefined ? null : m.sync.clockHandshakeUs / 1_000,
           driftPpm: Math.round((m.clockRatio - 1) * 1e6 * 10) / 10,

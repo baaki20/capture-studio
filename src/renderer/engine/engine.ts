@@ -19,6 +19,7 @@
  * `engine.trackEnded`; main decides (screen → graceful stop, R1.15; camera/mic → that component
  * ends, R1.16). Its worker finalizes its own file at that point.
  */
+import { cameraCaptureLatencyUs } from '../../shared/recording/camera-latency';
 import {
   EnginePortsSchema,
   type EngineClock,
@@ -121,6 +122,8 @@ interface StreamRun {
   resolveResult: (result: WorkerResult) => void;
   done: Promise<WorkerResult>;
   encoder: { name: string; hardware: boolean };
+  /** Camera: moves `startOffsetUs` earlier (`camera-latency.ts`); null for other streams. */
+  captureLatencyUs: number | null;
 }
 
 interface Session {
@@ -553,6 +556,7 @@ export class CaptureEngine {
       }
       const selected = encoders.get(p.streamId);
       if (!selected) continue;
+      const captureLatencyUs = p.track.kind === 'camera' ? cameraLatency(p.track) : null;
       const init: WorkerInit = {
         type: 'init',
         media: 'video',
@@ -571,8 +575,11 @@ export class CaptureEngine {
           p.track.kind === 'screen' && payload.cropToRegion && payload.region
             ? payload.region
             : null,
+        captureLatencyUs: captureLatencyUs ?? 0,
       };
       this.launch(session, init, selected.encoder);
+      const run = session.runs.get(p.streamId);
+      if (run) run.captureLatencyUs = captureLatencyUs;
       streams.push({
         kind: p.track.kind,
         streamId: p.streamId,
@@ -615,6 +622,7 @@ export class CaptureEngine {
       resolveResult,
       done,
       encoder,
+      captureLatencyUs: null,
     };
     session.runs.set(init.streamId, run);
     worker.onmessage = (event: MessageEvent<WorkerToEngine>) => {
@@ -751,7 +759,12 @@ export class CaptureEngine {
     if (resolved.error) console.warn(`engine: calibration failed: ${resolved.error}`);
 
     const streams = results.map((result) =>
-      streamResult(result, resolved.byStream.get(result.streamId) ?? null, session.t0Us),
+      streamResult(
+        result,
+        resolved.byStream.get(result.streamId) ?? null,
+        session.t0Us,
+        session.runs.get(result.streamId)?.captureLatencyUs ?? null,
+      ),
     );
     if (payload.reason !== 'restart') this.release();
     return {
@@ -832,6 +845,19 @@ function trackInfo(track: AcquiredTrack): TrackInfo {
       ? { frameRate: track.deliveredFps }
       : {}),
   };
+}
+
+/** The camera's capture latency from its delivered rate and reported exposure. */
+function cameraLatency(track: VideoTrack): number {
+  const settings = track.track.getSettings() as MediaTrackSettings & { exposureTime?: number };
+  const latency = cameraCaptureLatencyUs({
+    frameRate: track.deliveredFps ?? track.fps,
+    exposureTime: settings.exposureTime ?? null,
+  });
+  console.info(
+    `engine: camera capture latency ${(latency / 1000).toFixed(1)} ms (${(track.deliveredFps ?? track.fps).toFixed(1)} fps, exposure ${settings.exposureTime === undefined ? 'unknown' : `${(settings.exposureTime / 10).toFixed(1)} ms`})`,
+  );
+  return latency;
 }
 
 function closePorts(ports: DeliveredPorts): void {

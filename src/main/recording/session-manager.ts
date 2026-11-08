@@ -235,6 +235,8 @@ interface StreamState {
     clockHandshakeUs: number | null;
     /** System audio: sink output latency added to `startOffsetUs`. */
     outputLatencyUs?: number;
+    /** Camera: capture latency subtracted from `startOffsetUs` (by the engine). */
+    captureLatencyUs?: number;
   };
   startOffsetUs: number | null;
   endedEarly: boolean;
@@ -1080,6 +1082,9 @@ export class SessionManager {
           report.calibration.clockHandshakeUs == null
             ? stream.sync.clockHandshakeUs
             : Math.round(report.calibration.clockHandshakeUs),
+        ...(report.captureLatencyUs === undefined
+          ? {}
+          : { captureLatencyUs: Math.round(report.captureLatencyUs) }),
       };
       if (JSON.stringify(next) !== JSON.stringify(stream.sync)) {
         stream.sync = next;

@@ -225,6 +225,17 @@ describe('stream results', () => {
     expect(streamResult(worker, sync, 7_500_000)).not.toHaveProperty('captureCheckpoints');
   });
 
+  it('moves a camera earlier by its capture latency and reports it', () => {
+    const camera = { ...worker, kind: 'camera' as const, streamId: 'str_cam' };
+    const entry = streamResult(camera, sync, 7_500_000, 41_000);
+    expect(entry.startOffsetUs).toBe(500_000 - 41_000);
+    expect(entry.captureLatencyUs).toBe(41_000);
+    expect(ENGINE_COMMANDS['engine.stop'].response.safeParse({ streams: [entry] }).success).toBe(
+      true,
+    );
+    expect(streamResult(camera, sync, 7_500_000)).not.toHaveProperty('captureLatencyUs');
+  });
+
   it('omits what is unknown instead of sending nulls', () => {
     const entry = streamResult(missingResult('str_s', 'screen', null, 5), null, 0);
     expect(entry).toMatchObject({ status: 'failed', endedAtUs: 5, endedEarly: false });

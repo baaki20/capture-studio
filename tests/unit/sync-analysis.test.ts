@@ -64,6 +64,17 @@ describe('visualClapNear', () => {
     expect(visualClapNear({ times, values }, 1.0)).toBeCloseTo(30 * frame, 6);
   });
 
+  it('places a contact inside a frame from how much that frame still moved', () => {
+    // The hands met 60 % into interval 30 (between frames 29 and 30): it holds 60 % of the motion.
+    const partial = times.map((_, i) => (i > 15 && i < 30 ? 8 : i === 30 ? 0.1 + 0.6 * 7.9 : 0.1));
+    expect(visualClapNear({ times, values: partial }, 1.0)).toBeCloseTo(29.6 * frame, 6);
+  });
+
+  it('ignores a slowdown that does not stop', () => {
+    const slowing = times.map((_, i) => (i > 15 && i <= 30 ? 8 : i > 30 && i < 40 ? 5 : 0.1));
+    expect(visualClapNear({ times, values: slowing }, 1.0)).not.toBeCloseTo(30 * frame, 3);
+  });
+
   it('returns null without a clear stop nearby', () => {
     expect(visualClapNear({ times, values }, 1.6)).toBeNull();
     expect(visualClapNear({ times, values: times.map(() => 1) }, 1.0)).toBeNull();
