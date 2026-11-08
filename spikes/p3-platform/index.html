@@ -1,0 +1,41 @@
+<!doctype html><meta charset="utf-8"><script>
+const grab = async (track) => {
+  const r = new MediaStreamTrackProcessor({ track }).readable.getReader();
+  let f = null;
+  for (let i = 0; i < 5; i++) { const { value } = await r.read(); f?.close(); f = value; }
+  return f;
+};
+async function magentaShare(id) {
+  const s = await navigator.mediaDevices.getUserMedia({ video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxWidth: 3840, maxHeight: 2160 } } });
+  const t = s.getVideoTracks()[0]; const f = await grab(t);
+  const c = new OffscreenCanvas(f.displayWidth, f.displayHeight); const g = c.getContext('2d'); g.drawImage(f, 0, 0); f.close(); t.stop();
+  const d = g.getImageData(0, 0, c.width, c.height).data; let n = 0;
+  for (let i = 0; i < d.length; i += 16) if (d[i] > 230 && d[i + 1] < 30 && d[i + 2] > 230) n++;
+  return { magentaFraction: +(n / (d.length / 16)).toFixed(4) };
+}
+async function loopbackLevel() {
+  const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  const a = s.getAudioTracks()[0];
+  if (!a) { s.getTracks().forEach((t) => t.stop()); return { audioTrack: false }; }
+  const r = new MediaStreamTrackProcessor({ track: a }).readable.getReader();
+  let sum = 0, n = 0, rate = 0, ch = 0; const until = performance.now() + 1500;
+  while (performance.now() < until) {
+    const { value } = await r.read(); rate = value.sampleRate; ch = value.numberOfChannels;
+    const buf = new Float32Array(value.numberOfFrames); value.copyTo(buf, { planeIndex: 0, format: 'f32-planar' }); value.close();
+    for (const x of buf) { sum += x * x; n++; }
+  }
+  s.getTracks().forEach((t) => t.stop());
+  return { audioTrack: true, sampleRate: rate, channels: ch, rmsDbfs: +(10 * Math.log10(sum / Math.max(n, 1) + 1e-12)).toFixed(1) };
+}
+async function cursorFrames() {
+  const frames = {}; let settings = null;
+  for (const cursor of ['always', 'never']) {
+    const s = await navigator.mediaDevices.getDisplayMedia({ video: { cursor }, audio: false });
+    const t = s.getVideoTracks()[0]; settings = settings ?? {}; settings[cursor] = t.getSettings().cursor ?? null;
+    const f = await grab(t); const c = new OffscreenCanvas(f.displayWidth, f.displayHeight); c.getContext('2d').drawImage(f, 0, 0); f.close(); t.stop();
+    const blob = await c.convertToBlob({ type: 'image/png' });
+    frames[cursor] = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+  }
+  return { frames, settings };
+}
+</script>
