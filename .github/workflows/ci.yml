@@ -66,14 +66,12 @@ jobs:
 
   # Phase 3: unit tests on Windows and macOS, and integration tests on Windows (real FFmpeg).
   # macOS integration tests wait for a pinned macOS FFmpeg (scripts/build-ffmpeg-macos.sh).
-  # Not blocking until these jobs have been green once: Linux-only assumptions surface here.
   desktop:
     strategy:
       fail-fast: false
       matrix:
         runner: [windows-2025, macos-15]
     runs-on: ${{ matrix.runner }}
-    continue-on-error: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
