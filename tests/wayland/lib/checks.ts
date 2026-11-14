@@ -331,21 +331,34 @@ export function cameraDetailChecks(
   return out;
 }
 
+/**
+ * The R1.24 camera ↔ mic verdict, from the screen flashes the camera saw. Claps only inform:
+ * on real hands the detector picked impossible instants (2026-11-14: −281 to −34 ms per clap),
+ * so a clap-only result is reported but decides nothing.
+ */
 export function cameraMicCheck(report: ProjectSyncReport): Check {
   const cm = report.cameraMic;
-  if (cm.method === 'none' || cm.medianMs === null) {
-    return errorCheck(
+  if (cm.method === 'flash' && cm.medianMs !== null) {
+    return check(
       'R1.24',
-      'camera ↔ mic',
-      'the camera saw no flashes and no claps were paired (aim the camera at the screen or a mirror, or clap in view)',
+      'camera ↔ mic (flash)',
+      Math.abs(cm.medianMs) <= 60,
+      ms(cm.medianMs, 1),
+      '≤ 60 ms',
+      `${String(cm.pairs)} pairs; includes the display's own latency`,
     );
   }
-  return check(
+  if (cm.method === 'clap' && cm.medianMs !== null) {
+    return info(
+      'R1.24',
+      'camera ↔ mic (claps only, not a verdict)',
+      ms(cm.medianMs, 1),
+      `${String(cm.pairs)} pairs; the camera saw too few flashes (aim it at the screen or a mirror)`,
+    );
+  }
+  return errorCheck(
     'R1.24',
-    `camera ↔ mic (${cm.method})`,
-    Math.abs(cm.medianMs) <= 60,
-    ms(cm.medianMs, 1),
-    '≤ 60 ms',
-    `${String(cm.pairs)} pairs${cm.method === 'clap' ? '; claps are accurate to about a third of a frame on synthetic claps' : ''}`,
+    'camera ↔ mic',
+    'the camera saw too few flashes (aim it at the screen or a mirror, keep its shutter open and a light on)',
   );
 }
