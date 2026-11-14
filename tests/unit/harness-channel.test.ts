@@ -10,6 +10,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FreeSpaceOverride, HarnessChannel } from '../../src/main/diagnostics/harness-channel';
 import { ChannelClient } from '../wayland/lib/channel-client';
+import { namedPipes, testSocketPath } from '../fixtures/socket-path';
 
 let dir: string;
 let channel: HarnessChannel;
@@ -17,7 +18,7 @@ let socketPath: string;
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cs-harness-'));
-  socketPath = path.join(dir, 'control.sock');
+  socketPath = testSocketPath(dir, 'control.sock');
   channel = new HarnessChannel({
     socketPath,
     handlers: {
@@ -50,7 +51,7 @@ describe('harness channel', () => {
       await expect(client.call('nothing')).resolves.toBeNull();
       await expect(client.call('boom')).rejects.toThrow('it broke');
       await expect(client.call('toString')).rejects.toThrow('unknown command');
-      expect((await fs.stat(socketPath)).mode & 0o777).toBe(0o600);
+      if (!namedPipes) expect((await fs.stat(socketPath)).mode & 0o777).toBe(0o600);
     } finally {
       client.close();
     }

@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { buildCsp } from '../../src/shared/security/csp';
 
@@ -43,17 +44,16 @@ describe('security baseline (§1.3)', () => {
     expect(isAppUrl('http://localhost:5174/', dev)).toBe(false);
     expect(isAppUrl('https://evil.example/', dev)).toBe(false);
 
-    const prod = { rendererDir: '/opt/Capture Studio/resources/app.asar/out/renderer' };
-    expect(
-      isAppUrl(
-        'file:///opt/Capture%20Studio/resources/app.asar/out/renderer/shell/index.html',
-        prod,
-      ),
-    ).toBe(true);
-    expect(
-      isAppUrl('file:///opt/Capture%20Studio/resources/app.asar/out/renderer-evil/x.html', prod),
-    ).toBe(false);
-    expect(isAppUrl('file:///etc/passwd', prod)).toBe(false);
+    // Built from paths so they hold on Windows too (drive letters, backslashes).
+    const resources = path.resolve('/opt/Capture Studio/resources/app.asar/out');
+    const prod = { rendererDir: path.join(resources, 'renderer') };
+    const url = (...parts: string[]) => pathToFileURL(path.join(resources, ...parts)).href;
+    expect(url('renderer', 'shell', 'index.html')).toContain('Capture%20Studio');
+    expect(isAppUrl(url('renderer', 'shell', 'index.html'), prod)).toBe(true);
+    expect(isAppUrl(url('renderer-evil', 'x.html'), prod)).toBe(false);
+    expect(isAppUrl(url('renderer', '..', 'main', 'x.html'), prod)).toBe(false);
+    expect(isAppUrl(pathToFileURL(path.resolve('/etc/passwd')).href, prod)).toBe(false);
+    expect(isAppUrl('file://evil.example/share/renderer/x.html', prod)).toBe(false);
   });
 
   it('production CSP allows only self-hosted code', () => {

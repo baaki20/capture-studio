@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { automationSocketPath, registerAutomation } from '../../src/main/ipc/automation-handlers';
 import { silentLogger } from '../../src/shared/logger';
 import { createDefaultSettings, type Settings } from '../../src/shared/settings/schema';
+import { automationPipeName } from '../../src/shared/automation/protocol';
 
 let dir: string;
 
@@ -89,7 +90,11 @@ describe('registerAutomation', () => {
   it('listens only while automation is on', async () => {
     const { handle, flip } = setup(false);
     const socketPath = automationSocketPath(dir);
-    expect(socketPath).toBe(path.join(dir, 'automation', 'automation.sock'));
+    expect(socketPath).toBe(
+      process.platform === 'win32'
+        ? automationPipeName(dir)
+        : path.join(dir, 'automation', 'automation.sock'),
+    );
     await vi.waitFor(() => expect(handle.listening).toBe(false));
     expect(await canConnect(socketPath)).toBe(false);
 

@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
 import { IpcRouter, type IpcMainLike, type IpcSenderEvent } from '../../src/main/ipc/router';
@@ -15,8 +17,12 @@ const { allowMediaCapture, isMediaCaptureAllowed } =
 
 type Listener = (event: IpcSenderEvent, ...args: unknown[]) => unknown;
 
-const RENDERER = { rendererDir: '/app/out/renderer', preloadDir: '/app/out/preload' };
-const ENGINE_URL = 'file:///app/out/renderer/engine/index.html';
+// Built from paths so they hold on Windows too (drive letters, backslashes).
+const RENDERER = {
+  rendererDir: path.resolve('/app/out/renderer'),
+  preloadDir: path.resolve('/app/out/preload'),
+};
+const ENGINE_URL = pathToFileURL(path.join(RENDERER.rendererDir, 'engine', 'index.html')).href;
 
 function harness() {
   const listeners = new Map<string, Listener>();

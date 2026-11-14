@@ -18,6 +18,7 @@ import { automationSocketPath } from '../../src/mcp/socket-path';
 import { toUs } from '../../src/mcp/units';
 import { fakeApp } from '../fixtures/automation-app';
 import { recordedProject } from '../fixtures/editor-project';
+import { testSocketPath } from '../fixtures/socket-path';
 
 let dir: string;
 let server: AutomationServer | null = null;
@@ -33,7 +34,7 @@ afterEach(async () => {
 });
 
 async function serve(handlers: AutomationHandlers): Promise<string> {
-  const socketPath = path.join(dir, 'automation', 'automation.sock');
+  const socketPath = testSocketPath(dir, 'automation', 'automation.sock');
   server = new AutomationServer({ socketPath, handlers });
   await server.start();
   return socketPath;
@@ -73,7 +74,7 @@ describe('AppClient', () => {
   });
 
   it('explains how to turn automation on when nothing listens, and reconnects later', async () => {
-    const socketPath = path.join(dir, 'automation', 'automation.sock');
+    const socketPath = testSocketPath(dir, 'automation', 'automation.sock');
     const client = new AppClient({ socketPath });
     await expect(client.call('projects.list', {})).rejects.toMatchObject({
       code: 'app-unavailable',

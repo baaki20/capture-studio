@@ -16,6 +16,7 @@ import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
+import { isNamedPipe } from '../../shared/automation/protocol';
 
 export const HARNESS_SOCKET_ENV = 'CS_HARNESS_SOCKET';
 
@@ -46,7 +47,8 @@ export class HarnessChannel {
 
   async start(): Promise<void> {
     const { socketPath } = this.options;
-    await fs.rm(socketPath, { force: true });
+    const pipe = isNamedPipe(socketPath);
+    if (!pipe) await fs.rm(socketPath, { force: true });
     const server = net.createServer((socket) => this.accept(socket));
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
@@ -55,7 +57,7 @@ export class HarnessChannel {
         resolve();
       });
     });
-    await fs.chmod(socketPath, 0o600);
+    if (!pipe) await fs.chmod(socketPath, 0o600);
     this.server = server;
     this.logger.info(`harness: control channel on ${socketPath}`);
   }
@@ -72,7 +74,8 @@ export class HarnessChannel {
     const server = this.server;
     this.server = null;
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
-    await fs.rm(this.options.socketPath, { force: true }).catch(() => undefined);
+    if (!isNamedPipe(this.options.socketPath))
+      await fs.rm(this.options.socketPath, { force: true }).catch(() => undefined);
   }
 
   private accept(socket: net.Socket): void {

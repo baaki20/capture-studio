@@ -83,14 +83,18 @@ describe('inspectMediaFile', () => {
     });
   });
 
-  it.skipIf(process.getuid?.() === 0)('reports a file without read permission', async () => {
-    const file = await write('locked.mp4', mp4());
-    await fs.chmod(file, 0o000);
-    expect(await inspectMediaFile(file)).toEqual({
-      state: 'unreadable',
-      reason: 'permission denied',
-    });
-  });
+  // chmod cannot take read access away on Windows; root reads anything.
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'reports a file without read permission',
+    async () => {
+      const file = await write('locked.mp4', mp4());
+      await fs.chmod(file, 0o000);
+      expect(await inspectMediaFile(file)).toEqual({
+        state: 'unreadable',
+        reason: 'permission denied',
+      });
+    },
+  );
 
   it('caches by size and modification time', async () => {
     const cache = new MediaHealthCache();

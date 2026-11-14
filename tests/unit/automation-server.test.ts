@@ -12,6 +12,7 @@ import {
   AutomationServer,
   type AutomationHandlers,
 } from '../../src/main/automation/automation-server';
+import { namedPipes, testSocketPath } from '../fixtures/socket-path';
 
 let dir: string;
 let server: AutomationServer | null = null;
@@ -47,7 +48,7 @@ function handlers(overrides: Partial<AutomationHandlers> = {}): AutomationHandle
 }
 
 async function start(overrides: Partial<AutomationHandlers> = {}, maxLineBytes?: number) {
-  const socketPath = path.join(dir, 'automation', 'automation.sock');
+  const socketPath = testSocketPath(dir, 'automation', 'automation.sock');
   server = new AutomationServer({
     socketPath,
     handlers: handlers(overrides),
@@ -86,13 +87,16 @@ async function exchange(socketPath: string, lines: string[]): Promise<unknown[]>
 }
 
 describe('AutomationServer', () => {
-  it('creates a private folder and a 0600 socket, and removes it on stop', async () => {
-    const socketPath = await start();
-    expect((await fs.stat(path.dirname(socketPath))).mode & 0o777).toBe(0o700);
-    expect((await fs.stat(socketPath)).mode & 0o777).toBe(0o600);
-    await server?.stop();
-    await expect(fs.stat(socketPath)).rejects.toThrow();
-  });
+  it.skipIf(namedPipes)(
+    'creates a private folder and a 0600 socket, and removes it on stop',
+    async () => {
+      const socketPath = await start();
+      expect((await fs.stat(path.dirname(socketPath))).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(socketPath)).mode & 0o777).toBe(0o600);
+      await server?.stop();
+      await expect(fs.stat(socketPath)).rejects.toThrow();
+    },
+  );
 
   it('answers listed methods and refuses everything else with a code', async () => {
     const socketPath = await start();

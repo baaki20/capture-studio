@@ -3,7 +3,8 @@
  * navigation away from the app, no new windows, no webviews, no permission grants by default,
  * and external links only for `https:` and `mailto:`.
  */
-import { pathToFileURL } from 'node:url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { app, session, shell, type WebContents, type WebPreferences } from 'electron';
 import type { Logger } from '../../shared/logger';
 
@@ -52,8 +53,17 @@ export function isAppUrl(
     return parsed.origin === new URL(appOrigins.devServerUrl).origin;
   }
   if (parsed.protocol !== 'file:') return false;
-  const rendererPath = pathToFileURL(appOrigins.rendererDir).pathname.replace(/\/?$/, '/');
-  return parsed.pathname.startsWith(rendererPath);
+  let file: string;
+  try {
+    file = fileURLToPath(parsed);
+  } catch {
+    return false; // for example a file URL with a host
+  }
+  const root = path.resolve(appOrigins.rendererDir) + path.sep;
+  // Windows paths ignore case (drive letters and folders may be spelled either way).
+  return process.platform === 'win32'
+    ? file.toLowerCase().startsWith(root.toLowerCase())
+    : file.startsWith(root);
 }
 
 function guardWebContents(

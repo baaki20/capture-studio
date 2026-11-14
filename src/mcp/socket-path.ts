@@ -21,13 +21,16 @@ export function defaultUserDataDir(
   platform: NodeJS.Platform = process.platform,
   home: string = os.homedir(),
 ): string {
-  if (platform === 'darwin') return path.join(home, 'Library', 'Application Support', APP_FOLDER);
+  if (platform === 'darwin')
+    return path.posix.join(home, 'Library', 'Application Support', APP_FOLDER);
   if (platform === 'win32') {
     const appData = env.APPDATA?.trim() ? env.APPDATA : path.win32.join(home, 'AppData', 'Roaming');
     return path.win32.join(appData, APP_FOLDER);
   }
-  const config = env.XDG_CONFIG_HOME?.trim() ? env.XDG_CONFIG_HOME : path.join(home, '.config');
-  return path.join(config, APP_FOLDER);
+  const config = env.XDG_CONFIG_HOME?.trim()
+    ? env.XDG_CONFIG_HOME
+    : path.posix.join(home, '.config');
+  return path.posix.join(config, APP_FOLDER);
 }
 
 export function automationSocketPath(
@@ -38,7 +41,7 @@ export function automationSocketPath(
   const explicit = env[SOCKET_ENV]?.trim();
   if (explicit) return explicit;
   if (platform === 'win32') return automationPipeName(defaultUserDataDir(env, platform, home));
-  return path.join(
+  return path.posix.join(
     defaultUserDataDir(env, platform, home),
     AUTOMATION_DIR_NAME,
     AUTOMATION_SOCKET_NAME,

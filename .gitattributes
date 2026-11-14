@@ -1,0 +1,9 @@
+# LF everywhere, also in Windows checkouts: generated files (schemas, icons) and configs are
+# compared byte for byte by tests, and the app writes LF.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.mp4 binary
+*.wav binary
+*.zip binary

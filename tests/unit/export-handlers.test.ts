@@ -28,6 +28,9 @@ import {
 } from '../../src/main/ipc/export-handlers';
 import { recordedProject } from '../fixtures/editor-project';
 
+/** A fake absolute path in this OS's form (a drive letter and backslashes on Windows). */
+const native = (posix: string) => path.resolve(posix);
+
 const OPTIONS: ExportOptions = {
   resolution: 'canvas',
   fps: 'project',
@@ -85,9 +88,12 @@ function setup(overrides: Partial<ExportHandlerDeps> = {}) {
     findRoot: (id) => Promise.resolve(id === doc.id ? '/projects/Lesson.cstudio' : null),
     readProject: () => Promise.resolve(doc),
     settings: () =>
-      createDefaultSettings({ projectsDir: '/videos/CS', exportsDir: '/videos/CS/Exports' }),
+      createDefaultSettings({
+        projectsDir: native('/videos/CS'),
+        exportsDir: native('/videos/CS/Exports'),
+      }),
     probeEncoders: () => Promise.resolve(report),
-    showSaveDialog: vi.fn(() => Promise.resolve<string | null>('/elsewhere/Chosen')),
+    showSaveDialog: vi.fn(() => Promise.resolve<string | null>(native('/elsewhere/Chosen'))),
     showItemInFolder: vi.fn(),
     openPath: vi.fn(() => Promise.resolve('')),
     logger: silentLogger,
@@ -119,14 +125,14 @@ describe('export handlers', () => {
   it('targets <exportsDir>/<project name>.mp4 by default', async () => {
     const { doc, call } = setup();
     expect(await call('export.target', { projectId: doc.id })).toEqual({
-      path: '/videos/CS/Exports/Lesson test.mp4',
+      path: native('/videos/CS/Exports/Lesson test.mp4'),
       exists: false,
     });
   });
 
   it('asks before replacing an existing file (R1.47)', async () => {
     const { doc, call, files, jobs } = setup();
-    files.add('/videos/CS/Exports/Lesson test.mp4');
+    files.add(native('/videos/CS/Exports/Lesson test.mp4'));
     const first = await call('export.start', { projectId: doc.id, options: OPTIONS });
     expect(first).toMatchObject({ jobId: null, status: 'exists' });
     expect(jobs).toHaveLength(0);
@@ -141,15 +147,15 @@ describe('export handlers', () => {
 
   it('uses the save dialog choice, adds .mp4, and trusts its overwrite confirmation', async () => {
     const { doc, call, files, jobs, deps } = setup({
-      showSaveDialog: vi.fn(() => Promise.resolve<string | null>('/elsewhere/Talk.mp4')),
+      showSaveDialog: vi.fn(() => Promise.resolve<string | null>(native('/elsewhere/Talk.mp4'))),
     });
-    files.add('/elsewhere/Talk.mp4');
+    files.add(native('/elsewhere/Talk.mp4'));
     expect(await call('export.chooseOutput', { projectId: doc.id })).toEqual({
-      path: '/elsewhere/Talk.mp4',
+      path: native('/elsewhere/Talk.mp4'),
       exists: true,
     });
     expect(deps.showSaveDialog).toHaveBeenCalledWith({
-      defaultPath: '/videos/CS/Exports/Lesson test.mp4',
+      defaultPath: native('/videos/CS/Exports/Lesson test.mp4'),
       senderId: 7,
       kind: 'export',
     });
@@ -157,29 +163,29 @@ describe('export handlers', () => {
       projectId: doc.id,
       options: OPTIONS,
     });
-    expect(started).toMatchObject({ status: 'started', path: '/elsewhere/Talk.mp4' });
-    expect(jobs[0]?.job).toMatchObject({ output: '/elsewhere/Talk.mp4', overwrite: true });
+    expect(started).toMatchObject({ status: 'started', path: native('/elsewhere/Talk.mp4') });
+    expect(jobs[0]?.job).toMatchObject({ output: native('/elsewhere/Talk.mp4'), overwrite: true });
     expect(withMp4Extension('/a/b')).toBe('/a/b.mp4');
     expect(withMp4Extension('/a/b.MP4')).toBe('/a/b.MP4');
   });
 
   it('writes each format with its own extension and asks again for a new file (R2.24)', async () => {
     const { doc, call, files, jobs, deps } = setup({
-      showSaveDialog: vi.fn(() => Promise.resolve<string | null>('/elsewhere/Talk.mp4')),
+      showSaveDialog: vi.fn(() => Promise.resolve<string | null>(native('/elsewhere/Talk.mp4'))),
     });
-    files.add('/elsewhere/Talk.mp4');
+    files.add(native('/elsewhere/Talk.mp4'));
     await call('export.chooseOutput', { projectId: doc.id, format: 'gif' });
     expect(deps.showSaveDialog).toHaveBeenCalledWith(
-      expect.objectContaining({ defaultPath: '/videos/CS/Exports/Lesson test.gif' }),
+      expect.objectContaining({ defaultPath: native('/videos/CS/Exports/Lesson test.gif') }),
     );
     const gif = await call<{ status: string; path: string }>('export.start', {
       projectId: doc.id,
       options: { ...OPTIONS, format: 'gif' },
     });
     // The dialog confirmed replacing Talk.mp4, not Talk.gif.
-    expect(gif).toMatchObject({ status: 'started', path: '/elsewhere/Talk.gif' });
-    expect(jobs[0]?.job).toMatchObject({ output: '/elsewhere/Talk.gif', overwrite: false });
-    files.add('/elsewhere/Talk.mp3');
+    expect(gif).toMatchObject({ status: 'started', path: native('/elsewhere/Talk.gif') });
+    expect(jobs[0]?.job).toMatchObject({ output: native('/elsewhere/Talk.gif'), overwrite: false });
+    files.add(native('/elsewhere/Talk.mp3'));
     const mp3 = await call<{ status: string }>('export.start', {
       projectId: doc.id,
       options: { ...OPTIONS, format: 'mp3' },
@@ -200,7 +206,7 @@ describe('export handlers', () => {
       });
       expect(saved).toEqual({ path: path.join(dir, 'Still.png') });
       expect(deps.showSaveDialog).toHaveBeenCalledWith({
-        defaultPath: '/videos/CS/Exports/Lesson test frame.png',
+        defaultPath: native('/videos/CS/Exports/Lesson test frame.png'),
         senderId: 7,
         kind: 'frame',
       });
@@ -236,7 +242,7 @@ describe('export handlers', () => {
     const { doc, call } = setup({ showSaveDialog: () => Promise.resolve(null) });
     expect(await call('export.chooseOutput', { projectId: doc.id })).toBeNull();
     expect(await call('export.target', { projectId: doc.id })).toMatchObject({
-      path: '/videos/CS/Exports/Lesson test.mp4',
+      path: native('/videos/CS/Exports/Lesson test.mp4'),
     });
   });
 
@@ -254,7 +260,10 @@ describe('export handlers', () => {
       overwrite: true,
     });
     // Same target while the first runs: blocked.
-    expect(again).toMatchObject({ status: 'blocked', path: '/videos/CS/Exports/Edited.mp4' });
+    expect(again).toMatchObject({
+      status: 'blocked',
+      path: native('/videos/CS/Exports/Edited.mp4'),
+    });
     expect(jobs).toHaveLength(1);
   });
 
@@ -306,7 +315,7 @@ describe('export handlers', () => {
       payload: { jobId, fraction: 0.25, etaSec: 30 },
     });
     job?.result.resolve({
-      output: '/videos/CS/Exports/Lesson test.mp4',
+      output: native('/videos/CS/Exports/Lesson test.mp4'),
       encoder: 'libx264',
       fallback: { from: 'h264_vaapi', reason: 'boom' },
       durationUs: 1,
@@ -324,9 +333,11 @@ describe('export handlers', () => {
       },
     });
     await call('export.reveal', { jobId });
-    expect(deps.showItemInFolder).toHaveBeenCalledWith('/videos/CS/Exports/Lesson test.mp4');
+    expect(deps.showItemInFolder).toHaveBeenCalledWith(
+      native('/videos/CS/Exports/Lesson test.mp4'),
+    );
     await call('export.open', { jobId });
-    expect(deps.openPath).toHaveBeenCalledWith('/videos/CS/Exports/Lesson test.mp4');
+    expect(deps.openPath).toHaveBeenCalledWith(native('/videos/CS/Exports/Lesson test.mp4'));
   });
 
   it('tells job listeners what the editor hears (automation)', async () => {
@@ -339,7 +350,7 @@ describe('export handlers', () => {
     });
     jobs[0]?.options.onProgress?.(0.5);
     jobs[0]?.result.resolve({
-      output: '/videos/CS/Exports/Lesson test.mp4',
+      output: native('/videos/CS/Exports/Lesson test.mp4'),
       encoder: 'libx264',
       fallback: null,
       durationUs: 1,
@@ -352,7 +363,7 @@ describe('export handlers', () => {
       {
         type: 'done',
         jobId,
-        outputPath: '/videos/CS/Exports/Lesson test.mp4',
+        outputPath: native('/videos/CS/Exports/Lesson test.mp4'),
         encoder: 'libx264',
         notice: null,
       },
@@ -500,7 +511,8 @@ describe('export temp files (R1.47)', () => {
     const keep = [
       'Lesson test.mp4', // a finished export
       '.Lesson test.mp4.part', // no token
-      '.Lesson test.mp4.0123ABCD.part', // not our token shape
+      // Not our token shape (another token: macOS file names ignore case).
+      '.Lesson test.mp4.4567CDEF.part',
       exportTempName('Other.mp4', '89abcdef'), // another export's temp file
       'notes.part',
     ].map((name) => path.join(dir, name));
@@ -509,7 +521,7 @@ describe('export temp files (R1.47)', () => {
   }
 
   const withExportsDir = (dir: string): Partial<ExportHandlerDeps> => ({
-    settings: () => createDefaultSettings({ projectsDir: '/videos/CS', exportsDir: dir }),
+    settings: () => createDefaultSettings({ projectsDir: native('/videos/CS'), exportsDir: dir }),
   });
 
   it('deletes the temp output when the utility dies mid-export', async () => {

@@ -246,6 +246,11 @@ export async function makeProxy(options: {
       '-map',
       '0:v:0',
       '-an',
+      // One output frame per source frame at the source's own time: the default frame-rate
+      // mode may drop a frame (seen on a loaded CI runner), and the preview would then show
+      // the neighbour.
+      '-fps_mode',
+      'passthrough',
       '-vf',
       `scale=-2:${String(PROXY_HEIGHT)}`,
       '-c:v',

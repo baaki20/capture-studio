@@ -54,7 +54,8 @@ describe('CacheJobs', () => {
       media('mic', 'audio'),
       media('system', 'audio'),
     ]);
-    await vi.waitFor(() => expect(started).toEqual(['mic.peaks', 'system.peaks']));
+    // Both peaks jobs start together (each first creates cache/, so either may be first).
+    await vi.waitFor(() => expect([...started].sort()).toEqual(['mic.peaks', 'system.peaks']));
     // The editor asks for the screen thumbnails meanwhile: queued ahead, not duplicated.
     const editor = caches.ensure({ projectId: 'prj', root, media: media('screen', 'video') }, 0);
     expect(caches.isPending('prj', 'screen', 'thumbs')).toBe(true);
