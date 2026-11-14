@@ -98,6 +98,9 @@ sed -i '' '/lame_init_old/d' "$WORK/lame-3.100/include/libmp3lame.sym"
 
 echo "== FFmpeg $FFMPEG_VERSION"
 checkout ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_COMMIT" "$FFMPEG_COMMIT"
+# A shallow checkout has no tags, so FFmpeg would call itself by its short hash; its version
+# script prefers a VERSION file, which keeps the name the Linux and Windows builds report.
+echo "$FFMPEG_VERSION" >"$WORK/ffmpeg/VERSION"
 # x265 is C++: its static library needs the C++ runtime at link time. Auto-detection is off:
 # on Intel runners Homebrew sits in /usr/local, where it would pick up liblzma, libX11 and more;
 # only system libraries are enabled by name.
@@ -137,7 +140,7 @@ encoders=$("$STAGE/bin/ffmpeg" -hide_banner -encoders)
 for e in libx264 libx265 libvpx-vp9 libsvtav1 libopus libmp3lame h264_videotoolbox; do
   grep -qw -- "$e" <<<"$encoders" || { echo "encoder $e is missing" >&2; exit 1; }
 done
-"$STAGE/bin/ffmpeg" -hide_banner -version | head -1
+"$STAGE/bin/ffmpeg" -hide_banner -version | head -1 | grep -F "ffmpeg version $FFMPEG_VERSION "
 
 tar -C "$WORK/stage" -cJf "$OUT/$ROOT.tar.xz" "$ROOT"
 (cd "$OUT" && shasum -a 256 "$ROOT.tar.xz" >"$ROOT.tar.xz.sha256" && cat "$ROOT.tar.xz.sha256")
