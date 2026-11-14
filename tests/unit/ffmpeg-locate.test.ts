@@ -15,9 +15,9 @@ describe('ffmpeg/locate', () => {
     });
     expect(loc).toEqual({
       platformKey: 'linux-x64',
-      dir: path.join('/src/capture-studio', 'resources', 'bin', 'linux-x64'),
-      ffmpeg: path.join('/src/capture-studio', 'resources', 'bin', 'linux-x64', 'ffmpeg'),
-      ffprobe: path.join('/src/capture-studio', 'resources', 'bin', 'linux-x64', 'ffprobe'),
+      dir: path.posix.join('/src/capture-studio', 'resources', 'bin', 'linux-x64'),
+      ffmpeg: path.posix.join('/src/capture-studio', 'resources', 'bin', 'linux-x64', 'ffmpeg'),
+      ffprobe: path.posix.join('/src/capture-studio', 'resources', 'bin', 'linux-x64', 'ffprobe'),
     });
   });
 
@@ -45,7 +45,7 @@ describe('ffmpeg/locate', () => {
     };
     expect(resolveFfmpegPaths({ ...base, isPackaged: false }).dir).toBe('/custom');
     expect(resolveFfmpegPaths({ ...base, isPackaged: true }).dir).toBe(
-      path.join('/r', 'bin', 'linux-x64'),
+      path.posix.join('/r', 'bin', 'linux-x64'),
     );
   });
 

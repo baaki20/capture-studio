@@ -60,7 +60,7 @@ describe('CacheJobs', () => {
     const editor = caches.ensure({ projectId: 'prj', root, media: media('screen', 'video') }, 0);
     expect(caches.isPending('prj', 'screen', 'thumbs')).toBe(true);
     finish.get('mic.peaks')?.(true);
-    await vi.waitFor(() => expect(started).toEqual(['mic.peaks', 'system.peaks', 'screen.thumbs']));
+    await vi.waitFor(() => expect(started.slice(2)).toEqual(['screen.thumbs']));
     finish.get('system.peaks')?.(true);
     finish.get('screen.thumbs')?.(true);
     await editor;

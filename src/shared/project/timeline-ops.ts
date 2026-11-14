@@ -1805,6 +1805,18 @@ function freezeDraft(draft: Project, op: OpOf<'freezeFrame'>, ctx: Ctx): void {
       fail('track-locked', 'a clip here is linked to a clip on a locked track');
     }
   }
+  // Clips from `at` on move by the freeze's length; a partner on a locked track cannot follow.
+  const lockedLinks = new Set(
+    draft.timeline.tracks
+      .filter((t) => t.locked)
+      .flatMap((t) => t.clips.map((c) => c.linkId).filter((id) => id !== null)),
+  );
+  for (const track of draft.timeline.tracks) {
+    if (track.locked) continue;
+    if (track.clips.some((c) => c.timelineStartUs >= at && c.linkId && lockedLinks.has(c.linkId))) {
+      fail('track-locked', 'a clip after this point is linked to a clip on a locked track');
+    }
+  }
   for (const track of draft.timeline.tracks) {
     if (track.locked) continue;
     const moved = plain(track.clips).map((c) =>

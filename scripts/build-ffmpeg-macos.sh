@@ -98,9 +98,12 @@ sed -i '' '/lame_init_old/d' "$WORK/lame-3.100/include/libmp3lame.sym"
 
 echo "== FFmpeg $FFMPEG_VERSION"
 checkout ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_COMMIT" "$FFMPEG_COMMIT"
-# x265 is C++: its static library needs the C++ runtime at link time.
+# x265 is C++: its static library needs the C++ runtime at link time. Auto-detection is off:
+# on Intel runners Homebrew sits in /usr/local, where it would pick up liblzma, libX11 and more;
+# only system libraries are enabled by name.
 (cd "$WORK/ffmpeg" && ./configure --prefix="$PREFIX" --pkg-config-flags=--static \
   --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --extra-libs=-lc++ \
+  --disable-autodetect --enable-zlib --enable-bzlib --enable-iconv \
   --enable-gpl --enable-version3 --enable-static --disable-shared --disable-ffplay \
   --disable-doc --disable-debug --enable-libx264 --enable-libx265 --enable-libvpx \
   --enable-libsvtav1 --enable-libopus --enable-libmp3lame --enable-videotoolbox \

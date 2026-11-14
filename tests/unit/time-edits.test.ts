@@ -112,6 +112,30 @@ describe('setSpeed', () => {
 });
 
 describe('freezeFrame', () => {
+  it('refuses, cleanly, to move a clip whose linked partner is on a locked track', () => {
+    // Found by the clip-time fuzz test (seed -496552963): freezing at the start of the face
+    // clip moved it while its voice partner stayed on the locked Voice track.
+    const base = project();
+    const voice = trackByName(base, 'Voice');
+    const doc: Project = {
+      ...base,
+      timeline: {
+        ...base.timeline,
+        tracks: base.timeline.tracks.map((t) => (t.id === voice.id ? { ...t, locked: true } : t)),
+      },
+    };
+    for (const atUs of [0, 3 * S]) {
+      const result = applyOp(
+        doc,
+        { type: 'freezeFrame', atUs, durationUs: S },
+        {
+          generateId: counterIds('L'),
+        },
+      );
+      expect(result.ok ? null : result.error.code).toBe('track-locked');
+    }
+  });
+
   it('holds every video track and opens a silent gap in the audio', () => {
     const doc = run(
       project(),
