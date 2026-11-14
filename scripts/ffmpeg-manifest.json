@@ -1,31 +1,31 @@
 {
-  "$comment": "Pinned FFmpeg builds (spec §1.10). Every archive and every extracted file is SHA-256 verified by scripts/fetch-ffmpeg.ts. Keys are <process.platform>-<process.arch>. BtbN prunes old daily releases, so add a mirror URL (for example our own release asset) before the pinned tag disappears.",
+  "$comment": "Pinned FFmpeg builds (spec \u00a71.10). Every archive and every extracted file is SHA-256 verified by scripts/fetch-ffmpeg.ts. Keys are <process.platform>-<process.arch>. BtbN prunes old daily releases but keeps the month-end ones, so pins use a month-end release; add a mirror URL (for example our own release asset) as well.",
   "schemaVersion": 1,
   "builds": {
     "linux-x64": {
       "provider": "BtbN/FFmpeg-Builds",
-      "release": "autobuild-2026-10-23-13-04",
-      "version": "n9.0.2-35-g9a9b70bb8c",
+      "release": "autobuild-2026-10-31-12-59",
+      "version": "n9.0.2-39-g7adfbe40dc",
       "variant": "gpl",
       "license": "GPL-3.0-or-later",
       "archive": {
-        "fileName": "ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0.tar.xz",
+        "fileName": "ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0.tar.xz",
         "format": "tar.xz",
         "urls": [
-          "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-23-13-04/ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0.tar.xz"
+          "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0.tar.xz"
         ],
-        "sha256": "143e31ca53d65d95bde12cc861e331fd2275e48a6ca988e62c46e8f5b77b9811",
-        "root": "ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0"
+        "sha256": "73e29a56974ae5a651133a04584c7483b21afe941e17dc91d79814a758b608d3",
+        "root": "ffmpeg-n9.0.2-39-g7adfbe40dc-linux64-gpl-9.0"
       },
       "files": {
         "ffmpeg": {
           "from": "bin/ffmpeg",
-          "sha256": "efe9247b244a0d9633374fa339a9f28d8b896a0c2c87fbc9e208b1510054e663",
+          "sha256": "384742b75419584d065bbf372613f9f7e8ccf22525b421c16a2ee679a78ee748",
           "executable": true
         },
         "ffprobe": {
           "from": "bin/ffprobe",
-          "sha256": "e5ddfa261e9c79edaed7121ed8e1c807950f0c5e5888221c5ea8506d587b4301",
+          "sha256": "ae9051af68f52e7ad5706b442577689c74c02da618ca1590caf1ac7199f2931c",
           "executable": true
         },
         "LICENSE.txt": {
@@ -36,9 +36,48 @@
       },
       "source": {
         "ffmpegRepository": "https://git.ffmpeg.org/ffmpeg.git",
-        "ffmpegRevision": "9a9b70bb8c",
+        "ffmpegRevision": "7adfbe40dc",
         "ffmpegBranch": "release/9.0",
-        "buildScripts": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-10-23-13-04"
+        "buildScripts": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-10-31-12-59"
+      }
+    },
+    "win32-x64": {
+      "provider": "BtbN/FFmpeg-Builds",
+      "release": "autobuild-2026-10-31-12-59",
+      "version": "n9.0.2-39-g7adfbe40dc",
+      "variant": "gpl",
+      "license": "GPL-3.0-or-later",
+      "archive": {
+        "fileName": "ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip",
+        "format": "zip",
+        "urls": [
+          "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip"
+        ],
+        "sha256": "693f3e224bc184b40524a62ca47526cfebaf2504414021b92fe75f677ad868b9",
+        "root": "ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0"
+      },
+      "files": {
+        "ffmpeg.exe": {
+          "from": "bin/ffmpeg.exe",
+          "sha256": "c930b63cb1ee8b7e2eaf9c15161160edd5c9acad34f0303b5855c8eb142a7e8d",
+          "executable": true
+        },
+        "ffprobe.exe": {
+          "from": "bin/ffprobe.exe",
+          "sha256": "075848c1bbb8b4e2e0b0ecba06e8ad06c889a8902ed219d6a9f5758c417ca108",
+          "executable": true
+        },
+        "LICENSE.txt": {
+          "from": "LICENSE.txt",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "executable": false
+        }
+      },
+      "source": {
+        "ffmpegRepository": "https://git.ffmpeg.org/ffmpeg.git",
+        "ffmpegRevision": "7adfbe40dc",
+        "ffmpegBranch": "release/9.0",
+        "buildScripts": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-10-31-12-59"
       }
     }
   }

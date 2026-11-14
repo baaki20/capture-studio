@@ -1,0 +1,37 @@
+name: FFmpeg for macOS
+
+# Builds the macOS FFmpeg (scripts/build-ffmpeg-macos.sh, Phase 3 plan D6) on both
+# architectures and keeps the archives as workflow artifacts. They are pinned in
+# scripts/ffmpeg-manifest.json only after someone publishes them as release assets.
+on:
+  push:
+    paths:
+      - scripts/build-ffmpeg-macos.sh
+      - .github/workflows/ffmpeg-macos.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build tools
+        run: brew install cmake nasm pkg-config
+
+      - name: Build FFmpeg
+        run: scripts/build-ffmpeg-macos.sh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-macos-${{ matrix.runner }}
+          path: out/
+          retention-days: 30

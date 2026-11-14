@@ -9,7 +9,8 @@
  *
  * The archive's SHA-256 must match the manifest before anything is extracted, and every
  * extracted file must match its own pinned SHA-256. Archives are cached in .cache/ffmpeg/.
- * Extraction uses the system `tar` (GNU tar on Linux, bsdtar on macOS and Windows 10+).
+ * Extraction uses the system `tar` (GNU tar on Linux, bsdtar on macOS and Windows 10+), and
+ * `unzip` for zip archives on Linux (packaging Windows builds there).
  */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -156,8 +157,14 @@ async function installBuild(
   const extractDir = await fs.mkdtemp(path.join(CACHE_DIR, `extract-${key}-`));
   try {
     log(`${key}: extracting`);
-    const tar = spawnSync('tar', ['-xf', archivePath, '-C', extractDir], { stdio: 'inherit' });
-    if (tar.status !== 0) throw new Error(`tar failed with exit code ${String(tar.status)}`);
+    // GNU tar (Linux) cannot read zip archives; bsdtar (macOS, Windows 10+) reads both.
+    const [tool, args] =
+      build.archive.format === 'zip' && process.platform === 'linux'
+        ? ['unzip', ['-q', archivePath, '-d', extractDir]]
+        : ['tar', ['-xf', archivePath, '-C', extractDir]];
+    const extract = spawnSync(tool, args, { stdio: 'inherit' });
+    if (extract.status !== 0)
+      throw new Error(`${tool} failed with exit code ${String(extract.status)}`);
 
     const stagingDir = `${targetDir}.staging`;
     await fs.rm(stagingDir, { recursive: true, force: true });
