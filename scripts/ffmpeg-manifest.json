@@ -12,6 +12,7 @@
         "fileName": "ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0.tar.xz",
         "format": "tar.xz",
         "urls": [
+          "https://github.com/baaki20/capture-studio/releases/download/ffmpeg-n9.0.2-35-g9a9b70bb8c/ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0.tar.xz",
           "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-23-13-04/ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0.tar.xz"
         ],
         "sha256": "143e31ca53d65d95bde12cc861e331fd2275e48a6ca988e62c46e8f5b77b9811",
