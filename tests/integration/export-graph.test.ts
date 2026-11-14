@@ -71,6 +71,7 @@ function graph(
   return {
     ...built,
     args: built.args.map(posix),
+    inputs: built.inputs.map((i) => ({ ...i, path: posix(i.path) })),
     masks: built.masks.map((m) => ({ ...m, path: posix(m.path) })),
   };
 }

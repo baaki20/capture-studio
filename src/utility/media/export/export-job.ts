@@ -44,7 +44,7 @@ import {
 import type { PeaksOf } from '../../../shared/project/audio-gain';
 import { parsePeaks } from '../../../shared/project/peaks';
 import { cleanAudio } from '../audio-clean';
-import { spawnChild } from '../child-processes';
+import { killAllChildren, spawnChild } from '../child-processes';
 import { generatePeaks } from '../peaks';
 import {
   buildExportGraph,
@@ -55,6 +55,7 @@ import {
 } from './graph-builder';
 import { writeMaskPng } from './mask-png';
 import { retryTransientFsErrors } from '../../../shared/fs-retry';
+import { isTransientFsError, TRANSIENT_RETRY_DELAYS_MS } from '../../../shared/fs-retry';
 
 export type ExportJobResult = JobResult<'export'>;
 
@@ -111,19 +112,32 @@ export function tempOutputPath(output: string, token: string): string {
 const activeTemps = new Set<string>();
 let exitHookInstalled = false;
 
+/** Blocks the thread for `ms` (exit hooks cannot await). */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 /**
- * Deletes the temp outputs (and work folders) of running exports, synchronously. Runs on process exit: the utility
- * exits on app quit (`process.exit` after `shutdown`) without waiting for the cancelled export's
- * own cleanup. FFmpeg may still hold the file open; unlinking it is enough.
+ * Deletes the temp outputs (and work folders) of running exports, synchronously. Runs on process
+ * exit: the utility exits on app quit (`process.exit` after `shutdown`) without waiting for the
+ * cancelled export's own cleanup. On Linux and macOS unlinking a file FFmpeg still has open is
+ * enough. Windows refuses to delete an open file, so there FFmpeg is killed first and the delete
+ * retried for about 1.5 s while the process lets go of its handles.
  */
-export function removeActiveExportTempsSync(): string[] {
+export function removeActiveExportTempsSync(platform: string = process.platform): string[] {
+  if (platform === 'win32' && activeTemps.size > 0) killAllChildren();
   const removed: string[] = [];
   for (const file of activeTemps) {
-    try {
-      rmSync(file, { recursive: true, force: true });
-      removed.push(file);
-    } catch {
-      // Best effort: main sweeps leftovers.
+    for (const delay of [0, ...(platform === 'win32' ? TRANSIENT_RETRY_DELAYS_MS : [])]) {
+      if (delay > 0) sleepSync(delay);
+      try {
+        rmSync(file, { recursive: true, force: true });
+        removed.push(file);
+        break;
+      } catch (error) {
+        // Best effort: main sweeps leftovers at the next start.
+        if (!isTransientFsError(error)) break;
+      }
     }
   }
   activeTemps.clear();
