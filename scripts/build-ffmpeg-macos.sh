@@ -102,7 +102,7 @@ checkout ffmpeg https://github.com/FFmpeg/FFmpeg.git "$FFMPEG_COMMIT" "$FFMPEG_C
 # on Intel runners Homebrew sits in /usr/local, where it would pick up liblzma, libX11 and more;
 # only system libraries are enabled by name.
 (cd "$WORK/ffmpeg" && ./configure --prefix="$PREFIX" --pkg-config-flags=--static \
-  --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --extra-libs=-lc++ \
+  --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --extra-libs="-lc++ -liconv" \
   --disable-autodetect --enable-zlib --enable-bzlib --enable-iconv \
   --enable-gpl --enable-version3 --enable-static --disable-shared --disable-ffplay \
   --disable-doc --disable-debug --enable-libx264 --enable-libx265 --enable-libvpx \

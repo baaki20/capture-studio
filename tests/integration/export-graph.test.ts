@@ -52,7 +52,7 @@ function graph(
   video: 'graph' | 'pipe' = 'graph',
 ): ExportGraph {
   const settings = resolveExportSettings(doc, { ...STANDARD, ...options }, hardware);
-  return unwrap(
+  const built = unwrap(
     buildExportGraph({
       doc,
       projectRoot: '/projects/Lesson.cstudio',
@@ -65,6 +65,14 @@ function graph(
       video,
     }),
   );
+  // The builder joins paths natively; the goldens are written with '/' (Windows uses '\\').
+  if (path.sep === '/') return built;
+  const posix = (p: string) => p.replaceAll(path.sep, '/');
+  return {
+    ...built,
+    args: built.args.map(posix),
+    masks: built.masks.map((m) => ({ ...m, path: posix(m.path) })),
+  };
 }
 
 function golden(g: ExportGraph): string {
