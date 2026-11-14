@@ -33,8 +33,10 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-async function serve(handlers: AutomationHandlers): Promise<string> {
-  const socketPath = testSocketPath(dir, 'automation', 'automation.sock');
+async function serve(
+  handlers: AutomationHandlers,
+  socketPath = testSocketPath(dir, 'automation', 'automation.sock'),
+): Promise<string> {
   server = new AutomationServer({ socketPath, handlers });
   await server.start();
   return socketPath;
@@ -81,7 +83,7 @@ describe('AppClient', () => {
       message: expect.stringContaining('Settings → Assistants') as unknown,
     });
     const { service } = fakeApp(recordedProject());
-    await serve(service.handlers);
+    await serve(service.handlers, socketPath);
     expect((await client.call('projects.list', {})).projects).toHaveLength(1);
     await server?.stop();
     await expect(client.call('projects.list', {})).rejects.toMatchObject({

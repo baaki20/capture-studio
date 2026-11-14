@@ -246,9 +246,8 @@ export async function makeProxy(options: {
       '-map',
       '0:v:0',
       '-an',
-      // One output frame per source frame at the source's own time: the default frame-rate
-      // mode may drop a frame (seen on a loaded CI runner), and the preview would then show
-      // the neighbour.
+      // One output frame per source frame at the source's own time, never resampled to a
+      // constant rate (the preview maps the proxy's timestamps onto the original's).
       '-fps_mode',
       'passthrough',
       '-vf',

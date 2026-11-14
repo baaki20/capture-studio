@@ -29,10 +29,9 @@ describe('ffmpeg/locate', () => {
       platform: 'win32',
       arch: 'x64',
     });
-    expect(loc.dir).toBe(
-      path.join('C:\\Program Files\\Capture Studio\\resources', 'bin', 'win32-x64'),
-    );
-    expect(loc.ffmpeg.endsWith('ffmpeg.exe')).toBe(true);
+    // Windows separators whatever OS the test runs on.
+    expect(loc.dir).toBe('C:\\Program Files\\Capture Studio\\resources\\bin\\win32-x64');
+    expect(loc.ffmpeg).toBe(`${loc.dir}\\ffmpeg.exe`);
     expect(ffmpegPlatformKey('darwin', 'arm64')).toBe('darwin-arm64');
   });
 

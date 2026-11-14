@@ -26,11 +26,9 @@ afterEach(async () => {
 
 /** Runs Python with `script`, passing `args` (no shell). */
 function python(script: string, ...args: string[]): string {
-  // UTF-8 output whatever the console code page (Windows defaults to a legacy one).
-  return execFileSync('python3', ['-I', '-c', script, ...args], {
-    encoding: 'utf8',
-    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-  });
+  // `-X utf8`: UTF-8 output whatever the console code page (Windows defaults to a legacy one);
+  // `-I` ignores PYTHONIOENCODING.
+  return execFileSync('python3', ['-I', '-X', 'utf8', '-c', script, ...args], { encoding: 'utf8' });
 }
 
 async function makeProject(): Promise<string> {

@@ -36,7 +36,7 @@ function harness() {
   const router = new IpcRouter({
     ipcMain,
     logger,
-    isAppUrl: (url) => url.startsWith('file:///app/out/renderer/'),
+    isAppUrl: (url) => url.startsWith(pathToFileURL(RENDERER.rendererDir).href + '/'),
   });
   const windows: FakeWindow[] = [];
   const host = new EngineHost({

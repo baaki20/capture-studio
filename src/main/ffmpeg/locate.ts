@@ -38,18 +38,20 @@ export function resolveFfmpegPaths(options: LocateFfmpegOptions): FfmpegLocation
   const platform = options.platform ?? process.platform;
   const arch = options.arch ?? process.arch;
   const platformKey = ffmpegPlatformKey(platform, arch);
+  // Paths in the target platform's form (tests resolve other platforms' layouts).
+  const p = platform === 'win32' ? path.win32 : path.posix;
   const override = options.isPackaged ? undefined : options.env?.CS_FFMPEG_DIR;
   const dir =
     override ??
     (options.isPackaged
-      ? path.join(options.resourcesPath, 'bin', platformKey)
-      : path.join(options.appPath, 'resources', 'bin', platformKey));
+      ? p.join(options.resourcesPath, 'bin', platformKey)
+      : p.join(options.appPath, 'resources', 'bin', platformKey));
   const exe = platform === 'win32' ? '.exe' : '';
   return {
     platformKey,
     dir,
-    ffmpeg: path.join(dir, `ffmpeg${exe}`),
-    ffprobe: path.join(dir, `ffprobe${exe}`),
+    ffmpeg: p.join(dir, `ffmpeg${exe}`),
+    ffprobe: p.join(dir, `ffprobe${exe}`),
   };
 }
 

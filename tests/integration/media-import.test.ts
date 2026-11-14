@@ -151,8 +151,6 @@ describe('makeProxy', () => {
           'frame=pts_time',
           '-of',
           'csv=p=0',
-          '-read_intervals',
-          '%+#5',
           file,
         ],
         { encoding: 'utf8' },

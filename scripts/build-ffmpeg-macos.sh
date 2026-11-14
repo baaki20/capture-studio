@@ -39,7 +39,11 @@ trap 'rm -rf "$WORK"' EXIT
 # Fetches a tag or branch (not every host serves a bare commit) and insists on the pinned commit.
 checkout() { # <name> <repository> <ref> <commit>
   git init -q "$WORK/$1"
-  git -C "$WORK/$1" fetch -q --depth 1 "$2" "$3"
+  # Tags are fetched as tags: x265 installs x265.pc only when `git describe` finds its version.
+  case "$3" in
+  refs/tags/*) git -C "$WORK/$1" fetch -q --depth 1 "$2" "+$3:$3" ;;
+  *) git -C "$WORK/$1" fetch -q --depth 1 "$2" "$3" ;;
+  esac
   git -C "$WORK/$1" checkout -q FETCH_HEAD
   local got
   got=$(git -C "$WORK/$1" rev-parse HEAD)
