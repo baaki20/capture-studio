@@ -307,6 +307,13 @@ export class SessionManager {
   private durationTimer: ReturnType<typeof setInterval> | null = null;
   /** The in-flight start, awaited by anything that must not overtake it. */
   private starting: Promise<void> | null = null;
+  /**
+   * True from countdown → recording until `engine.start` answered. The state is already
+   * `recording` inside (actions wait on `starting`, engine events count as capturing), but it is
+   * not announced: a start the engine refuses (no hardware encoder) goes countdown → failed for
+   * the UI instead of flashing "recording" first.
+   */
+  private engineStarting = false;
   private finishing: Promise<void> | null = null;
   private readonly logger: Logger;
   private readonly offUtility: () => void;
@@ -791,15 +798,18 @@ export class SessionManager {
   }
 
   private emitState(failureReason: string | null = null): void {
+    if (this.engineStarting) return;
     this.deps.events.state(this.statePayload(failureReason));
   }
 
   private statePayload(failureReason: string | null): EventPayload<'rec.state'> {
+    const state = this.engineStarting ? 'countdown' : this.stateValue;
     return {
-      state: this.stateValue,
+      state,
       sessionId: this.session?.sessionId ?? null,
-      elapsedUs: this.elapsedUs(),
-      countdownRemainingSec: this.stateValue === 'countdown' ? this.countdownRemaining : null,
+      elapsedUs: this.engineStarting ? 0 : this.elapsedUs(),
+      countdownRemainingSec:
+        state === 'countdown' ? (this.engineStarting ? 0 : this.countdownRemaining) : null,
       failureReason: failureReason ?? (this.stateValue === 'failed' ? this.lastFailure : null),
       limitUs: this.session
         ? this.recorderOption(this.session, 'durationLimitSec') * 1e6 || null
@@ -944,14 +954,18 @@ export class SessionManager {
   private async beginRecording(): Promise<boolean> {
     const session = this.session;
     if (!session || this.stateValue !== 'countdown') return false;
+    this.engineStarting = true;
     this.fire({ type: 'countdown-elapsed' });
     const task = this.startCapture(session);
     this.starting = task;
     try {
       await task;
+      this.engineStarting = false;
+      this.emitState();
       return true;
     } catch (error) {
       this.logger.error('recording: start failed', error);
+      this.engineStarting = false;
       this.starting = null;
       await this.failAndSettle(`Recording could not start: ${message(error)}`);
       return false;
