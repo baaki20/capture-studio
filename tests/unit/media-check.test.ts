@@ -8,6 +8,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { checkMediaPresence } from '../../src/main/projects/editor-media';
 import { inspectMediaFile, MediaHealthCache } from '../../src/main/projects/media-check';
+import { serializeCursorTrack } from '../../src/shared/project/cursor-track';
 import { exampleProject } from '../fixtures/example-project';
 
 let dir: string;
@@ -53,6 +54,11 @@ describe('inspectMediaFile', () => {
     expect(await inspectMediaFile(await write('x.webm', webm))).toEqual({ state: 'ok' });
     const wav = Buffer.from('RIFF\0\0\0\0WAVEfmt ', 'latin1');
     expect(await inspectMediaFile(await write('x.wav', wav))).toEqual({ state: 'ok' });
+    const cursor = serializeCursorTrack({ sampleRateHz: 120, width: 64, height: 64 }, []);
+    expect(await inspectMediaFile(await write('cursor.jsonl', cursor))).toEqual({ state: 'ok' });
+    expect(await inspectMediaFile(await write('other.jsonl', '{"format":"x"}\n'))).toMatchObject({
+      state: 'unreadable',
+    });
   });
 
   it('reports missing, empty, truncated, garbage and stream-less files', async () => {

@@ -191,32 +191,35 @@ describe('parseProject', () => {
   it('loads a current project read-write', () => {
     const result = parseProject(JSON.parse(JSON.stringify(exampleProject())));
     expect(result.ok && result.readOnly).toBe(false);
-    expect(result.ok && result.fileFormatVersion).toBe(2);
+    expect(result.ok && result.fileFormatVersion).toBe(3);
   });
 
-  it('migrates a v1 project to v2 without changing anything else', () => {
-    const v1 = { ...(JSON.parse(JSON.stringify(exampleProject())) as Project), formatVersion: 1 };
-    const result = parseProject(v1);
+  it.each([1, 2])('migrates a v%i project to v3 without changing anything else', (version) => {
+    const old = {
+      ...(JSON.parse(JSON.stringify(exampleProject())) as Project),
+      formatVersion: version,
+    };
+    const result = parseProject(old);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.readOnly).toBe(false);
-    expect(result.fileFormatVersion).toBe(1);
-    expect(result.migrationsApplied).toHaveLength(1);
+    expect(result.fileFormatVersion).toBe(version);
+    expect(result.migrationsApplied).toHaveLength(3 - version);
     expect(result.project).toEqual(exampleProject());
   });
 
   it('opens a newer major version read-only when it still validates (R1.30)', () => {
-    const doc = { ...exampleProject(), formatVersion: 3, extensions: { future: { x: 1 } } };
+    const doc = { ...exampleProject(), formatVersion: 4, extensions: { future: { x: 1 } } };
     const result = parseProject(doc);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.readOnly).toBe(true);
-    expect(result.fileFormatVersion).toBe(3);
+    expect(result.fileFormatVersion).toBe(4);
     expect(result.project.extensions).toEqual({ future: { x: 1 } });
   });
 
   it('reports a newer, incompatible project', () => {
-    const doc = { ...exampleProject(), formatVersion: 4, timeline: 'v4 timeline' };
+    const doc = { ...exampleProject(), formatVersion: 5, timeline: 'v5 timeline' };
     const result = parseProject(doc);
     expect(!result.ok && result.reason).toBe('newer-incompatible');
   });
@@ -238,9 +241,9 @@ describe('parseProject', () => {
 });
 
 describe('generated JSON Schema', () => {
-  it('docs/schemas/project-2.schema.json is up to date (run `npm run gen:schema`)', () => {
+  it('docs/schemas/project-3.schema.json is up to date (run `npm run gen:schema`)', () => {
     const committed = readFileSync(
-      path.join(import.meta.dirname, '../../docs/schemas/project-2.schema.json'),
+      path.join(import.meta.dirname, '../../docs/schemas/project-3.schema.json'),
       'utf8',
     );
     expect(committed).toBe(projectJsonSchemaText());

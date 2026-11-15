@@ -11,11 +11,13 @@
  *   `moov` holding at least one `trak` and media data (`mdat`, or `moof` fragments) that is not
  *   empty.
  * - **WebM/Matroska, WAV, Ogg** (possible relink choices): recognised by their signature.
+ * - **Cursor tracks** (v3, `cursor.jsonl`): recognised by their header line's format name.
  *
  * Results are cached by path, size, modification time and inode, so reopening a project costs one
  * `stat` per media.
  */
 import { constants, promises as fs, type Stats } from 'node:fs';
+import { CURSOR_FILE_FORMAT } from '../../shared/project/cursor-track';
 
 export type MediaHealth =
   { state: 'ok' } | { state: 'missing' } | { state: 'unreadable'; reason: string };
@@ -125,7 +127,7 @@ export async function inspectMediaFile(fullPath: string): Promise<MediaHealth> {
     };
   }
   try {
-    const head = await readAt(handle, 0, 12);
+    const head = await readAt(handle, 0, 64);
     if (head.length >= 8 && head.toString('latin1', 4, 8) === 'ftyp') {
       return await checkIsoBmff(handle, stat.size);
     }
@@ -136,6 +138,9 @@ export async function inspectMediaFile(fullPath: string): Promise<MediaHealth> {
         : { state: 'unreadable', reason: 'it is not a media file' };
     }
     if (head.length >= 4 && head.toString('latin1', 0, 4) === 'OggS') return { state: 'ok' };
+    if (head.toString('utf8').replace(/\s/g, '').startsWith(`{"format":"${CURSOR_FILE_FORMAT}"`)) {
+      return { state: 'ok' };
+    }
     return { state: 'unreadable', reason: 'it is not a media file (or is damaged)' };
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code ?? 'error';

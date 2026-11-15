@@ -14,7 +14,9 @@ import { DecoderPool } from '../editor/preview/decoder-pool';
 import { FrameCache } from '../editor/preview/frame-cache';
 import { webCodecsBackend } from '../editor/preview/media-backend';
 import { loadObjectFonts } from '../editor/preview/object-fonts';
+import { CursorTrackStore } from '../editor/preview/cursor-tracks';
 import { ObjectRasterizer } from '../editor/preview/object-raster';
+import { sceneCursorPlans } from '../../shared/project/cursor-effects';
 import { sceneObjectPlans } from '../../shared/project/objects';
 import { decoderSources } from '../../shared/project/render-plan';
 import { ExportFrameRenderer } from './frame-renderer';
@@ -42,17 +44,23 @@ window.addEventListener('message', (event: MessageEvent) => {
   const pool = new DecoderPool<VideoFrame>(webCodecsBackend, new FrameCache<VideoFrame>());
   pool.setSources(decoderSources(doc.media, (id) => mediaUrls[id] ?? null));
   const rasterizer = new ObjectRasterizer();
+  const cursorTracks = new CursorTrackStore();
   const renderer = new ExportFrameRenderer<VideoFrame, OffscreenCanvas>(
     doc,
     pool,
     compositor,
     {},
     {
-      ready: loadObjectFonts,
+      ready: async () => {
+        await Promise.all([loadObjectFonts(), cursorTracks.load(doc, mediaUrls)]);
+        const [failed] = cursorTracks.failed;
+        if (failed) throw new Error(`Cannot read the cursor track: ${failed[1]}`);
+      },
       objects: (scene) => {
         const drawn = rasterizer.objects(sceneObjectPlans(scene));
         if (!drawn.complete) throw new Error('an object could not be drawn');
-        return drawn.objects;
+        const cursors = rasterizer.cursors(sceneCursorPlans(doc, cursorTracks.tracks, scene));
+        return [...cursors, ...drawn.objects];
       },
     },
   );

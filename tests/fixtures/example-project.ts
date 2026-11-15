@@ -7,7 +7,7 @@ import type { Project } from '../../src/shared/project/schema';
 export function exampleProject(): Project {
   return {
     format: 'capture-studio.project',
-    formatVersion: 2,
+    formatVersion: 3,
     id: 'prj_01JBQ4ZJ4X6V3K8N2M7P5R9T0W',
     name: 'Lesson 2026-10-24 14-05',
     createdAt: '2026-10-24T14:05:12.345Z',

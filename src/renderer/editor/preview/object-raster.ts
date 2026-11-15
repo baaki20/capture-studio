@@ -9,6 +9,10 @@
  * Shapes: strokes lie inside the box. Arrows run from the tail corner to the opposite one with
  * the head on the far end. Steps are a filled circle with the label. Spotlights darken the frame
  * outside the box.
+ *
+ * Cursor effects (v3, `shared/project/cursor-effects.ts`) are drawn here too: the highlight is a
+ * filled circle, a click ring a stroked one, and the cursor our arrow (white with a dark outline)
+ * with its tip on the anchor.
  */
 import {
   arrowEnds,
@@ -18,6 +22,7 @@ import {
   type ObjectDrawPlan,
   type PxRect,
 } from '../../../shared/project/objects';
+import { CURSOR_ARROW, type CursorDrawPlan } from '../../../shared/project/cursor-effects';
 import type { CompositeObjectOf } from './compositor-math';
 import { FONT_FAMILIES, objectFontsLoaded } from './object-fonts';
 
@@ -204,6 +209,43 @@ function drawPlan(ctx: Ctx, plan: RasterPlan): void {
   }
 }
 
+function drawCursorPlan(ctx: Ctx, plan: CursorDrawPlan): void {
+  const { picture, anchor } = plan;
+  switch (picture.kind) {
+    case 'highlight':
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, picture.radiusPx, 0, Math.PI * 2);
+      ctx.fillStyle = picture.color;
+      ctx.fill();
+      return;
+    case 'ring':
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, picture.radiusPx, 0, Math.PI * 2);
+      ctx.lineWidth = picture.lineWidthPx;
+      ctx.strokeStyle = picture.color;
+      ctx.stroke();
+      return;
+    case 'cursor': {
+      const h = picture.heightPx;
+      ctx.beginPath();
+      CURSOR_ARROW.forEach(([px, py], i) => {
+        const x = anchor.x + px * h;
+        const y = anchor.y + py * h;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(1, h * 0.07);
+      ctx.strokeStyle = '#1A1A1A';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fill();
+      ctx.stroke();
+      return;
+    }
+  }
+}
+
 /** Uses text (so it must wait for the fonts). */
 function needsFonts(plan: RasterPlan): boolean {
   return plan.item.kind === 'text' || plan.item.kind === 'step';
@@ -216,19 +258,42 @@ export class ObjectRasterizer {
 
   /** The plan's picture, or null while its fonts are still loading. */
   picture(plan: RasterPlan): OffscreenCanvas | null {
-    const cached = this.cache.get(plan.key);
-    if (cached) {
+    if (needsFonts(plan) && !this.fontsReady() && !this.cache.has(plan.key)) return null;
+    return this.cached(plan.key, plan.size, (ctx) => {
+      drawPlan(ctx, plan);
+    });
+  }
+
+  /** The compositor's objects for cursor-effect plans (no fonts, so always complete). */
+  cursors(plans: readonly CursorDrawPlan[]): CompositeObjectOf<OffscreenCanvas>[] {
+    return plans.map((plan) => ({
+      kind: 'image',
+      key: `cursor|${plan.key}`,
+      image: this.cached(`cursor|${plan.key}`, plan.size, (ctx) => {
+        drawCursorPlan(ctx, plan);
+      }),
+      rect: plan.rect,
+      opacity: plan.opacity,
+    }));
+  }
+
+  private cached(
+    key: string,
+    size: { width: number; height: number },
+    draw: (ctx: Ctx) => void,
+  ): OffscreenCanvas {
+    const hit = this.cache.get(key);
+    if (hit) {
       // Most recently used last.
-      this.cache.delete(plan.key);
-      this.cache.set(plan.key, cached);
-      return cached;
+      this.cache.delete(key);
+      this.cache.set(key, hit);
+      return hit;
     }
-    if (needsFonts(plan) && !this.fontsReady()) return null;
-    const canvas = new OffscreenCanvas(plan.size.width, plan.size.height);
+    const canvas = new OffscreenCanvas(size.width, size.height);
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('object rasteriser: no 2D context');
-    drawPlan(ctx, plan);
-    this.cache.set(plan.key, canvas);
+    draw(ctx);
+    this.cache.set(key, canvas);
     if (this.cache.size > CACHE_SIZE) {
       const oldest = this.cache.keys().next().value;
       if (oldest !== undefined) this.cache.delete(oldest);

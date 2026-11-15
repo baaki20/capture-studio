@@ -12,6 +12,11 @@ export const PROJECT_MIGRATIONS: readonly Migration[] = [
     description: 'v1 → v2: teaching-editor fields are optional, so nothing else changes',
     up: (doc) => doc,
   },
+  {
+    from: 2,
+    description: 'v2 → v3: cursor tracks and cursor effects are optional, so nothing else changes',
+    up: (doc) => doc,
+  },
 ];
 
 export const projectMigrations = defineMigrations({

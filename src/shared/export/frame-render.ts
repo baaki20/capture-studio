@@ -16,6 +16,7 @@
  *   frame bytes.
  */
 import type { ExportOptions } from '../ipc/contract';
+import { cursorEffectsActive } from '../project/cursor-effects';
 import type { Project } from '../project/schema';
 import { exportSize } from './presets';
 
@@ -73,6 +74,7 @@ export function pickTimeUs(fileTimeUs: number, fps: number): number {
 export function needsFrameRender(doc: Project): boolean {
   const { timeline } = doc;
   if (timeline.beautify) return true;
+  if (cursorEffectsActive(doc)) return true;
   if ((timeline.camera?.length ?? 0) > 0) return true;
   if (timeline.objectTracks?.some((track) => track.items.length > 0)) return true;
   for (const track of timeline.tracks) {

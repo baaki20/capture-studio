@@ -10,8 +10,11 @@
  *   re-render (`onInvalidate`), so a paused preview settles on the exact frame.
  * - Objects (text, callouts, blur and pixelate) are drawn from their draw plans; until the
  *   bundled fonts load, text is left out and the render is not exact.
+ * - Cursor effects (v3) are drawn below the objects once their cursor tracks have loaded; a load
+ *   triggers a re-render.
  */
 import { decoderKey, decoderSources, type VideoLayer } from '../../../shared/project/render-plan';
+import { sceneCursorPlans } from '../../../shared/project/cursor-effects';
 import { sceneObjectPlans } from '../../../shared/project/objects';
 import { sceneAt } from '../../../shared/project/scene';
 import type { Media, Project } from '../../../shared/project/schema';
@@ -24,6 +27,7 @@ import type {
   Size,
 } from './compositor-webgl';
 import type { DecoderPool } from './decoder-pool';
+import { CursorTrackStore } from './cursor-tracks';
 import { ObjectRasterizer } from './object-raster';
 import type { CacheableFrame } from './frame-cache';
 import type { PreviewStats } from './protocol';
@@ -54,6 +58,7 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
     private readonly compositor: CompositorLike,
     private readonly onInvalidate: () => void,
     private readonly rasterizer = new ObjectRasterizer(),
+    private readonly cursorTracks = new CursorTrackStore(),
   ) {
     pool.onFrame((mediaId) => {
       if (this.waitingFor.has(mediaId)) this.onInvalidate();
@@ -74,6 +79,9 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
       ),
     );
     this.compositor.resize(doc.timeline.canvas);
+    void this.cursorTracks.load(doc, mediaUrls).then(({ changed }) => {
+      if (changed && this.doc === doc) this.onInvalidate();
+    });
   }
 
   /** Draws timeline time `tUs`; returns whether every layer showed its exact frame. */
@@ -105,7 +113,8 @@ export class PreviewRenderer<F extends CacheableFrame & TexImageSource> {
         ? this.rasterizer.objects(sceneObjectPlans(scene))
         : { objects: [], complete: true };
     exact &&= complete;
-    this.compositor.draw(scene.background, items, objects);
+    const cursors = this.rasterizer.cursors(sceneCursorPlans(doc, this.cursorTracks.tracks, scene));
+    this.compositor.draw(scene.background, items, [...cursors, ...objects]);
     if (!exact) this.inexact += 1;
     return exact;
   }

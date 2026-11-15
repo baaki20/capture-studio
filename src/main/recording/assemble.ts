@@ -395,7 +395,10 @@ export async function generateCaches(
   const cacheDir = path.join(root, CACHE_DIR);
   await fs.mkdir(cacheDir, { recursive: true });
   const todo = media
-    .filter((m) => m.status !== 'failed' && m.status !== 'missing' && m.durationUs > 0)
+    .filter(
+      (m) =>
+        m.kind !== 'cursor' && m.status !== 'failed' && m.status !== 'missing' && m.durationUs > 0,
+    )
     .sort((a, b) => Number(a.kind !== 'audio') - Number(b.kind !== 'audio'));
   const next = async (): Promise<void> => {
     for (let m = todo.shift(); m; m = todo.shift()) {

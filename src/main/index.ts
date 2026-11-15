@@ -767,7 +767,10 @@ async function start(): Promise<void> {
     openFrameRenderer: ({ doc, spec }) => {
       const mediaUrls: Record<string, string> = {};
       for (const media of doc.media) {
-        if (media.kind === 'video') mediaUrls[media.id] = mediaUrl(doc.id, media.path);
+        // Cursor tracks too: the render window draws their effects (v3).
+        if (media.kind === 'video' || media.kind === 'cursor') {
+          mediaUrls[media.id] = mediaUrl(doc.id, media.path);
+        }
       }
       return openFrameRenderer(renderer, { doc, mediaUrls, spec }, log);
     },

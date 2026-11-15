@@ -93,8 +93,7 @@ export class ExportFrameRenderer<F extends CacheableFrame, I = never> {
       if (signal?.aborted) throw new RenderError('cancelled');
       const scene = sceneAt(this.doc, frameTimeUs(k, spec.fps));
       const items = await this.settle(scene.layers, spec.fps, signal);
-      const objects =
-        this.objectSource && scene.objects.length > 0 ? this.objectSource.objects(scene) : [];
+      const objects = this.objectSource ? this.objectSource.objects(scene) : [];
       this.compositor.drawOffscreen(scene.background, items, objects);
       await sink.write(k, this.compositor.readYuv420(out));
     }

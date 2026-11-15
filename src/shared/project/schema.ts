@@ -6,12 +6,16 @@
  * field means the Phase 1 behaviour, so migrating a v1 file changes nothing but the version. The
  * version still goes up because a Phase 1 build would silently drop these fields on save; with
  * the bump it opens a v2 project read-only instead (R1.30).
+ *
+ * Format 3 (Phase 3, plan decision D8) adds cursor tracks (media of kind `cursor`, a
+ * `cursor.jsonl` file, `cursor-track.ts`) and the timeline's cursor effects, marked "v3". They
+ * are optional too, for the same reason.
  */
 import { z } from 'zod';
 import { checkProjectInvariants } from './invariants';
 
 export const PROJECT_FORMAT = 'capture-studio.project';
-export const PROJECT_FORMAT_VERSION = 2;
+export const PROJECT_FORMAT_VERSION = 3;
 /** Folder-bundle extension (§1.6). Kept in one place so a rename is a one-line change. */
 export const PROJECT_EXTENSION = '.cstudio';
 export const PROJECT_FILE_NAME = 'project.json';
@@ -120,10 +124,24 @@ export const MediaSyncSchema = z.object({
   ),
 });
 
+/** v3: a cursor track recorded with a screen media (`cursor-track.ts`). */
+export const CursorTrackInfoSchema = z.object({
+  screenMediaId: prefixedId('med').describe('The screen video whose pixels the positions are in'),
+  inVideo: z
+    .boolean()
+    .describe(
+      'The screen video shows the system cursor. Then the editor can add rings and a highlight ' +
+        'but cannot move, resize or hide the cursor',
+    ),
+  sampleRateHz: z.number().positive().describe('Nominal position rate'),
+  samples: z.int().nonnegative(),
+  clicks: z.int().nonnegative(),
+});
+
 export const MediaSchema = z.object({
   id: prefixedId('med'),
-  role: z.enum(['screen', 'camera', 'microphone', 'system-audio', 'imported']),
-  kind: z.enum(['video', 'audio']),
+  role: z.enum(['screen', 'camera', 'microphone', 'system-audio', 'imported', 'cursor']),
+  kind: z.enum(['video', 'audio', 'cursor']).describe('v3: cursor = a cursor track, never a clip'),
   path: RelativePosixPath,
   status: z.enum(['ok', 'missing', 'recovered', 'failed']),
   durationUs: NonNegativeUs.describe('File-local duration'),
@@ -149,6 +167,7 @@ export const MediaSchema = z.object({
       discontinuities: z.int().nonnegative(),
     })
     .optional(),
+  cursor: CursorTrackInfoSchema.optional().describe('v3: kind cursor only'),
   encoder: z.object({ name: z.string(), hardware: z.boolean() }).optional(),
   sync: MediaSyncSchema.optional(),
   stats: z
@@ -431,6 +450,28 @@ export const BeautifySchema = z.object({
   shadow: ShadowSchema.optional(),
 });
 
+/**
+ * v3: cursor effects (R3.10–R3.12), drawn from the cursor tracks. Sizes are fractions of the
+ * canvas's short side. Smoothing, size and hide need a track whose video does not show the
+ * cursor (`inVideo: false`); rings and the highlight work on any track.
+ */
+export const CursorEffectsSchema = z.object({
+  smoothing: Fraction.describe('0 = the recorded path; 1 = the smoothest'),
+  size: z.number().min(0.5).max(3).describe('Drawn cursor scale; 1 = the system size'),
+  hide: z.boolean().describe('Hide the drawn cursor (rings and highlight still show)'),
+  clickRings: z.object({
+    enabled: z.boolean(),
+    color: HexColor,
+    size: z.number().min(0.01).max(0.2).describe('Final ring radius'),
+    durationUs: z.int().min(100_000).max(2_000_000),
+  }),
+  highlight: z.object({
+    enabled: z.boolean(),
+    color: HexColor.describe('A translucent colour (#RRGGBBAA) works best'),
+    radius: z.number().min(0.01).max(0.2),
+  }),
+});
+
 export const MarkerSchema = z.object({
   id: prefixedId('mrk'),
   tUs: NonNegativeUs,
@@ -462,6 +503,7 @@ export const TimelineSchema = z.object({
     .describe('v2: sorted by tUs; zooms everything except face overlays'),
   beautify: BeautifySchema.optional().describe('v2: replaces the plain canvas background'),
   markers: z.array(MarkerSchema).optional().describe('v2: sorted by tUs'),
+  cursorEffects: CursorEffectsSchema.optional().describe('v3: absent = no effects'),
 });
 
 export const ExportPrefsSchema = z.object({
@@ -528,4 +570,6 @@ export type ObjectTrack = z.infer<typeof ObjectTrackSchema>;
 export type CameraKeyframe = z.infer<typeof CameraKeyframeSchema>;
 export type Beautify = z.infer<typeof BeautifySchema>;
 export type Marker = z.infer<typeof MarkerSchema>;
+export type CursorTrackInfo = z.infer<typeof CursorTrackInfoSchema>;
+export type CursorEffects = z.infer<typeof CursorEffectsSchema>;
 export type Project = z.infer<typeof ProjectStructureSchema>;

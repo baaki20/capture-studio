@@ -182,7 +182,7 @@ describe('project store', () => {
     await store.write(root, doc);
     await fs.writeFile(
       path.join(root, 'project.json'),
-      JSON.stringify({ ...doc, formatVersion: 3, futureField: true }),
+      JSON.stringify({ ...doc, formatVersion: 4, futureField: true }),
     );
     const opened = await store.open(doc.id);
     expect(opened.readOnly).toBe(true);
