@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned FFmpeg builds (spec \u00a71.10). Every archive and every extracted file is SHA-256 verified by scripts/fetch-ffmpeg.ts. Keys are <process.platform>-<process.arch>. BtbN prunes old daily releases but keeps the month-end ones, so pins use a month-end release; add a mirror URL (for example our own release asset) as well.",
+  "$comment": "Pinned FFmpeg builds (spec \u00a71.10). Every archive and every extracted file is SHA-256 verified by scripts/fetch-ffmpeg.ts. Keys are <process.platform>-<process.arch>. BtbN prunes old daily releases but keeps the month-end ones, so pins use a month-end release; add a mirror URL (for example our own release asset) as well. The darwin builds are our own, made by scripts/build-ffmpeg-macos.sh (.github/workflows/ffmpeg-macos.yml) and published as a pre-release.",
   "schemaVersion": 1,
   "builds": {
     "linux-x64": {
@@ -78,6 +78,84 @@
         "ffmpegRevision": "7adfbe40dc",
         "ffmpegBranch": "release/9.0",
         "buildScripts": "https://github.com/BtbN/FFmpeg-Builds/tree/autobuild-2026-10-31-12-59"
+      }
+    },
+    "darwin-arm64": {
+      "provider": "capture-studio (scripts/build-ffmpeg-macos.sh)",
+      "release": "ffmpeg-n9.0.2-39-macos",
+      "version": "n9.0.2-39-g7adfbe40dc",
+      "variant": "gpl",
+      "license": "GPL-3.0-or-later",
+      "archive": {
+        "fileName": "ffmpeg-n9.0.2-39-g7adfbe40dc-macos-arm64-gpl.tar.xz",
+        "format": "tar.xz",
+        "urls": [
+          "https://github.com/baaki20/capture-studio/releases/download/ffmpeg-n9.0.2-39-macos/ffmpeg-n9.0.2-39-g7adfbe40dc-macos-arm64-gpl.tar.xz"
+        ],
+        "sha256": "483a93e9bc237734b0194de8cbcbfbbb648b436e65e44fa1dc97a8b26846531d",
+        "root": "ffmpeg-n9.0.2-39-g7adfbe40dc-macos-arm64-gpl"
+      },
+      "files": {
+        "ffmpeg": {
+          "from": "bin/ffmpeg",
+          "sha256": "b99145181b439131b61e61d3329310ad30d9b5a140fdd8717e23ed59a7edfcb6",
+          "executable": true
+        },
+        "ffprobe": {
+          "from": "bin/ffprobe",
+          "sha256": "3408a8679c5d78fb5c83f35f1b9e744dbf9d013607ed4ad5e906fc2321921e5f",
+          "executable": true
+        },
+        "LICENSE.txt": {
+          "from": "LICENSE.txt",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "executable": false
+        }
+      },
+      "source": {
+        "ffmpegRepository": "https://git.ffmpeg.org/ffmpeg.git",
+        "ffmpegRevision": "7adfbe40dc",
+        "ffmpegBranch": "release/9.0",
+        "buildScripts": "https://github.com/baaki20/capture-studio/blob/ffmpeg-n9.0.2-39-macos/scripts/build-ffmpeg-macos.sh"
+      }
+    },
+    "darwin-x64": {
+      "provider": "capture-studio (scripts/build-ffmpeg-macos.sh)",
+      "release": "ffmpeg-n9.0.2-39-macos",
+      "version": "n9.0.2-39-g7adfbe40dc",
+      "variant": "gpl",
+      "license": "GPL-3.0-or-later",
+      "archive": {
+        "fileName": "ffmpeg-n9.0.2-39-g7adfbe40dc-macos-x64-gpl.tar.xz",
+        "format": "tar.xz",
+        "urls": [
+          "https://github.com/baaki20/capture-studio/releases/download/ffmpeg-n9.0.2-39-macos/ffmpeg-n9.0.2-39-g7adfbe40dc-macos-x64-gpl.tar.xz"
+        ],
+        "sha256": "e142a39204ac426de4bfdc643577812ff13b6eb25a07099ba8ad3071d8a11ff8",
+        "root": "ffmpeg-n9.0.2-39-g7adfbe40dc-macos-x64-gpl"
+      },
+      "files": {
+        "ffmpeg": {
+          "from": "bin/ffmpeg",
+          "sha256": "f963ce14655791186436f513b4ff0ed4b7a0bd0574c33b3739e5900de4135a4f",
+          "executable": true
+        },
+        "ffprobe": {
+          "from": "bin/ffprobe",
+          "sha256": "c431dcc548c4511a835fa2a54ce4104f0f7728770b52fa1ef6f4e0f9e48645cd",
+          "executable": true
+        },
+        "LICENSE.txt": {
+          "from": "LICENSE.txt",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+          "executable": false
+        }
+      },
+      "source": {
+        "ffmpegRepository": "https://git.ffmpeg.org/ffmpeg.git",
+        "ffmpegRevision": "7adfbe40dc",
+        "ffmpegBranch": "release/9.0",
+        "buildScripts": "https://github.com/baaki20/capture-studio/blob/ffmpeg-n9.0.2-39-macos/scripts/build-ffmpeg-macos.sh"
       }
     }
   }

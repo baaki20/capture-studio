@@ -17,10 +17,16 @@ for the exact build we ship is available as follows.
    Capture Studio source tree.
 
 2. The build scripts and the sources of every third-party library compiled into the
-   executables, with the exact versions used, are defined by the BtbN/FFmpeg-Builds
-   repository at the release tag recorded in BUILD-INFO.json:
+   executables, with the exact versions used, are defined as follows.
+
+   Linux and Windows: by the BtbN/FFmpeg-Builds repository at the release tag recorded in
+   BUILD-INFO.json:
 
        https://github.com/BtbN/FFmpeg-Builds/tree/<release tag>
+
+   macOS: by `scripts/build-ffmpeg-macos.sh` in the Capture Studio source tree, at the
+   release tag recorded in BUILD-INFO.json. The script pins the exact upstream commit or
+   release archive (with its SHA-256) of FFmpeg and of every library it compiles in.
 
 3. Written offer. For at least three years after we last distribute a given version of
    Capture Studio, and for as long as we offer spare parts or support for it, we will give

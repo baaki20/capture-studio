@@ -64,13 +64,12 @@ jobs:
           path: test-results/
           retention-days: 7
 
-  # Phase 3: unit tests on Windows and macOS, and integration tests on Windows (real FFmpeg).
-  # macOS integration tests wait for a pinned macOS FFmpeg (scripts/build-ffmpeg-macos.sh).
+  # Phase 3: unit and integration tests (real pinned FFmpeg) on Windows and macOS (Apple silicon and Intel).
   desktop:
     strategy:
       fail-fast: false
       matrix:
-        runner: [windows-2025, macos-15]
+        runner: [windows-2025, macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -94,16 +93,13 @@ jobs:
         run: npm run test:unit
 
       - name: Cache FFmpeg archive
-        if: runner.os == 'Windows'
         uses: actions/cache@v4
         with:
           path: .cache/ffmpeg
           key: ffmpeg-${{ runner.os }}-${{ hashFiles('scripts/ffmpeg-manifest.json') }}
 
       - name: Fetch pinned FFmpeg
-        if: runner.os == 'Windows'
         run: npm run fetch:ffmpeg
 
       - name: Integration tests
-        if: runner.os == 'Windows'
         run: npm run test:integration
