@@ -155,6 +155,8 @@ describe('makeProxy', () => {
         ],
         { encoding: 'utf8' },
       ).trim();
+    // Every frame, not the first packets: the proxy has B-frames, so which frames the first few
+    // packets decode to depends on the decoder's thread count (a 2-core CI machine differed).
     expect(pts(output)).toBe(pts(path.join(sources, 'big.mp4')));
   });
 });
