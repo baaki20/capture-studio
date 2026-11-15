@@ -52,6 +52,7 @@ import { AudioCleanupSection, ClipAudioSection, PausesSection } from './AudioSec
 import { MediaSection } from './MediaSection';
 import { AnnotationsSection, ObjectSection } from './ObjectSections';
 import { BackgroundSection, CameraSection } from './ScreenStyleSections';
+import { CursorSection } from './CursorSection';
 import { MarkersSection, SpeedSection, TransitionSection } from './TimeSections';
 import {
   DEFAULT_BORDER,
@@ -122,6 +123,7 @@ export function InspectorPanel() {
       <MarkersSection doc={doc} />
       <BackgroundSection doc={doc} />
       <CameraSection doc={doc} />
+      <CursorSection doc={doc} />
       <SyncSection doc={doc} />
     </aside>
   );

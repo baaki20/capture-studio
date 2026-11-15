@@ -47,13 +47,31 @@ describe('auto-zoom proposals (R3.11)', () => {
     ]);
   });
 
-  it('leaves manual zooms alone and respects a range', () => {
-    const doc = cursorProject();
-    doc.timeline.camera = [
-      { tUs: 0, rect: { x: 0, y: 0, width: 1, height: 1 }, easing: 'hold' },
-      { tUs: 2_000_000, rect: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 }, easing: 'hold' },
-    ];
+  it('leaves manual zooms alone, fits between them and respects a range', () => {
+    const doc = value(
+      applyOp(cursorProject(), {
+        type: 'setCameraZoom',
+        startUs: 1_800_000,
+        endUs: 2_600_000,
+        rect: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+      }),
+    );
+    // The first group is inside the manual zoom; the second is free.
     expect(proposeAutoZoom(doc, tracks).map((p) => p.clicks)).toEqual([1]);
+    // A manual zoom ending just before the last press: the auto zoom starts after it.
+    const near = value(
+      applyOp(cursorProject(), {
+        type: 'setCameraZoom',
+        startUs: 7_000_000,
+        endUs: 8_600_000,
+        rect: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 },
+      }),
+    );
+    const last = proposeAutoZoom(near, tracks).at(-1);
+    expect(last?.startUs).toBeGreaterThan(8_600_000);
+    const added = value(applyOp(near, { type: 'addCameraZooms', zooms: [last!] }));
+    expect(cameraAt(added.timeline.camera, 8_000_000).width).toBeCloseTo(0.5, 5);
+    expect(cameraAt(added.timeline.camera, 9_500_000).width).toBeCloseTo(0.5, 5);
     expect(
       proposeAutoZoom(cursorProject(), tracks, { range: { inUs: 0, outUs: 5_000_000 } }),
     ).toHaveLength(1);

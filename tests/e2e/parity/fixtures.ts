@@ -12,6 +12,8 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { frameTimeUs } from '../../../src/shared/export/frame-render';
 import { cameraRect } from '../../../src/shared/project/camera-keyframes';
+import { DEFAULT_CURSOR_EFFECTS } from '../../../src/shared/project/cursor-effects';
+import { serializeCursorTrack, type CursorEvent } from '../../../src/shared/project/cursor-track';
 import { importedMediaEntry } from '../../../src/shared/project/media-import';
 import { TEXT_PRESETS, newObject, type ObjectKind } from '../../../src/shared/project/objects';
 import type { RectF } from '../../../src/shared/project/scene';
@@ -696,6 +698,102 @@ const imageBackground: ParityFixture = {
   },
 };
 
+/**
+ * Phase 3: cursor effects from a synthetic cursor track (R3.10): a smoothed, enlarged drawn
+ * cursor (the screen video has none), click rings, a highlight, and a 2× camera zoom that the
+ * effects follow. The track circles the screen with jitter, with presses at 1.0, 1.2 and 4.5 s.
+ */
+const cursorEffects: ParityFixture = {
+  name: 'p3-cursor-effects',
+  // Moving, ring growing (three), zoomed (two), ring at 4.5 s (two), late.
+  frames: [15, 31, 36, 45, 60, 90, 100, 136, 140, 170],
+  minSsim: 0.95,
+  regions: [],
+  phase1: false,
+  build(projectsDir) {
+    const seconds = 6;
+    let doc = recorded(seconds, 'A', 'Parity cursor effects');
+    const ids = { generateId: counterIds('C') };
+    doc = unwrap(
+      applyOp(doc, { type: 'setHidden', trackId: trackByName(doc, 'Face').id, hidden: true }, ids),
+    );
+    const screen = doc.media.find((m) => m.role === 'screen');
+    if (!screen) throw new Error('no screen media');
+    const events: CursorEvent[] = [];
+    const presses = [1_000_000, 1_200_000, 4_500_000];
+    const done = new Set<number>();
+    for (let i = 0; i <= seconds * 120; i++) {
+      const tUs = Math.round((i * 1_000_000) / 120);
+      const a = (tUs / 1_000_000) * 1.3;
+      const jitter = i % 2 === 0 ? 3 : -3;
+      const x = Math.round(W / 2 + Math.cos(a) * 380 + jitter);
+      const y = Math.round(H / 2 + Math.sin(a) * 220);
+      const press = presses.find((p) => p >= tUs && p < tUs + 8_334 && !done.has(p));
+      if (press !== undefined) {
+        done.add(press);
+        events.push({ tUs: press, x, y, action: 'down', button: 'left' });
+        events.push({ tUs: press + 60_000, x, y, action: 'up', button: 'left' });
+      } else if (!events.some((e) => e.tUs > tUs)) {
+        events.push({ tUs, x, y });
+      }
+    }
+    const cursorMedia: Project['media'][number] = {
+      id: 'med_01JBQ4ZJ4X6V3K8N2M7P5R9CUR',
+      role: 'cursor',
+      kind: 'cursor',
+      path: 'media/cursor.jsonl',
+      status: 'ok',
+      durationUs: seconds * 1_000_000,
+      startOffsetUs: screen.startOffsetUs,
+      syncAdjustUs: 0,
+      clockRatio: 1,
+      cursor: {
+        screenMediaId: screen.id,
+        inVideo: false,
+        sampleRateHz: 120,
+        samples: events.length,
+        clicks: presses.length,
+      },
+    };
+    doc = { ...doc, media: [...doc.media, cursorMedia] };
+    doc = unwrap(
+      applyOp(
+        doc,
+        {
+          type: 'setCursorEffects',
+          effects: {
+            ...DEFAULT_CURSOR_EFFECTS,
+            smoothing: 0.6,
+            size: 1.5,
+            clickRings: { enabled: true, color: '#FFB020', size: 0.05, durationUs: 600_000 },
+            highlight: { enabled: true, color: '#FFE45C59', radius: 0.04 },
+          },
+        },
+        ids,
+      ),
+    );
+    doc = unwrap(
+      applyOp(
+        doc,
+        {
+          type: 'setCameraZoom',
+          startUs: 2_600_000,
+          endUs: 3_800_000,
+          rect: cameraRect(2, 0.5, 0.5),
+          easeUs: 300_000,
+        },
+        ids,
+      ),
+    );
+    const saved = save(projectsDir, doc, seconds);
+    writeFileSync(
+      path.join(saved.root, 'media', 'cursor.jsonl'),
+      serializeCursorTrack({ sampleRateHz: 120, width: W, height: H }, events),
+    );
+    return saved;
+  },
+};
+
 export const FIXTURES: readonly ParityFixture[] = [
   roundedFace,
   faceKeyframes,
@@ -706,6 +804,7 @@ export const FIXTURES: readonly ParityFixture[] = [
   privacy,
   timeEdits,
   imageBackground,
+  cursorEffects,
 ];
 
 /** Timeline time of an output frame. */

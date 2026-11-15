@@ -61,9 +61,13 @@ Edits run in the project's editor window (it opens when needed): they show at on
 is one undo step labelled "Assistant: …", and autosave saves them. Reads and dry runs never open a
 window. Exports go to the exports folder. The tools: `list_projects`, `get_project`, `cut_range`,
 `trim_ends`, `split_at`, `delete_clips`, `trim_clip`, `move_clip`, `set_track`, `set_face_layout`,
-`set_screen_crop`, `nudge_sync`, `set_marks`, `apply_edits` (several as one step),
-`find_silences`, `remove_silences`, `undo`, `redo`, `get_frame`, `export_project`,
-`export_status`, `cancel_export`. Zooms, captions, transcripts, text and speed changes are not
+`set_face_mode`, `set_face_keyframe`, `set_screen_crop`, `set_background`, `zoom_screen`,
+`set_zoom_keyframe`, `auto_zoom`, `set_cursor_effects`, `add_annotation`, `edit_annotation`,
+`remove_annotations`, `set_speed`, `freeze_frame`, `set_transition`, `set_marker`,
+`remove_marker`, `set_clip_audio`, `set_volume_keyframe`, `set_audio_cleanup`, `nudge_sync`,
+`set_marks`, `apply_edits` (several as one step), `find_silences`, `remove_silences`, `undo`,
+`redo`, `get_frame`, `export_project`, `export_status`, `cancel_export`. Cursor effects and
+`auto_zoom` need a recording with a cursor track. Captions, transcripts and adding media are not
 editor features yet, so assistants cannot do them either.
 
 ## Packaging (Linux)

@@ -11,10 +11,13 @@
  * - The zoom centres on the middle of the presses on the canvas (before any camera) and zooms
  *   by `zoom`, less when the presses are spread wider than the zoomed view can show; spreads
  *   that need less than `MIN_ZOOM` give no zoom.
- * - A range that already holds camera keyframes is left alone (manual zooms win).
+ * - Manual zooms win: presses the camera is already zoomed on, or with keyframes between them,
+ *   give no zoom; otherwise the zoom is trimmed to fit between the keyframes around it (its
+ *   eased entry after the one before, its end before the one after) and dropped when that
+ *   leaves less than `MIN_ZOOM_US`.
  */
 import type { Us } from '../time';
-import { CAMERA_EASE_MAX_US, CAMERA_ZOOM_MAX, cameraRect } from './camera-keyframes';
+import { CAMERA_EASE_MAX_US, CAMERA_ZOOM_MAX, cameraAt, cameraRect } from './camera-keyframes';
 import { clipTimeAtRef, clipTimelineDurationUs } from './clip-time';
 import { cursorMediaFor, type CursorTracks } from './cursor-effects';
 import { fileToRefUs } from './media-time';
@@ -42,6 +45,8 @@ export const DEFAULT_AUTO_ZOOM: AutoZoomOptions = {
 
 /** Below this the zoom is not worth it. */
 export const MIN_ZOOM = 1.25;
+/** Shortest zoom worth adding after trimming. */
+export const MIN_ZOOM_US = 500_000;
 /** Margin kept around the presses inside the zoomed view (fraction of the view). */
 const SPREAD_FILL = 0.7;
 
@@ -130,10 +135,18 @@ export function proposeAutoZoom(
     const first = group[0];
     const last = group[group.length - 1];
     if (!first || !last) continue;
-    const startUs = Math.max(0, first.tUs - o.leadUs);
-    const endUs = Math.min(duration, last.tUs + o.holdUs);
-    if (endUs <= startUs) continue;
-    if (keys.some((k) => k.tUs >= startUs - easeUs && k.tUs <= endUs)) continue;
+    const zoomedThere = (tUs: Us) => cameraAt(keys, tUs).width < 1;
+    if (group.some((c) => zoomedThere(c.tUs))) continue;
+    if (keys.some((k) => k.tUs >= first.tUs && k.tUs <= last.tUs)) continue;
+    const before = keys.filter((k) => k.tUs < first.tUs).at(-1);
+    const after = keys.find((k) => k.tUs > last.tUs);
+    const startUs = Math.max(
+      0,
+      first.tUs - o.leadUs,
+      before ? before.tUs + Math.max(easeUs, 1) + 1 : 0,
+    );
+    const endUs = Math.min(duration, last.tUs + o.holdUs, after ? after.tUs - 1 : duration);
+    if (endUs - startUs < MIN_ZOOM_US) continue;
     const xs = group.map((c) => c.x);
     const ys = group.map((c) => c.y);
     const spread = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));

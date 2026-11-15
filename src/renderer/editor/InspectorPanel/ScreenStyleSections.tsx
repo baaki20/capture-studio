@@ -423,7 +423,7 @@ export function CameraSection({ doc }: { doc: Project }) {
   );
 }
 
-function Slider(props: {
+export function Slider(props: {
   id: string;
   label: string;
   min: number;
