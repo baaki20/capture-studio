@@ -137,6 +137,8 @@ export const OP_LABELS: Record<TimelineOpType, string> = {
   removeCameraKeyframe: 'Delete zoom keyframe',
   moveCameraKeyframe: 'Move zoom keyframe',
   setCameraZoom: 'Zoom range',
+  addCameraZooms: 'Auto-zoom',
+  setCursorEffects: 'Change cursor effects',
   addObject: 'Add annotation',
   updateObject: 'Change annotation',
   removeObjects: 'Delete annotation',
@@ -178,6 +180,8 @@ export function defaultCoalesceKey(op: TimelineOp): string | null {
       return `layout-key:${op.trackId}:${String(op.tUs)}`;
     case 'setBeautify':
       return 'beautify';
+    case 'setCursorEffects':
+      return 'cursor-effects';
     case 'setCameraKeyframe':
       return `camera-key:${String(op.tUs)}`;
     case 'updateObject':

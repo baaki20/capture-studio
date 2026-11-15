@@ -39,6 +39,7 @@ function handlers(overrides: Partial<AutomationHandlers> = {}): AutomationHandle
     'project.undo': unused,
     'project.redo': unused,
     'audio.silences': unused,
+    'cursor.autoZoom': unused,
     'preview.frame': unused,
     'export.start': unused,
     'export.status': unused,

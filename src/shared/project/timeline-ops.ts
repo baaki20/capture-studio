@@ -78,6 +78,7 @@ import {
 import {
   ArrowObjectSchema,
   BlurObjectSchema,
+  CursorEffectsSchema,
   HighlightObjectSchema,
   PixelateObjectSchema,
   ShapeObjectSchema,
@@ -91,6 +92,7 @@ import type {
   Border,
   CameraKeyframe,
   Clip,
+  CursorEffects,
   Easing,
   FaceMode,
   FRect,
@@ -169,6 +171,14 @@ export type Transition = NonNullable<Clip['transitionIn']>;
 
 export type NudgeTarget = { componentId: string } | { mediaIds: string[] };
 
+/** A zoomed range of the camera (`setCameraZoom`, and each of `addCameraZooms`). */
+export interface CameraZoom {
+  startUs: Us;
+  endUs: Us;
+  rect: FRect;
+  easeUs?: Us;
+}
+
 /** A serializable edit command; `applyOp` dispatches on `type`. */
 export type TimelineOp =
   | { type: 'split'; atUs: Us; clipIds?: string[]; includeLinked?: boolean }
@@ -212,6 +222,8 @@ export type TimelineOp =
   | { type: 'removeCameraKeyframe'; tUs: Us }
   | { type: 'moveCameraKeyframe'; fromUs: Us; toUs: Us }
   | { type: 'setCameraZoom'; startUs: Us; endUs: Us; rect: FRect; easeUs?: Us }
+  | { type: 'addCameraZooms'; zooms: CameraZoom[] }
+  | { type: 'setCursorEffects'; effects: CursorEffects | null }
   | { type: 'addObject'; item: TimelineObject; trackId?: string }
   | { type: 'updateObject'; objectId: string; patch: ObjectPatch }
   | { type: 'removeObjects'; objectIds: string[] }
@@ -560,6 +572,16 @@ export const moveCameraKeyframe = opFn('moveCameraKeyframe');
 /** The camera on one rect over a time range, eased in and out (a zoomed range). */
 export const setCameraZoom = opFn('setCameraZoom');
 /**
+ * Adds several zoomed ranges in one step (auto-zoom on clicks, R3.11): each as `setCameraZoom`,
+ * in order. One undo removes them all; afterwards each is ordinary keyframes.
+ */
+export const addCameraZooms = opFn('addCameraZooms');
+/**
+ * Sets the cursor effects (R3.10), or removes them (null). Numbers are clamped to the schema's
+ * ranges. Refused when the project has no cursor track.
+ */
+export const setCursorEffects = opFn('setCursorEffects');
+/**
  * Adds a text, callout or privacy object (R2.5–R2.7) with the ID it carries, to `trackId` or to
  * the first object track (an "Annotations" track is made when there is none).
  */
@@ -675,7 +697,11 @@ function runOp(draft: Project, op: TimelineOp, ctx: Ctx): void {
     case 'removeCameraKeyframe':
     case 'moveCameraKeyframe':
     case 'setCameraZoom':
+    case 'addCameraZooms':
       cameraDraft(draft, op);
+      return;
+    case 'setCursorEffects':
+      cursorEffectsDraft(draft, op.effects);
       return;
     case 'addObject':
     case 'updateObject':
@@ -1335,9 +1361,28 @@ function cameraRectOf(rect: FRect): FRect {
   return clampCameraRect(rect) ?? fail('invalid-value', 'the camera rect must be a rectangle');
 }
 
+/** The keyframes with one zoomed range added (`setCameraZoom`). */
+function withZoom(keys: CameraKeyframe[] | undefined, zoom: CameraZoom): CameraKeyframe[] {
+  requireTime(zoom.startUs, 'the start');
+  requireTime(zoom.endUs, 'the end');
+  if (zoom.endUs <= zoom.startUs) fail('invalid-value', 'the zoom range needs start < end');
+  const easeUs = zoom.easeUs ?? 0;
+  if (!isTime(easeUs) || easeUs > CAMERA_EASE_MAX_US) {
+    fail('invalid-value', `the change takes 0–${String(CAMERA_EASE_MAX_US / 1e6)} s`);
+  }
+  const ease = Math.min(easeUs, Math.floor((zoom.endUs - zoom.startUs) / 2));
+  return cameraZoomRange(keys, zoom.startUs, zoom.endUs, cameraRectOf(zoom.rect), ease);
+}
+
 function cameraDraft(
   draft: Project,
-  op: OpOf<'setCameraKeyframe' | 'removeCameraKeyframe' | 'moveCameraKeyframe' | 'setCameraZoom'>,
+  op: OpOf<
+    | 'setCameraKeyframe'
+    | 'removeCameraKeyframe'
+    | 'moveCameraKeyframe'
+    | 'setCameraZoom'
+    | 'addCameraZooms'
+  >,
 ): void {
   const keys = draft.timeline.camera ? plain(draft.timeline.camera) : undefined;
   switch (op.type) {
@@ -1373,19 +1418,50 @@ function cameraDraft(
       setCamera(draft, next);
       return;
     }
-    case 'setCameraZoom': {
-      requireTime(op.startUs, 'the start');
-      requireTime(op.endUs, 'the end');
-      if (op.endUs <= op.startUs) fail('invalid-value', 'the zoom range needs start < end');
-      const easeUs = op.easeUs ?? 0;
-      if (!isTime(easeUs) || easeUs > CAMERA_EASE_MAX_US) {
-        fail('invalid-value', `the change takes 0–${String(CAMERA_EASE_MAX_US / 1e6)} s`);
-      }
-      const ease = Math.min(easeUs, Math.floor((op.endUs - op.startUs) / 2));
-      setCamera(draft, cameraZoomRange(keys, op.startUs, op.endUs, cameraRectOf(op.rect), ease));
+    case 'setCameraZoom':
+      setCamera(draft, withZoom(keys, op));
+      return;
+    case 'addCameraZooms': {
+      if (op.zooms.length === 0) fail('nothing-to-do', 'no zooms to add');
+      setCamera(
+        draft,
+        op.zooms.reduce<CameraKeyframe[] | undefined>((acc, zoom) => withZoom(acc, zoom), keys),
+      );
       return;
     }
   }
+}
+
+function cursorEffectsDraft(draft: Project, effects: CursorEffects | null): void {
+  if (effects === null) {
+    if (!draft.timeline.cursorEffects) fail('nothing-to-do', 'there are no cursor effects');
+    delete draft.timeline.cursorEffects;
+    return;
+  }
+  if (!draft.media.some((m) => m.kind === 'cursor')) {
+    fail('invalid-value', 'this project has no cursor track, so it cannot have cursor effects');
+  }
+  const { clickRings: rings, highlight } = effects;
+  const parsed = CursorEffectsSchema.safeParse({
+    smoothing: clampTo(effects.smoothing, 0, 1, 'smoothing'),
+    size: clampTo(effects.size, 0.5, 3, 'the cursor size'),
+    hide: effects.hide,
+    clickRings: {
+      enabled: rings.enabled,
+      color: rings.color,
+      size: clampTo(rings.size, 0.01, 0.2, 'the ring size'),
+      durationUs: Math.round(clampTo(rings.durationUs, 100_000, 2_000_000, 'the ring duration')),
+    },
+    highlight: {
+      enabled: highlight.enabled,
+      color: highlight.color,
+      radius: clampTo(highlight.radius, 0.01, 0.2, 'the highlight radius'),
+    },
+  });
+  if (!parsed.success) {
+    fail('invalid-value', `invalid cursor effects: ${parsed.error.issues[0]?.message ?? ''}`);
+  }
+  draft.timeline.cursorEffects = parsed.data;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -31,7 +31,8 @@ export const SERVER_INSTRUCTIONS = `Capture Studio is a screen recorder with a v
 - Cuts (cut_range, trim_ends, remove_silences) remove time from every unlocked track together, keeping audio and video in sync.
 - Edits refuse with "conflict" if the user changed the project since you read it: read it again and redo.
 - Exports go to the user's exports folder (MP4, WebM, GIF or audio only). Ask the user before overwriting an existing file.
-- Not possible yet: zooms, captions, transcripts, text, speed changes, transitions, adding media or tracks.`;
+- Cursor effects (set_cursor_effects) and auto_zoom need a recording with a cursor track (get_project says whether there is one); without one they explain why.
+- Not possible yet: captions, transcripts, adding media or tracks.`;
 
 type Result = CallToolResult;
 
@@ -321,6 +322,14 @@ export function registerTools(server: McpServer, app: AppApi): void {
   stepTool(
     server,
     app,
+    'set_cursor_effects',
+    'cursorEffects',
+    'Sets the cursor effects for the whole video, from the recording’s cursor track: smoothing, size and hide (only when the picture does not already show the system cursor), click rings and a highlight that follows the cursor. Unset fields keep their value; off: true removes them all.',
+    (a) => (a.off ? 'Remove cursor effects' : 'Change cursor effects'),
+  );
+  stepTool(
+    server,
+    app,
     'set_clip_audio',
     'clipAudio',
     'Sets audio clips’ own gain (on top of the track volume) and fade in/out.',
@@ -519,6 +528,74 @@ export function registerTools(server: McpServer, app: AppApi): void {
           },
           `${String(found.ranges.length)} pause(s), ${secondsText(total)} in total.`,
         );
+      }),
+  );
+
+  server.registerTool(
+    'auto_zoom',
+    {
+      description:
+        'Zooms in on the clicks in the recording’s cursor track: clicks close together share one zoom, eased in and out, centred on them. Ranges that already have zoom keyframes are left alone. All zooms are one undo step; afterwards each is ordinary zoom keyframes. Use dryRun to list them first.',
+      inputSchema: {
+        project: ProjectRef,
+        zoom: z.number().min(1.25).max(4).optional().describe('Magnification; default 2'),
+        start: TimeInput.optional().describe('Only clicks from here on'),
+        end: TimeInput.optional().describe('Only clicks before this'),
+        dryRun: DryRun,
+      },
+      annotations: { destructiveHint: false, openWorldHint: false },
+    },
+    (args) =>
+      run(async () => {
+        const projectId = await resolveProject(app, args.project);
+        const got = await app.call('project.get', { projectId });
+        const { frameRate } = got.doc.timeline;
+        const range =
+          args.start !== undefined || args.end !== undefined
+            ? {
+                startUs: args.start !== undefined ? toUs(args.start, frameRate) : 0,
+                endUs: args.end !== undefined ? toUs(args.end, frameRate) : Number.MAX_SAFE_INTEGER,
+              }
+            : undefined;
+        const found = await app.call('cursor.autoZoom', {
+          projectId,
+          ...(args.zoom !== undefined ? { zoom: args.zoom } : {}),
+          ...(range ? { range } : {}),
+        });
+        if (found.unavailable) throw new ToolInputError(found.unavailable);
+        if (found.zooms.length === 0) {
+          return text(
+            found.missingMediaIds.length > 0
+              ? 'The cursor track could not be read; nothing was zoomed.'
+              : 'No clicks to zoom in on (or their ranges already have zoom keyframes).',
+          );
+        }
+        const zooms = found.zooms.slice(0, MAX_AUTOMATION_BATCH_OPS);
+        const label = `Auto-zoom on ${String(zooms.length)} click group${zooms.length === 1 ? '' : 's'}`;
+        const result = await app.call('project.edit', {
+          projectId,
+          label,
+          ops: [
+            {
+              type: 'addCameraZooms',
+              zooms: zooms.map(({ startUs, endUs, rect, easeUs }) => ({
+                startUs,
+                endUs,
+                rect,
+                easeUs,
+              })),
+            },
+          ],
+          dryRun: args.dryRun ?? false,
+          ifVersion: found.version,
+        });
+        const list = zooms
+          .map(
+            (z) =>
+              `- ${String(usToSeconds(z.startUs))}–${String(usToSeconds(z.endUs))} s, ${String(Math.round(10 / z.rect.width) / 10)}×, ${String(z.clicks)} click(s)`,
+          )
+          .join('\n');
+        return text(`${describeEdit(label, result, args.dryRun ?? false)}\n${list}`);
       }),
   );
 

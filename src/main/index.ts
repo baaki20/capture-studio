@@ -817,6 +817,11 @@ async function start(): Promise<void> {
       return loaded ? { doc: loaded.doc, readOnly: loaded.readOnly } : null;
     },
     peaksFile: (projectId, mediaId) => editorMedia.assetFile('peaks', projectId, mediaId),
+    projectFile: async (projectId, relativePath) => {
+      const root = await library.findRoot(projectId);
+      // Media paths are relative POSIX paths inside the project (schema-checked).
+      return root ? path.join(root, ...relativePath.split('/')) : null;
+    },
     exports: exportService,
     logger: log,
   });

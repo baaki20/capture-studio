@@ -198,6 +198,37 @@ export const AUTOMATION_METHODS = {
       missingMediaIds: z.array(z.string()),
     }),
   ),
+  /**
+   * Camera zooms around the clicks in the cursor tracks (`project/auto-zoom.ts`); add them with
+   * `project.edit` and an `addCameraZooms` operation. Empty, with the reason, without a track.
+   */
+  'cursor.autoZoom': method(
+    z.strictObject({
+      projectId: ProjectId,
+      zoom: z.number().min(1.25).max(4).optional(),
+      leadUs: z.int().min(0).max(5_000_000).optional(),
+      holdUs: z.int().min(0).max(10_000_000).optional(),
+      mergeGapUs: z.int().min(0).max(10_000_000).optional(),
+      easeUs: z.int().min(0).max(2_000_000).optional(),
+      range: UsRangeSchema.optional(),
+    }),
+    z.object({
+      zooms: z.array(
+        z.object({
+          startUs: z.int(),
+          endUs: z.int(),
+          rect: z.object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() }),
+          easeUs: z.int(),
+          clicks: z.int(),
+        }),
+      ),
+      version: z.int().nonnegative(),
+      /** Why there are no cursor tracks to read, or null. */
+      unavailable: z.string().nullable(),
+      /** Cursor media whose file could not be read. */
+      missingMediaIds: z.array(z.string()),
+    }),
+  ),
   /** The composed frame at a timeline time, as rendered by the editor's preview. */
   'preview.frame': method(
     z.strictObject({

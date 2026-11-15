@@ -10,6 +10,8 @@ import { createServer } from '../../src/mcp/server';
 import { timelineDurationUs } from '../../src/shared/project/timeline-ops';
 import { fakeApp, peaksBytes } from '../fixtures/automation-app';
 import { recordedProject, trackByName } from '../fixtures/editor-project';
+import { CURSOR_EVENTS, CURSOR_HEADER, cursorProject } from '../fixtures/cursor-project';
+import { serializeCursorTrack } from '../../src/shared/project/cursor-track';
 
 const S = 1_000_000;
 
@@ -46,6 +48,7 @@ describe('Capture Studio MCP tools', () => {
         'edit_annotation',
         'remove_annotations',
         'set_clip_audio',
+        'set_cursor_effects',
         'set_volume_keyframe',
         'set_audio_cleanup',
         'set_speed',
@@ -54,6 +57,7 @@ describe('Capture Studio MCP tools', () => {
         'set_marker',
         'remove_marker',
         'apply_edits',
+        'auto_zoom',
         'cancel_export',
         'cut_range',
         'delete_clips',
@@ -499,6 +503,39 @@ describe('Capture Studio MCP tools', () => {
     expect(removed.text).toMatch(/^Applied "Remove 2 pauses"/);
     const after = fake.editor()!.getState().doc!;
     expect((timelineDurationUs(doc) - timelineDurationUs(after)) / S).toBeCloseTo(4.4, 1);
+  });
+
+  it('sets cursor effects and zooms in on clicks, or says why not (R3.10–R3.12)', async () => {
+    const plain = await setup();
+    const refused = await plain.call('auto_zoom', { project: plain.doc.id });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/cursor track/);
+    expect(
+      (await plain.call('set_cursor_effects', { project: plain.doc.id, smoothing: 0.5 })).isError,
+    ).toBe(true);
+
+    const doc = cursorProject();
+    const fake = fakeApp(doc);
+    const { call } = await connect(fake.app);
+    const text = serializeCursorTrack(CURSOR_HEADER, CURSOR_EVENTS);
+    fake.peaks.set('media/cursor.jsonl', new TextEncoder().encode(text).buffer);
+    const summary = await call('get_project', { project: doc.id });
+    expect(summary.text).toMatch(/"drawnCursor": true/);
+    const set = await call('set_cursor_effects', {
+      project: doc.id,
+      smoothing: 0.5,
+      highlight: true,
+    });
+    expect(set.text).toMatch(/^Applied "Change cursor effects"/);
+    expect(fake.editor()!.getState().doc!.timeline.cursorEffects).toMatchObject({
+      smoothing: 0.5,
+      highlight: { enabled: true },
+    });
+    const dry = await call('auto_zoom', { project: doc.id, dryRun: true });
+    expect(dry.text).toMatch(/2 click group/);
+    const zoomed = await call('auto_zoom', { project: doc.id });
+    expect(zoomed.text).toMatch(/^Applied "Auto-zoom on 2 click groups"/);
+    expect(fake.editor()!.getState().doc!.timeline.camera?.length).toBeGreaterThan(4);
   });
 
   it('returns frames as images', async () => {

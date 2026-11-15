@@ -7,10 +7,12 @@
 import { formatTimecode, usToSeconds, type Us } from '../time';
 import { isTrackAudible } from './render-plan';
 import { cameraView } from './camera-keyframes';
+import { cursorEffectsAvailability } from './cursor-effects';
 import { objectLabel } from './objects';
 import type {
   AudioTrack,
   Beautify,
+  CursorEffects,
   Component,
   Easing,
   FaceMode,
@@ -126,6 +128,16 @@ export interface ProjectSummary {
     centerY: number;
     easing: Easing;
   }[];
+  /** v3: the cursor track and effects (`cursor-effects.ts`). */
+  cursor: {
+    /** Rings, highlight and auto-zoom can be used. */
+    track: boolean;
+    /** Smoothing, size and hide can be used too. */
+    drawnCursor: boolean;
+    /** Why something is not possible, or absent. */
+    note?: string;
+    effects?: CursorEffects;
+  };
 }
 
 export function timeSummary(us: Us, frameRate: number): TimeSummary {
@@ -261,5 +273,17 @@ export function summarizeProject(doc: Project): ProjectSummary {
           }),
         }
       : {}),
+    cursor: cursorSummary(doc),
+  };
+}
+
+function cursorSummary(doc: Project): ProjectSummary['cursor'] {
+  const availability = cursorEffectsAvailability(doc);
+  const note = availability.reason ?? availability.drawnReason;
+  return {
+    track: availability.available,
+    drawnCursor: availability.drawn,
+    ...(note ? { note } : {}),
+    ...(doc.timeline.cursorEffects ? { effects: doc.timeline.cursorEffects } : {}),
   };
 }

@@ -24,6 +24,7 @@ import {
   type TextPreset,
 } from '../shared/project/objects';
 import { cameraAt, cameraRect, cameraView } from '../shared/project/camera-keyframes';
+import { DEFAULT_CURSOR_EFFECTS, effectiveCursorEffects } from '../shared/project/cursor-effects';
 import type { ExternalOp } from '../shared/project/op-schema';
 import {
   EASINGS,
@@ -254,6 +255,22 @@ export const SHAPES = {
       .optional()
       .describe('Eased zoom in and out; default 0.6'),
   },
+  cursorEffects: {
+    off: z.boolean().optional().describe('Remove every cursor effect'),
+    smoothing: z
+      .number()
+      .min(0)
+      .max(1)
+      .optional()
+      .describe('Smooths the cursor path: 0 = as recorded, 1 = smoothest'),
+    size: z.number().min(0.5).max(3).optional().describe('Cursor size, 1 = the system size'),
+    hide: z.boolean().optional().describe('Hide the cursor (rings and highlight still show)'),
+    clickRings: z.boolean().optional().describe('A ring grows out of every click'),
+    ringColor: z.string().optional().describe('#RRGGBB'),
+    ringSeconds: z.number().min(0.1).max(2).optional().describe('How long a ring shows'),
+    highlight: z.boolean().optional().describe('A translucent circle follows the cursor'),
+    highlightColor: z.string().optional().describe('#RRGGBBAA, e.g. #FFE45C59'),
+  },
   zoomKeyframe: {
     at: TimeInput,
     remove: z.boolean().optional().describe('Remove the zoom keyframe at this time instead'),
@@ -406,6 +423,7 @@ export const EditStep = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('background'), ...SHAPES.background }),
   z.object({ kind: z.literal('zoom'), ...SHAPES.zoom }),
   z.object({ kind: z.literal('zoomKeyframe'), ...SHAPES.zoomKeyframe }),
+  z.object({ kind: z.literal('cursorEffects'), ...SHAPES.cursorEffects }),
   z.object({ kind: z.literal('speed'), ...SHAPES.speed }),
   z.object({ kind: z.literal('freezeFrame'), ...SHAPES.freezeFrame }),
   z.object({ kind: z.literal('transition'), ...SHAPES.transition }),
@@ -728,6 +746,33 @@ export function stepOps(doc: Project, step: EditStep): ExternalOp[] {
         ...(step.shadow !== undefined ? { shadow: step.shadow } : {}),
       });
       return [{ type: 'setBeautify', beautify }];
+    }
+    case 'cursorEffects': {
+      if (step.off) return [{ type: 'setCursorEffects', effects: null }];
+      const base = effectiveCursorEffects(doc) ?? DEFAULT_CURSOR_EFFECTS;
+      return [
+        {
+          type: 'setCursorEffects',
+          effects: {
+            smoothing: step.smoothing ?? base.smoothing,
+            size: step.size ?? base.size,
+            hide: step.hide ?? base.hide,
+            clickRings: {
+              ...base.clickRings,
+              ...(step.clickRings !== undefined ? { enabled: step.clickRings } : {}),
+              ...(step.ringColor !== undefined ? { color: step.ringColor } : {}),
+              ...(step.ringSeconds !== undefined
+                ? { durationUs: Math.round(step.ringSeconds * 1e6) }
+                : {}),
+            },
+            highlight: {
+              ...base.highlight,
+              ...(step.highlight !== undefined ? { enabled: step.highlight } : {}),
+              ...(step.highlightColor !== undefined ? { color: step.highlightColor } : {}),
+            },
+          },
+        },
+      ];
     }
     case 'zoom': {
       const startUs = time(step.start);

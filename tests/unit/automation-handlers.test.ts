@@ -72,6 +72,7 @@ function setup(enabled: boolean) {
     listProjects: () => Promise.resolve([]),
     readProject: () => Promise.resolve(null),
     peaksFile: () => Promise.resolve({ status: 'unavailable', path: null }),
+    projectFile: () => Promise.resolve(null),
     exports: {
       start: () => Promise.reject(new Error('unused')),
       cancel: () => undefined,

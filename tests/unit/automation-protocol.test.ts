@@ -24,6 +24,7 @@ describe('automation protocol', () => {
   it('lists only known methods, and none that run code or take paths', () => {
     expect(Object.keys(AUTOMATION_METHODS).sort()).toEqual([
       'audio.silences',
+      'cursor.autoZoom',
       'export.cancel',
       'export.start',
       'export.status',

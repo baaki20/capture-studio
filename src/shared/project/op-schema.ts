@@ -11,6 +11,7 @@ import { ObjectPatchSchema } from './object-patch';
 import {
   BeautifySchema,
   BorderSchema,
+  CursorEffectsSchema,
   EASINGS,
   FACE_MODES,
   FRectSchema,
@@ -147,6 +148,23 @@ export const TimelineOpSchema = z.discriminatedUnion('type', [
     endUs: NonNegativeUs,
     rect: CameraRect,
     easeUs: NonNegativeUs.optional(),
+  }),
+  z.strictObject({
+    type: z.literal('addCameraZooms'),
+    zooms: z
+      .array(
+        z.strictObject({
+          startUs: NonNegativeUs,
+          endUs: NonNegativeUs,
+          rect: CameraRect,
+          easeUs: NonNegativeUs.optional(),
+        }),
+      )
+      .min(1),
+  }),
+  z.strictObject({
+    type: z.literal('setCursorEffects'),
+    effects: CursorEffectsSchema.nullable(),
   }),
   z.strictObject({
     type: z.literal('addObject'),

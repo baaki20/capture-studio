@@ -16,7 +16,10 @@ import {
 } from '../../shared/automation/protocol';
 import type { ExportOptions, InvokeResponse } from '../../shared/ipc/contract';
 import type { Logger } from '../../shared/logger';
+import { proposeAutoZoom } from '../../shared/project/auto-zoom';
 import { describeChange } from '../../shared/project/change-summary';
+import { cursorEffectsAvailability, cursorMedia } from '../../shared/project/cursor-effects';
+import { parseCursorTrack, type CursorTrack } from '../../shared/project/cursor-track';
 import { parsePeaks } from '../../shared/project/peaks';
 import type { Project } from '../../shared/project/schema';
 import { quietRangesOnTimeline, quietWindows, type UsRange } from '../../shared/project/silence';
@@ -48,6 +51,8 @@ export interface AutomationServiceDeps {
     mediaId: string,
   ): Promise<{ status: 'ready' | 'pending' | 'unavailable'; path: string | null }>;
   readFile(path: string): Promise<ArrayBuffer>;
+  /** Full path of a file inside a project (a media's `path`), or null for an unknown project. */
+  projectFile(projectId: string, relativePath: string): Promise<string | null>;
   exports: {
     start(request: {
       projectId: string;
@@ -153,6 +158,8 @@ export class AutomationService {
     'project.redo': ({ projectId }) => this.historyStep(projectId, 'redo'),
 
     'audio.silences': (params) => this.silences(params),
+
+    'cursor.autoZoom': (params) => this.autoZoom(params),
 
     'preview.frame': async ({ projectId, atUs, maxWidth }) => {
       await this.editable(projectId);
@@ -291,6 +298,41 @@ export class AutomationService {
     return {
       ranges: quietRangesOnTimeline(doc, quiet, { minDurationUs, padUs }),
       version: current.version,
+      missingMediaIds: missing,
+    };
+  }
+
+  private async autoZoom({
+    projectId,
+    range,
+    ...options
+  }: AutomationParams<'cursor.autoZoom'>): Promise<AutomationResult<'cursor.autoZoom'>> {
+    const current = await this.current(projectId);
+    const { doc } = current;
+    const availability = cursorEffectsAvailability(doc);
+    const tracks = new Map<string, CursorTrack>();
+    const missing: string[] = [];
+    if (availability.available) {
+      for (const media of cursorMedia(doc)) {
+        const file = await this.deps.projectFile(projectId, media.path);
+        try {
+          if (!file) throw new Error('unknown project');
+          const text = new TextDecoder().decode(await this.deps.readFile(file));
+          tracks.set(media.id, parseCursorTrack(text));
+        } catch (error) {
+          this.deps.logger.warn(`automation: cursor track ${media.id} unreadable`, error);
+          missing.push(media.id);
+        }
+      }
+    }
+    const zooms = proposeAutoZoom(doc, tracks, {
+      ...options,
+      ...(range ? { range: { inUs: range.startUs, outUs: range.endUs } } : {}),
+    });
+    return {
+      zooms,
+      version: current.version,
+      unavailable: availability.reason,
       missingMediaIds: missing,
     };
   }

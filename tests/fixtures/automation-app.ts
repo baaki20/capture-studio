@@ -104,6 +104,7 @@ export function fakeApp(doc: Project): FakeApp {
           : { status: 'unavailable', path: null },
       ),
     readFile: (file) => Promise.resolve(peaks.get(file) ?? new ArrayBuffer(0)),
+    projectFile: (_projectId, relativePath) => Promise.resolve(relativePath),
     exports: {
       start: (request) => {
         started.push(request);

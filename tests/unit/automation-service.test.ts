@@ -16,8 +16,15 @@ import {
   type EditorAutomationCommand,
 } from '../../src/shared/ipc/editor-automation';
 import { PEAK_WINDOW_US } from '../../src/shared/project/peaks';
+import { serializeCursorTrack } from '../../src/shared/project/cursor-track';
 import type { Project } from '../../src/shared/project/schema';
 import { counterIds, recordedProject } from '../fixtures/editor-project';
+import {
+  CURSOR_EVENTS,
+  CURSOR_HEADER,
+  CURSOR_MEDIA_ID,
+  cursorProject,
+} from '../fixtures/cursor-project';
 
 const S = 1_000_000;
 const OPTIONS = { resolution: '720p', fps: 30, quality: 'draft', encoder: 'auto' } as const;
@@ -64,6 +71,8 @@ function setup(options: { doc?: Project; readOnly?: boolean } = {}) {
     string,
     { status: 'ready' | 'pending' | 'unavailable'; bytes?: ArrayBuffer }
   >();
+  /** Project files by `file:<relative path>`. */
+  const files = new Map<string, string>();
   const ensure = vi.fn((projectId: string) => {
     if (projectId !== doc.id)
       return Promise.reject(new EditorLinkError('editor-unavailable', 'no'));
@@ -109,7 +118,12 @@ function setup(options: { doc?: Project; readOnly?: boolean } = {}) {
           : { status: entry?.status ?? 'unavailable', path: null },
       );
     },
-    readFile: (file) => Promise.resolve(peaks.get(file)?.bytes ?? new ArrayBuffer(0)),
+    readFile: (file) => {
+      const text = files.get(file);
+      if (text !== undefined) return Promise.resolve(new TextEncoder().encode(text).buffer);
+      return Promise.resolve(peaks.get(file)?.bytes ?? new ArrayBuffer(0));
+    },
+    projectFile: (_projectId, relativePath) => Promise.resolve(`file:${relativePath}`),
     exports: {
       start: startExport,
       cancel: cancelExport,
@@ -131,6 +145,7 @@ function setup(options: { doc?: Project; readOnly?: boolean } = {}) {
     editors,
     ensure,
     peaks,
+    files,
     emit,
     startExport,
     cancelExport,
@@ -242,6 +257,21 @@ describe('AutomationService', () => {
     expect(result.ranges).toHaveLength(1);
     const [range] = result.ranges;
     expect((range!.endUs - range!.startUs) / S).toBeCloseTo(2.8, 1);
+  });
+
+  it('proposes zooms from the cursor tracks, or says why it cannot', async () => {
+    const none = setup();
+    const empty = await none.h['cursor.autoZoom']({ projectId: none.doc.id });
+    expect(empty.zooms).toEqual([]);
+    expect(empty.unavailable).toMatch(/cursor track/);
+
+    const { h, doc, files } = setup({ doc: cursorProject() });
+    const missing = await h['cursor.autoZoom']({ projectId: doc.id });
+    expect(missing.missingMediaIds).toEqual([CURSOR_MEDIA_ID]);
+    files.set('file:media/cursor.jsonl', serializeCursorTrack(CURSOR_HEADER, CURSOR_EVENTS));
+    const found = await h['cursor.autoZoom']({ projectId: doc.id, zoom: 2 });
+    expect(found.unavailable).toBeNull();
+    expect(found.zooms.map((z) => z.clicks)).toEqual([2, 1]);
   });
 
   it('captures frames through the editor', async () => {
