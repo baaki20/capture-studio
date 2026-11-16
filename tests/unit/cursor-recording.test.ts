@@ -272,7 +272,7 @@ describe('native helper loading', () => {
     expect(
       nativeHelperPath({ ...options, isPackaged: true, platform: 'darwin', arch: 'arm64' }),
     ).toBe('/r/native/darwin-arm64/cs-native.node');
-    expect(nativeHelperPath({ ...options, env: { CS_NATIVE_DIR: '/n' } })).toBe(
+    expect(nativeHelperPath({ ...options, platform: 'linux', env: { CS_NATIVE_DIR: '/n' } })).toBe(
       '/n/cs-native.node',
     );
     expect(
