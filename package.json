@@ -36,9 +36,9 @@
     "gen:schema": "tsx scripts/gen-schema.ts",
     "gen:icons": "tsx scripts/gen-icons.ts",
     "mcp": "tsx src/mcp/server.ts",
-    "package:linux": "npm run fetch:ffmpeg -- --platform linux-x64 && npm run build:native && electron-vite build && electron-builder --linux --x64",
-    "package:win": "npm run fetch:ffmpeg -- --platform win32-x64 && electron-vite build && electron-builder --win --x64",
-    "package:mac": "npm run fetch:ffmpeg && npm run build:native && electron-vite build && electron-builder --mac",
+    "package:linux": "npm run fetch:ffmpeg -- --platform linux-x64 && npm run build:native && electron-vite build && electron-builder --linux --x64 --publish never",
+    "package:win": "npm run fetch:ffmpeg -- --platform win32-x64 && electron-vite build && electron-builder --win --x64 --publish never",
+    "package:mac": "npm run fetch:ffmpeg && npm run build:native && electron-vite build && electron-builder --mac --publish never",
     "smoke:linux": "tsx scripts/smoke-linux-package.ts",
     "smoke:package": "tsx scripts/smoke-package.ts"
   },

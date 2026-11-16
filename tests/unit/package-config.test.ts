@@ -61,3 +61,14 @@ describe('electron-builder.yml', () => {
     expect(publish).toContain('repo: capture-studio');
   });
 });
+
+describe('package scripts', () => {
+  it('never publish (electron-builder would on CI, where the publish config needs a token)', () => {
+    const pkg = JSON.parse(
+      readFileSync(path.join(import.meta.dirname, '../../package.json'), 'utf8'),
+    ) as { scripts: Record<string, string> };
+    for (const name of ['package:linux', 'package:win', 'package:mac']) {
+      expect(pkg.scripts[name], name).toMatch(/electron-builder [^&]*--publish never/);
+    }
+  });
+});
