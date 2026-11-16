@@ -1,10 +1,105 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import type { UpdateStatePayload } from '../../shared/ipc/contract';
 import { ipcErrorMessage } from '../../shared/ipc/errors';
 import type { Settings as SettingsData } from '../../shared/settings/schema';
 import { GB, MB, namePreview, parseDiskThresholds } from './settings-form';
 import styles from './Settings.module.css';
 
 type Recorder = SettingsData['recorder'];
+
+/** One line about the updater's state (P3 step 9). */
+export function updateStatusText(state: UpdateStatePayload): string {
+  switch (state.kind) {
+    case 'unsupported':
+      return state.reason;
+    case 'idle':
+      return 'Not checked yet.';
+    case 'checking':
+      return 'Checking for updates…';
+    case 'downloading':
+      return `Downloading ${state.version}… ${String(state.percent)} %`;
+    case 'ready':
+      return `Version ${state.version} is ready. It installs when you restart or quit.`;
+    case 'up-to-date':
+      return 'Capture Studio is up to date.';
+    case 'error':
+      return `The update check failed: ${state.message}`;
+  }
+}
+
+/** Updates (P3 step 9): channel, automatic checks, the state and its actions. */
+function UpdatesGroup({
+  settings,
+  onPatch,
+}: {
+  settings: SettingsData['updates'];
+  onPatch: (patch: Partial<SettingsData['updates']>) => void;
+}) {
+  const api = window.captureStudio;
+  const [state, setState] = useState<UpdateStatePayload | null>(null);
+  useEffect(() => {
+    let active = true;
+    void api.updates.status().then((next) => {
+      if (active) setState(next);
+    });
+    const off = api.updates.onChanged(setState);
+    return () => {
+      active = false;
+      off();
+    };
+  }, [api]);
+  const unsupported = state?.kind === 'unsupported';
+  return (
+    <fieldset className={styles.group}>
+      <legend>Updates</legend>
+      <Field label="Channel" hint="Pre-releases get new features first and may have rough edges.">
+        <select
+          aria-label="Update channel"
+          value={settings.channel}
+          disabled={unsupported}
+          onChange={(e) =>
+            onPatch({ channel: e.target.value as SettingsData['updates']['channel'] })
+          }
+        >
+          <option value="release">Releases</option>
+          <option value="pre-release">Pre-releases</option>
+        </select>
+      </Field>
+      <Field label="Automatic checks">
+        <label className={styles.toggle}>
+          <input
+            type="checkbox"
+            checked={settings.autoCheck}
+            disabled={unsupported}
+            onChange={(e) => onPatch({ autoCheck: e.target.checked })}
+          />
+          Check for updates in the background
+        </label>
+      </Field>
+      <Field label="Status">
+        <p className={styles.hint} data-testid="update-status" role="status">
+          {state ? updateStatusText(state) : 'Loading…'}
+        </p>
+        {state && !unsupported ? (
+          <span className={styles.inline}>
+            <button
+              type="button"
+              disabled={state.kind === 'checking' || state.kind === 'downloading'}
+              onClick={() => void api.updates.check().then(setState)}
+            >
+              Check now
+            </button>
+            {state.kind === 'ready' ? (
+              <button type="button" onClick={() => void api.updates.install()}>
+                Restart and update
+              </button>
+            ) : null}
+          </span>
+        ) : null}
+      </Field>
+    </fieldset>
+  );
+}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -259,6 +354,11 @@ export function Settings() {
           </label>
         </Field>
       </fieldset>
+
+      <UpdatesGroup
+        settings={settings.updates}
+        onPatch={(updates) => save(api.settings.patch({ updates }))}
+      />
     </section>
   );
 }

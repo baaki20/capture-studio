@@ -206,7 +206,12 @@ async function commandLine(pid: number): Promise<string> {
  * Starts the packaged app with development-only switches set, waits for the media utility to
  * report its FFmpeg version in the app's own log, checks the switches were ignored, then quits.
  */
-async function launch(label: string, command: string, work: string): Promise<void> {
+async function launch(
+  label: string,
+  command: string,
+  work: string,
+  updates: 'on' | 'off',
+): Promise<void> {
   const config = path.join(work, 'config');
   const videos = path.join(work, 'Videos');
   const devProfile = path.join(work, 'dev-profile-must-not-exist');
@@ -319,6 +324,19 @@ async function launch(label: string, command: string, work: string): Promise<voi
         ? ', media utility exited cleanly'
         : ''),
   );
+  // P3 step 9: the helper ships and loads; the updater is on only where it can work.
+  const native = /native helper: ([^\n]+)/.exec(logText);
+  record(
+    `${label}: native helper loaded`,
+    native !== null && !native[1]?.startsWith('not loaded'),
+    native?.[1] ?? 'no "native helper" line',
+  );
+  const updater = /updates: (on|off \([^\n]*\))/.exec(logText);
+  record(
+    `${label}: updater ${updates}`,
+    updater?.[1]?.startsWith(updates) ?? false,
+    updater?.[1] ?? 'no "updates" line',
+  );
   out.close();
   err.close();
 }
@@ -336,7 +354,7 @@ async function smokeAppImage(file: string, work: string): Promise<void> {
   await checkDesktopFile('AppImage', path.join(squash, `${APP_ID}.desktop`));
   await checkIcons('AppImage', path.join(squash, 'usr', 'share', 'icons', 'hicolor'));
 
-  if (!options['no-launch']) await launch('AppImage', file, path.join(work, 'run'));
+  if (!options['no-launch']) await launch('AppImage', file, path.join(work, 'run'), 'on');
 }
 
 async function smokeDeb(file: string, work: string): Promise<void> {
@@ -386,7 +404,7 @@ async function smokeDeb(file: string, work: string): Promise<void> {
   await checkIcons('deb', path.join(root, 'usr', 'share', 'icons', 'hicolor'));
 
   if (!options['no-launch']) {
-    await launch('deb (extracted)', path.join(appDir, EXECUTABLE), path.join(work, 'run'));
+    await launch('deb (extracted)', path.join(appDir, EXECUTABLE), path.join(work, 'run'), 'off');
   }
 }
 

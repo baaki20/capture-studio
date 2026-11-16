@@ -51,6 +51,9 @@ import {
 } from './ipc/automation-handlers';
 import { registerCoreHandlers } from './ipc/core-handlers';
 import { ScreenSourceMemory, selectWithMemory } from './screen-memory';
+import { DocumentOpener, documentArgs } from './open-documents';
+import { registerUpdates } from './updates/register';
+import type { UpdateService } from './updates/update-service';
 import { loadNativeHelper } from './native/cs-native';
 import { createCursorTrackStarter } from './recording/cursor-track-start';
 import { registerEditorHandlers } from './ipc/editor-handlers';
@@ -165,6 +168,7 @@ let controlsHost: ControlsWindowHost | null = null;
 let exportService: ExportService | null = null;
 /** The assistants' automation socket (on only while enabled in Settings). */
 let automation: AutomationHandle | null = null;
+let updates: UpdateService | null = null;
 /** One editor window per project (steps 16–18). */
 const editorHost = new EditorWindowHost({ router, renderer, logger: log });
 /** Stops the setup panel's system-audio meter (set once the utility exists). */
@@ -667,6 +671,22 @@ async function start(): Promise<void> {
     },
     logger: log,
   });
+  documentOpener = new DocumentOpener({
+    unpack: async (file) => {
+      const entry = await library.unpack(file);
+      libraryChanged();
+      return entry;
+    },
+    importFolder: async (folder) => {
+      const entry = await library.importFolder(folder);
+      libraryChanged();
+      return entry;
+    },
+    openEditor: (id) => void editorHost.open(id),
+    showError: (title, message) => dialog.showErrorBox(title, message),
+    logger: log,
+  });
+  documentOpener.open(pendingDocuments.splice(0));
   const recovery = new RecoveryService({
     store,
     utility,
@@ -701,7 +721,10 @@ async function start(): Promise<void> {
       const options: Electron.SaveDialogOptions = {
         title: 'Pack project',
         defaultPath: path.join(settings.get().exportsDir, defaultName),
-        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+        filters: [
+          { name: 'Capture Studio pack', extensions: ['cstudiopack'] },
+          { name: 'Zip archive', extensions: ['zip'] },
+        ],
         properties: ['showOverwriteConfirmation', 'createDirectory'],
       };
       const result = parent
@@ -711,9 +734,9 @@ async function start(): Promise<void> {
     },
     chooseUnpackFile: (senderId) =>
       chooseOpenPath(senderId, {
-        title: 'Unpack a packed project (.zip)',
+        title: 'Unpack a packed project',
         properties: ['openFile'],
-        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+        filters: [{ name: 'Capture Studio pack or zip', extensions: ['cstudiopack', 'zip'] }],
       }),
   });
 
@@ -847,6 +870,24 @@ async function start(): Promise<void> {
     logger: log,
   });
 
+  // App updates (P3 step 9): GitHub Releases, only where this build can update itself.
+  updates = await registerUpdates({
+    router,
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    env: process.env,
+    execPath: process.execPath,
+    settings: () => settings.get().updates,
+    logger: log,
+  });
+  let updateSettings = JSON.stringify(settings.get().updates);
+  settings.onChange((next) => {
+    const changed = JSON.stringify(next.updates);
+    if (changed === updateSettings) return;
+    updateSettings = changed;
+    updates?.settingsChanged();
+  });
+
   automation = registerAutomation({
     router,
     editorHost,
@@ -919,21 +960,39 @@ async function start(): Promise<void> {
 
   showShell();
   if (cli.action) actionBus.dispatch({ type: cli.action, source: 'cli' });
+  documentOpener.ready();
 }
 
 const secondInstanceData: SecondInstanceData = { action: cli.action };
+
+/** Packs and project folders to open (plan D9): from argv, `open-file` or a second instance. */
+const pendingDocuments: string[] = documentArgs(process.argv.slice(1), process.cwd());
+let documentOpener: DocumentOpener | null = null;
+function openDocuments(files: readonly string[]): void {
+  if (files.length === 0) return;
+  if (documentOpener) documentOpener.open(files);
+  else pendingDocuments.push(...files);
+}
 
 if (relaunchX11 || !app.requestSingleInstanceLock(secondInstanceData)) {
   // Relaunching for X11, or another instance is running: it receives our action through
   // 'second-instance' (R1.2).
   app.quit();
 } else {
-  app.on('second-instance', (_event, argv, _cwd, additionalData) => {
+  app.on('second-instance', (_event, argv, cwd, additionalData) => {
     const forwarded = SecondInstanceDataSchema.safeParse(additionalData);
     const action = forwarded.success ? forwarded.data.action : parseCliArgs(argv).action;
+    const documents = documentArgs(argv.slice(1), cwd);
+    openDocuments(documents);
     if (!app.isReady()) return;
     if (action) actionBus.dispatch({ type: action, source: 'cli' });
-    else showShell();
+    else if (documents.length === 0) showShell();
+  });
+
+  // macOS: a document opened from Finder (also before the app is ready).
+  app.on('open-file', (event, file) => {
+    event.preventDefault();
+    openDocuments([file]);
   });
 
   // macOS: clicking the Dock icon with no window open shows the main window.
@@ -966,6 +1025,7 @@ if (relaunchX11 || !app.requestSingleInstanceLock(secondInstanceData)) {
     sessionManager?.dispose();
     engineHost?.dispose();
     exportService?.dispose();
+    updates?.dispose();
     mediaUtility?.stop();
     router.dispose();
   });

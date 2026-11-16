@@ -100,9 +100,8 @@ describe('packaging configuration', () => {
 
   it('ships FFmpeg where the packaged locate() looks for it', async () => {
     const yaml = await text('electron-builder.yml');
-    expect(yaml).toContain(
-      'from: resources/bin/${platform}-${arch}\n    to: bin/${platform}-${arch}',
-    );
+    // Per target: `${platform}` would name the build machine (package-config.test.ts).
+    expect(yaml).toContain('from: resources/bin/linux-${arch}\n      to: bin/linux-${arch}');
     const loc = resolveFfmpegPaths({
       isPackaged: true,
       resourcesPath: '/opt/Capture Studio/resources',
@@ -127,6 +126,7 @@ describe('package checks', () => {
         'Icon=capture-studio',
         'StartupWMClass=org.example.App',
         'Categories=AudioVideo;Video;Recorder;',
+        'MimeType=application/x-capture-studio-pack;',
         '',
         '[Desktop Action New]',
         'Name=Other',

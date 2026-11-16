@@ -60,6 +60,12 @@ const api: ShellPreloadApi = {
     copyReport: () => invoke('diag.copyReport'),
     forgetScreen: () => invoke('diag.forgetScreen'),
   },
+  updates: {
+    status: () => invoke('updates.status'),
+    check: () => invoke('updates.check'),
+    install: () => invoke('updates.install'),
+    onChanged: (listener) => subscribe('updates.changed', listener),
+  },
 };
 
 contextBridge.exposeInMainWorld('captureStudio', api);

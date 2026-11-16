@@ -4,6 +4,8 @@
  */
 import path from 'node:path';
 import type { Logger } from '../../shared/logger';
+import { PROJECT_EXTENSION } from '../../shared/project/schema';
+import { PACK_EXTENSION } from '../open-documents';
 import { checkMediaPresence } from '../projects/editor-media';
 import type { Library } from '../projects/library';
 import type { ProjectStore } from '../projects/project-store';
@@ -87,9 +89,14 @@ export function registerSessionHandlers(deps: SessionHandlerDeps): void {
   router.handle('library.pack', async ({ id }, context) => {
     const root = await library.findRoot(id);
     if (!root) throw new Error(`project ${id} was not found`);
-    const chosen = await deps.choosePackFile?.(context.senderId, `${path.basename(root)}.zip`);
+    const chosen = await deps.choosePackFile?.(
+      context.senderId,
+      `${path.basename(root, PROJECT_EXTENSION)}${PACK_EXTENSION}`,
+    );
     if (!chosen) return null;
-    const output = path.extname(chosen).toLowerCase() === '.zip' ? chosen : `${chosen}.zip`;
+    // A pack has its own extension (plan D9); a name the user ended in .zip stays a .zip.
+    const ext = path.extname(chosen).toLowerCase();
+    const output = ext === '.zip' || ext === PACK_EXTENSION ? chosen : `${chosen}${PACK_EXTENSION}`;
     return library.pack(id, output);
   });
   router.handle('library.unpack', async (_payload, context) => {

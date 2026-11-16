@@ -13,7 +13,11 @@ import { z } from 'zod';
 import { CapabilityReportSchema, FfmpegEncoderReportSchema } from '../capabilities/types';
 import { EXPORT_FORMATS } from '../export/formats';
 import { MediaSchema, NRectSchema, ProjectSchema, TrackSchema } from '../project/schema';
-import { AutomationSettingsSchema, SettingsV1Schema } from '../settings/schema';
+import {
+  AutomationSettingsSchema,
+  UpdateSettingsSchema,
+  SettingsV1Schema,
+} from '../settings/schema';
 import { CLI_ACTIONS } from './actions';
 import { EditorAutomationReplySchema, EditorAutomationRequestSchema } from './editor-automation';
 
@@ -65,6 +69,7 @@ export const SettingsPatchSchema = z.strictObject({
   language: S.language.optional(),
   /** Only the shell (Settings) may change this; main refuses it from other windows. */
   automation: AutomationSettingsSchema.partial().strict().optional(),
+  updates: UpdateSettingsSchema.partial().strict().optional(),
 });
 export type SettingsPatchPayload = z.infer<typeof SettingsPatchSchema>;
 
@@ -385,6 +390,18 @@ export const DiagnosticsReportSchema = z.object({
 });
 export type DiagnosticsReport = z.infer<typeof DiagnosticsReportSchema>;
 
+/** The updater's state (P3 step 9, `main/updates/update-service.ts`). */
+export const UpdateStateSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('unsupported'), reason: z.string() }),
+  z.object({ kind: z.literal('idle'), checkedAt: z.string().nullable() }),
+  z.object({ kind: z.literal('checking') }),
+  z.object({ kind: z.literal('downloading'), version: z.string(), percent: z.number() }),
+  z.object({ kind: z.literal('ready'), version: z.string() }),
+  z.object({ kind: z.literal('up-to-date'), checkedAt: z.string() }),
+  z.object({ kind: z.literal('error'), message: z.string() }),
+]);
+export type UpdateStatePayload = z.infer<typeof UpdateStateSchema>;
+
 // ---------------------------------------------------------------------------------------------
 // Invoke channels
 
@@ -522,6 +539,11 @@ export const INVOKE_CHANNELS = {
 
   'diag.get': invoke(NoPayload, DiagnosticsReportSchema, SHELL),
   'diag.copyReport': invoke(NoPayload, z.object({ text: z.string() }), SHELL),
+  'updates.status': invoke(NoPayload, UpdateStateSchema, SHELL),
+  /** Checks now; resolves with the state after the check (a download continues afterwards). */
+  'updates.check': invoke(NoPayload, UpdateStateSchema, SHELL),
+  /** Restarts into a downloaded update. */
+  'updates.install': invoke(NoPayload, z.object({ started: z.boolean() }), SHELL),
   /** "Choose the screen again" (P3 step 8): the next recording asks the portal. */
   'diag.forgetScreen': invoke(NoPayload, z.object({ forgotten: z.boolean() }), SHELL),
 } as const;
@@ -580,6 +602,7 @@ export const EVENT_CHANNELS = {
   /** A project's background peaks and thumbnails are done (R1.44). */
   'media.cachesReady': { payload: z.object({ projectId: Id }), windows: ['shell', 'editor'] },
   'caps.changed': { payload: CapabilityReportSchema, windows: UI },
+  'updates.changed': { payload: UpdateStateSchema, windows: ['shell'] },
   /** An assistant edit, undo, snapshot or frame capture for this editor (`editor-automation.ts`). */
   'automation.request': { payload: EditorAutomationRequestSchema, windows: ['editor'] },
 } as const satisfies Record<string, { payload: z.ZodType; windows: readonly WindowKind[] }>;

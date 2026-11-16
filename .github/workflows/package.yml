@@ -1,0 +1,89 @@
+name: Packages
+
+# P3 step 9: builds the unsigned packages on each platform's own runner when packaging changes,
+# checks them (smoke tests) and keeps them as short-lived artifacts. Nothing is published; signing
+# switches on only where the credentials are configured as secrets (plan D3).
+on:
+  push:
+    paths:
+      - electron-builder.yml
+      - package.json
+      - package-lock.json
+      - build/**
+      - native/**
+      - scripts/build-native.ts
+      - scripts/smoke-*.ts
+      - scripts/package-checks.ts
+      - .github/workflows/package.yml
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            script: package:linux
+          - runner: windows-2025
+            script: package:win
+          - runner: macos-15
+            script: package:mac -- --arm64
+          - runner: macos-15-intel
+            script: package:mac -- --x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      # No signing identity on these runners: build unsigned (macOS arm64 gets an ad-hoc signature).
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Cache FFmpeg archive
+        uses: actions/cache@v4
+        with:
+          path: .cache/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ffmpeg-manifest.json') }}
+
+      # package:linux and package:mac build it themselves; package:win cannot on other hosts.
+      - name: Build the native helper
+        if: runner.os == 'Windows'
+        run: npm run build:native
+
+      - name: Build packages
+        run: npm run ${{ matrix.script }}
+
+      - name: Install Xvfb
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb libnss3 libgbm1 libasound2t64
+
+      - name: Smoke test (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run --auto-servernum npm run smoke:linux
+
+      - name: Smoke test (Windows, macOS)
+        if: runner.os != 'Linux'
+        run: npm run smoke:package
+
+      - name: Keep the packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.runner }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest*.yml
+          retention-days: 7

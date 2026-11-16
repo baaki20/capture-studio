@@ -112,6 +112,12 @@ export interface ShellPreloadApi extends PreloadBase {
     /** "Choose the screen again": the next recording asks the portal (P3 step 8). */
     forgetScreen(): Promise<InvokeResponse<'diag.forgetScreen'>>;
   };
+  readonly updates: {
+    status(): Promise<InvokeResponse<'updates.status'>>;
+    check(): Promise<InvokeResponse<'updates.check'>>;
+    install(): Promise<InvokeResponse<'updates.install'>>;
+    onChanged(listener: Listener<EventPayload<'updates.changed'>>): Unsubscribe;
+  };
 }
 
 export interface ControlsPreloadApi extends PreloadBase {

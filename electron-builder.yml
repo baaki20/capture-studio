@@ -1,5 +1,12 @@
-# Packaging (spec §1.2, §1.10, §4.5 step 20). Phase 1 ships AppImage and deb for Linux.
-# `npm run package:linux` builds both into dist/; `npm run smoke:linux` checks them.
+# Packaging (spec §1.2, §1.10, §4.5 step 20; P3 step 9). Linux: AppImage and deb
+# (`npm run package:linux`, checked by `npm run smoke:linux`). Windows: NSIS, x64
+# (`npm run package:win`). macOS: dmg and zip, one build per architecture (plan D5;
+# `npm run package:mac -- --arm64` or `-- --x64`).
+#
+# Signing (plan D3) switches on by itself when the credentials are in the environment, and is
+# skipped otherwise: macOS `CSC_LINK` + `CSC_KEY_PASSWORD` (Developer ID Application) and, for
+# notarization, `APPLE_ID` + `APPLE_APP_SPECIFIC_PASSWORD` + `APPLE_TEAM_ID`; Windows `CSC_LINK` +
+# `CSC_KEY_PASSWORD` (or `WIN_CSC_LINK`). Unsigned macOS builds cannot auto-update.
 appId: org.capturestudio.CaptureStudio
 productName: Capture Studio
 executableName: capture-studio
@@ -19,10 +26,11 @@ files:
 asar: true
 
 # FFmpeg ships as separate executables next to the app, with its licence, build info and source
-# offer (§1.10, §8 Q1). The folder layout is what main/ffmpeg/locate.ts resolves when packaged.
+# offer (§1.10, §8 Q1), and the native helper (plan D7, `npm run build:native`) with its crate
+# notices. Both are per target, so each platform section lists its own folders: `${platform}` in
+# a path means the build machine, not the target. The layout is what main/ffmpeg/locate.ts and
+# main/native/cs-native.ts resolve when packaged.
 extraResources:
-  - from: resources/bin/${platform}-${arch}
-    to: bin/${platform}-${arch}
   - from: resources/licenses
     to: licenses
   - from: LICENSE
@@ -38,10 +46,82 @@ electronFuses:
   enableEmbeddedAsarIntegrityValidation: true
   enableCookieEncryption: true
 
+# Pack output (plan D9): a zip with its own extension, so double-clicking one unpacks it into the
+# library and opens it. The project folder itself is associated on macOS only (below), where
+# Finder can treat a folder as a document.
+fileAssociations:
+  - ext: cstudiopack
+    name: Capture Studio project pack
+    description: A Capture Studio project packed into one file
+    mimeType: application/x-capture-studio-pack
+    role: Editor
+
+# Updates (plan D4, spec §2.13): electron-updater reads GitHub Releases. Builds only write the
+# update metadata (latest*.yml); nothing is uploaded unless `--publish` is passed.
+publish:
+  provider: github
+  owner: baaki20
+  repo: capture-studio
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  extraResources:
+    - from: resources/bin/win32-${arch}
+      to: bin/win32-${arch}
+    - from: resources/native/win32-${arch}
+      to: native/win32-${arch}
+  icon: build/icons/256x256.png
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: capture-studio-setup-${version}-${arch}.${ext}
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - dmg
+    - zip
+  extraResources:
+    - from: resources/bin/darwin-${arch}
+      to: bin/darwin-${arch}
+    - from: resources/native/darwin-${arch}
+      to: native/darwin-${arch}
+  icon: build/icons/512x512.png
+  category: public.app-category.video
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Without these strings macOS ends the app when it first opens the camera or microphone.
+  extendInfo:
+    NSCameraUsageDescription: Capture Studio records your camera when you turn it on for a recording.
+    NSMicrophoneUsageDescription: Capture Studio records your microphone when you turn it on for a recording.
+    NSScreenCaptureUsageDescription: Capture Studio records the screen you choose.
+  fileAssociations:
+    - ext: cstudiopack
+      name: Capture Studio project pack
+      role: Editor
+    - ext: cstudio
+      name: Capture Studio project
+      role: Editor
+      isPackage: true
+
+dmg:
+  artifactName: capture-studio-${version}-${arch}.${ext}
+
 linux:
   target:
     - AppImage
     - deb
+  extraResources:
+    - from: resources/bin/linux-${arch}
+      to: bin/linux-${arch}
+    - from: resources/native/linux-${arch}
+      to: native/linux-${arch}
   icon: build/icons
   # Electron 45 takes the Wayland app_id and the X11 WM_CLASS from `desktopName` in package.json
   # (org.capturestudio.CaptureStudio). The installed .desktop file is named after it, so GNOME

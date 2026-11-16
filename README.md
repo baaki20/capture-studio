@@ -70,7 +70,7 @@ window. Exports go to the exports folder. The tools: `list_projects`, `get_proje
 `auto_zoom` need a recording with a cursor track. Captions, transcripts and adding media are not
 editor features yet, so assistants cannot do them either.
 
-## Packaging (Linux)
+## Packaging
 
 `npm run package:linux` writes `dist/capture-studio-<version>-x86_64.AppImage` and
 `dist/capture-studio_<version>_amd64.deb`; `npm run smoke:linux` verifies them. Both ship FFmpeg and
@@ -81,6 +81,26 @@ ffprobe in `resources/bin/linux-x64/` with their licence, build info and source 
   `StartupWMClass`, so GNOME groups windows under the launcher and portals see a stable id.
 - The deb installs to `/opt/Capture Studio/` with a `/usr/bin/capture-studio` link.
 - The AppImage uses the static type2 runtime, so it needs `fusermount3` but not `libfuse2`.
+
+Windows and macOS (Phase 3):
+
+- `npm run package:win` writes the NSIS installer `dist/capture-studio-setup-<version>-x64.exe`
+  (it builds on Linux with Wine, but the native helper needs a Windows build machine: run
+  `npm run build:native` there first). `npm run package:mac -- --arm64` (or `-- --x64`) writes a
+  dmg and a zip for one architecture, with that architecture's FFmpeg and helper.
+  `npm run smoke:package` checks them on their own OS; the **Packages** workflow builds and checks
+  all four on CI when packaging files change.
+- Every package carries the native helper (`resources/native/<platform>-<arch>/`) and its crates'
+  notices (`NOTICES.txt`, written by `npm run build:native`).
+- Signing switches on when the credentials are in the environment, and builds stay unsigned
+  otherwise: macOS `CSC_LINK`/`CSC_KEY_PASSWORD` (Developer ID Application) and, to notarize,
+  `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID`; Windows `CSC_LINK`/`CSC_KEY_PASSWORD`.
+- Packs (`.cstudiopack`) are associated on every OS: opening one unpacks it into the library and
+  opens it. On macOS a `.cstudio` project folder is a document that opens with a double-click.
+- Updates come from this repository's GitHub Releases (electron-updater; Settings → Updates picks
+  releases or pre-releases). The Windows install, the AppImage and a signed Mac app update
+  themselves; deb installs update through the package manager, and unsigned Mac builds cannot.
+  Builds only write the update metadata (`latest*.yml`); nothing is uploaded without `--publish`.
 
 ## Layout
 

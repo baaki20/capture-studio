@@ -26,6 +26,16 @@ export const MAX_IMPORTED_PROJECTS = 1000;
  */
 export const AutomationSettingsSchema = z.object({ enabled: z.boolean() });
 
+/**
+ * Updates (P3 step 9, plan D4): the channel is the GitHub release kind the updater follows
+ * (`pre-release` also takes pre-releases); `autoCheck` checks at start and every few hours.
+ */
+export const UpdateSettingsSchema = z.object({
+  channel: z.enum(['release', 'pre-release']),
+  autoCheck: z.boolean(),
+});
+export const DEFAULT_UPDATE_SETTINGS = { channel: 'release', autoCheck: true } as const;
+
 export const SettingsV1Schema = z.object({
   schemaVersion: z.literal(SETTINGS_SCHEMA_VERSION),
   projectsDir: z.string().min(1),
@@ -84,6 +94,7 @@ export const SettingsV1Schema = z.object({
     .object({ importedRoots: z.array(z.string().min(1)).max(MAX_IMPORTED_PROJECTS) })
     .default({ importedRoots: [] }),
   automation: AutomationSettingsSchema.default({ enabled: false }),
+  updates: UpdateSettingsSchema.default(DEFAULT_UPDATE_SETTINGS),
 });
 
 export type Settings = z.infer<typeof SettingsV1Schema>;
@@ -125,6 +136,7 @@ export function createDefaultSettings(paths: SettingsPathDefaults): Settings {
     language: 'en',
     library: { importedRoots: [] },
     automation: { enabled: false },
+    updates: { ...DEFAULT_UPDATE_SETTINGS },
   };
 }
 

@@ -75,6 +75,7 @@ describe('IPC contract (§4.3.11)', () => {
         'rec.notice',
         'rec.state',
         'rec.stats',
+        'updates.changed',
       ].sort(),
     );
     expect(Object.keys(ENGINE_COMMANDS)).toEqual([

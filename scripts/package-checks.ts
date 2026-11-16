@@ -22,6 +22,10 @@ export const REQUIRED_RESOURCES = [
   'licenses/FFMPEG-SOURCE-OFFER.txt',
   'bin/linux-x64/LICENSE.txt',
   'bin/linux-x64/BUILD-INFO.json',
+  // P3 step 9: the native helper with its crate notices, and the updater's feed settings.
+  'native/linux-x64/cs-native.node',
+  'native/linux-x64/NOTICES.txt',
+  'app-update.yml',
 ] as const;
 export const REQUIRED_EXECUTABLES = ['bin/linux-x64/ffmpeg', 'bin/linux-x64/ffprobe'] as const;
 
@@ -34,6 +38,8 @@ export function expectedDesktopEntry(appId: string): Readonly<Record<string, str
     Categories: 'AudioVideo;Video;Recorder;',
     StartupWMClass: appId,
     Terminal: 'false',
+    // Double-clicking a pack opens it (plan D9).
+    MimeType: 'application/x-capture-studio-pack;',
   };
 }
 
