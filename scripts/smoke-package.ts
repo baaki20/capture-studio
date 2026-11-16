@@ -42,7 +42,8 @@ async function layout(): Promise<Layout> {
     return {
       key,
       resources: path.join(app, 'resources'),
-      executable: path.join(app, 'Capture Studio.exe'),
+      // electron-builder.yml sets executableName.
+      executable: path.join(app, 'capture-studio.exe'),
       exe: '.exe',
       installers: [/^capture-studio-setup-.*\.exe$/],
       feed: 'latest.yml',
@@ -54,10 +55,13 @@ async function layout(): Promise<Layout> {
     const dir = dirs[0];
     if (!dir) throw new Error('no dist/mac* folder');
     const bundle = path.join(DIST, dir, 'Capture Studio.app');
+    // CFBundleExecutable: the one file in Contents/MacOS.
+    const [binary] = await fs.readdir(path.join(bundle, 'Contents', 'MacOS'));
+    if (!binary) throw new Error('no executable in Contents/MacOS');
     return {
       key,
       resources: path.join(bundle, 'Contents', 'Resources'),
-      executable: path.join(bundle, 'Contents', 'MacOS', 'Capture Studio'),
+      executable: path.join(bundle, 'Contents', 'MacOS', binary),
       exe: '',
       installers: [/^capture-studio-.*\.dmg$/, /^Capture Studio-.*-mac\.zip$|\.zip$/],
       feed: 'latest-mac.yml',

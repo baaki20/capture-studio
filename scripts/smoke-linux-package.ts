@@ -268,6 +268,11 @@ async function launch(
     startLine !== null && exitCode === undefined,
     startLine ? startLine[0] : `no start line in ${logFile} (exit ${String(exitCode)})`,
   );
+  if (!startLine) {
+    // What the app printed says why it did not start (a sandbox refusal, a missing library).
+    const stderr = await fs.readFile(path.join(work, 'stderr.log'), 'utf8').catch(() => '');
+    console.log(`--- ${label}: stderr (last lines)\n${stderr.split('\n').slice(-15).join('\n')}`);
+  }
   record(
     `${label}: media utility ready with bundled FFmpeg`,
     ready !== null && ready[1] !== '?',

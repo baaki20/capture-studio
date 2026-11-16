@@ -69,7 +69,11 @@ jobs:
 
       - name: Smoke test (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run --auto-servernum npm run smoke:linux
+        # Ubuntu 24.04 blocks unprivileged user namespaces, which Chromium's sandbox needs when the
+        # extracted deb's chrome-sandbox is not setuid (an install sets it up; extraction cannot).
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run --auto-servernum npm run smoke:linux
 
       - name: Smoke test (Windows, macOS)
         if: runner.os != 'Linux'
