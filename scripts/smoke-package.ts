@@ -54,7 +54,11 @@ async function layout(): Promise<Layout> {
     const dirs = (await fs.readdir(DIST)).filter((d) => d.startsWith('mac'));
     const dir = dirs[0];
     if (!dir) throw new Error('no dist/mac* folder');
-    const bundle = path.join(DIST, dir, 'Capture Studio.app');
+    // The bundle's name follows electron-builder's naming; take the one .app there.
+    const app = (await fs.readdir(path.join(DIST, dir))).find((f) => f.endsWith('.app'));
+    if (!app) throw new Error(`no .app in dist/${dir}`);
+    console.log(`app bundle: ${dir}/${app}`);
+    const bundle = path.join(DIST, dir, app);
     // CFBundleExecutable: the one file in Contents/MacOS.
     const [binary] = await fs.readdir(path.join(bundle, 'Contents', 'MacOS'));
     if (!binary) throw new Error('no executable in Contents/MacOS');
