@@ -16,9 +16,11 @@ import {
   type FfmpegEncoderReport,
 } from '../../shared/capabilities/types';
 import {
+  cursorTrackCapability,
   ffmpegHardwareCapability,
   secretsCapability,
   webcodecsPending,
+  type NativeHelperStatus,
   type SecretsStatusLike,
 } from './common';
 
@@ -46,6 +48,7 @@ export interface LinuxDetectInput {
   secrets: SecretsStatusLike | null;
   encoders: FfmpegEncoderReport | null;
   exec: ExecFn;
+  nativeHelper?: NativeHelperStatus | null;
 }
 
 const PROBE_TIMEOUT_MS = 3000;
@@ -189,11 +192,11 @@ export async function detectLinuxCapabilities(input: LinuxDetectInput): Promise<
       wayland ? 'The portal bakes the cursor into the stream.' : 'Not verified on X11 yet.',
       'cursor-visible',
     ),
-    'capture.cursor.track': unavailable(
-      wayland
-        ? 'Cursor positions are not available on Wayland; cursor effects are disabled, manual zoom works.'
-        : 'Needs the native XInput2 helper (Phase 3); cursor effects are disabled.',
-    ),
+    'capture.cursor.track': wayland
+      ? unavailable(
+          'Cursor positions are not available on Wayland; cursor effects are disabled, manual zoom works.',
+        )
+      : cursorTrackCapability(input.nativeHelper ?? null, 'x11'),
     'capture.screenshot.silent': wayland
       ? degraded('screenshot-portal', 'The Screenshot portal may ask for permission each time.')
       : available('desktopCapturer'),

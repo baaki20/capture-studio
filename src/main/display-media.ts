@@ -23,6 +23,8 @@ export const SCREEN_CAPTURE_MAX = { width: 3840, height: 2160 } as const;
 export interface DesktopSourceLike {
   id: string;
   name: string;
+  /** The `screen` display a monitor source shows (empty for windows and some portals). */
+  display_id?: string;
   /** Electron's `NativeImage`; present (and non-empty) only when thumbnails were asked for. */
   thumbnail?: { isEmpty(): boolean; toDataURL(): string };
 }

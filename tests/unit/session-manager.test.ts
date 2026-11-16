@@ -367,6 +367,7 @@ function harness(
     pickRegion?: SessionManagerDeps['pickRegion'];
     selectScreen?: SessionManagerDeps['selectScreen'];
     forgetScreen?: SessionManagerDeps['forgetScreen'];
+    startCursorTrack?: SessionManagerDeps['startCursorTrack'];
     generateCaches?: SessionManagerDeps['generateCaches'];
   } = {},
 ): Harness {
@@ -434,6 +435,7 @@ function harness(
         })),
     ...(options.pickRegion ? { pickRegion: options.pickRegion } : {}),
     ...(options.forgetScreen ? { forgetScreen: options.forgetScreen } : {}),
+    ...(options.startCursorTrack ? { startCursorTrack: options.startCursorTrack } : {}),
     systemAudioAvailable: () => options.systemAudio ?? true,
     systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
     platform: () => ({
@@ -695,6 +697,57 @@ describe('session manager', () => {
     h.manager.onTrackEnded({ kind: 'screen', reason: 'ended', atUs: T0 + S });
     expect(memory.current).toBeNull();
     await waitFor(() => h.manager.state === 'completed', 4000);
+  });
+
+  it('records a cursor track with a monitor recording and adds it to the project (P3 step 4)', async () => {
+    const starts: { file: string; crop: unknown; t0Us: number; displayId?: string }[] = [];
+    const h = harness({
+      selectScreen: () =>
+        Promise.resolve({
+          sourceId: 'screen:1:0',
+          displayId: '1',
+          maxWidth: 3840,
+          maxHeight: 2160,
+        }),
+      startCursorTrack: ({ file, crop, t0Us, source }) => {
+        starts.push({
+          file,
+          crop,
+          t0Us,
+          ...(source.displayId ? { displayId: source.displayId } : {}),
+        });
+        return {
+          stop: async () => {
+            await fs.writeFile(file, 'track');
+            return {
+              samples: 120,
+              clicks: 1,
+              durationUs: 1_000_000,
+              sampleRateHz: 120,
+              clicksAvailable: true,
+              source: 'native',
+            };
+          },
+        };
+      },
+    });
+    const root = await startRecording(h);
+    expect(starts).toEqual([
+      { file: path.join(root, 'media', 'cursor.jsonl'), crop: null, t0Us: T0, displayId: '1' },
+    ]);
+    await waitFor(() => h.utility.opened.length === 3);
+    // A restart drops the first track and records a new one.
+    await h.manager.restart();
+    expect(starts).toHaveLength(2);
+    await h.manager.stop();
+    const doc = await readProject(root);
+    const cursor = doc.media.find((m) => m.kind === 'cursor');
+    expect(cursor).toMatchObject({
+      role: 'cursor',
+      path: 'media/cursor.jsonl',
+      cursor: { inVideo: true, samples: 120, clicks: 1 },
+    });
+    expect(cursor?.cursor?.screenMediaId).toBe(doc.media.find((m) => m.role === 'screen')?.id);
   });
 
   it('abort deletes the project folder', async () => {

@@ -34,6 +34,10 @@ jobs:
       - name: Fetch pinned FFmpeg
         run: npm run fetch:ffmpeg
 
+      # The runners ship rustup with a stable toolchain (plan D7).
+      - name: Build the native helper
+        run: npm run build:native
+
       - name: Lint
         run: npm run lint
 
@@ -52,8 +56,16 @@ jobs:
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
+      # Xvfb is this job's own X server, so the helper may move and click its pointer (XTest).
+      - name: Native helper input test (Xvfb)
+        run: xvfb-run --auto-servernum npx vitest run --project integration tests/integration/native-helper.test.ts
+        env:
+          CS_NATIVE_INPUT_TEST: '1'
+
       - name: E2E tests (Xvfb, X11)
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e
+        env:
+          CS_NATIVE_INPUT_TEST: '1'
 
       # Playwright's logs, traces and the app's main.log, to diagnose a failure on the runner.
       - name: Upload E2E results
@@ -91,6 +103,9 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+
+      - name: Build the native helper
+        run: npm run build:native
 
       - name: Cache FFmpeg archive
         uses: actions/cache@v4

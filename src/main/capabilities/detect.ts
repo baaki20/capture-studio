@@ -15,7 +15,7 @@ import {
 } from '../../shared/capabilities/types';
 import type { Logger } from '../../shared/logger';
 import { silentLogger } from '../../shared/logger';
-import type { SecretsStatusLike } from './common';
+import type { NativeHelperStatus, SecretsStatusLike } from './common';
 import { detectLinuxCapabilities, type ExecFn, type ExecResult } from './linux';
 import { detectMacCapabilities, type MacPermissions } from './macos';
 import { detectWindowsCapabilities } from './windows';
@@ -55,6 +55,8 @@ export interface DetectOptions {
   osRelease?: string;
   /** macOS only: privacy permission states (null before they are read). */
   macPermissions?: MacPermissions | null;
+  /** P3 step 4: the native helper, when main tried to load it. */
+  nativeHelper?: NativeHelperStatus | null;
   secrets: SecretsStatusLike | null;
   encoders: FfmpegEncoderReport | null;
   exec?: ExecFn;
@@ -84,15 +86,22 @@ async function detectPlatformCapabilities(
         secrets,
         encoders,
         exec,
+        nativeHelper: options.nativeHelper ?? null,
       });
     case 'win32':
-      return detectWindowsCapabilities({ osRelease, secrets, encoders });
+      return detectWindowsCapabilities({
+        osRelease,
+        secrets,
+        encoders,
+        nativeHelper: options.nativeHelper ?? null,
+      });
     case 'darwin':
       return detectMacCapabilities({
         osRelease,
         permissions: options.macPermissions ?? null,
         secrets,
         encoders,
+        nativeHelper: options.nativeHelper ?? null,
       });
     default:
       return placeholderCapabilities(options.platform);

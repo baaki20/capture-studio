@@ -7,6 +7,7 @@ import {
   type ExecFn,
   type ExecResult,
 } from '../../src/main/capabilities/linux';
+import { cursorTrackCapability } from '../../src/main/capabilities/common';
 import { readMacPermissions } from '../../src/main/capabilities/mac-permissions';
 import { macosMajor, type MacPermissions } from '../../src/main/capabilities/macos';
 import { windowsBuild } from '../../src/main/capabilities/windows';
@@ -211,7 +212,11 @@ describe('Windows capability detection (Phase 3)', () => {
     expect(c['secrets.persistent'].state).toBe('available');
     // Not built yet: no capability may claim what the app cannot do.
     expect(c['audio.system'].state).toBe('unavailable');
-    expect(c['capture.cursor.track'].state).toBe('unavailable');
+    // Without the native helper the cursor is polled (no clicks).
+    expect(c['capture.cursor.track']).toMatchObject({
+      state: 'degraded',
+      strategy: 'electron-poll',
+    });
     expect(c['capture.region.onScreenOverlay'].strategy).toBe('in-app-picker');
   });
 
@@ -348,5 +353,40 @@ describe('CapabilityService', () => {
     await service.refresh();
     expect(service.get('encode.webcodecs.hw').state).toBe('available');
     expect(listener).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('cursor track capability (P3 step 4)', () => {
+  const helper = (backend: string | null) => ({ backend, reason: backend ? null : 'Not built.' });
+
+  it('uses the helper on its own platform, and polls otherwise', () => {
+    expect(cursorTrackCapability(helper('x11'), 'x11')).toMatchObject({
+      state: 'available',
+      strategy: 'native-helper',
+    });
+    const polled = cursorTrackCapability(helper(null), 'x11');
+    expect(polled).toMatchObject({ state: 'degraded', strategy: 'electron-poll' });
+    expect(polled.reason).toMatch(/^Not built\. /);
+    expect(cursorTrackCapability(helper('unsupported'), 'win32').strategy).toBe('electron-poll');
+    expect(cursorTrackCapability(null, 'macos').strategy).toBe('electron-poll');
+  });
+
+  it('says when clicks are blocked by a permission', () => {
+    const blocked = cursorTrackCapability(helper('macos'), 'macos', 'Clicks need Accessibility.');
+    expect(blocked).toMatchObject({ state: 'degraded', strategy: 'native-helper' });
+    expect(blocked.reason).toMatch(/clicks are not/);
+  });
+
+  it('is never offered on Wayland, helper or not', async () => {
+    const report = await detectCapabilities({
+      platform: 'linux',
+      env: { XDG_SESSION_TYPE: 'wayland', WAYLAND_DISPLAY: 'wayland-0' },
+      ozonePlatform: 'wayland',
+      secrets: null,
+      encoders: null,
+      nativeHelper: helper('x11'),
+      exec: () => Promise.resolve({ code: 0, stdout: '', stderr: '', error: null }),
+    });
+    expect(report.capabilities['capture.cursor.track'].state).toBe('unavailable');
   });
 });

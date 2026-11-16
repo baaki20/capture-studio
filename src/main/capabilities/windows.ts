@@ -18,9 +18,11 @@ import {
   type FfmpegEncoderReport,
 } from '../../shared/capabilities/types';
 import {
+  cursorTrackCapability,
   ffmpegHardwareCapability,
   secretsCapability,
   webcodecsPending,
+  type NativeHelperStatus,
   type SecretsStatusLike,
 } from './common';
 
@@ -32,6 +34,7 @@ export interface WindowsDetectInput {
   osRelease: string;
   secrets: SecretsStatusLike | null;
   encoders: FfmpegEncoderReport | null;
+  nativeHelper?: NativeHelperStatus | null;
 }
 
 /** The build number from `os.release()`, or null when it cannot be read. */
@@ -63,9 +66,7 @@ export function detectWindowsCapabilities(input: WindowsDetectInput): Capability
       'Hiding the cursor is not verified on Windows yet.',
       'cursor-visible',
     ),
-    'capture.cursor.track': unavailable(
-      'Cursor tracking is not available yet; cursor effects are disabled, manual zoom works.',
-    ),
+    'capture.cursor.track': cursorTrackCapability(input.nativeHelper ?? null, 'win32'),
     'capture.screenshot.silent': available('desktopCapturer'),
     'audio.system': unavailable(
       'System audio is not supported on Windows in this build yet. Recording continues without it.',

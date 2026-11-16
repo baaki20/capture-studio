@@ -11,3 +11,7 @@ playwright-report/
 resources/bin/
 .cache/
 spikes/out/
+
+# The native helper (native/cs-native) builds here: npm run build:native
+native/cs-native/target/
+resources/native/

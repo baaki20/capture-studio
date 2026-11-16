@@ -26,6 +26,8 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { CURSOR_FILE_NAME } from '../../shared/project/cursor-track';
+import type { CursorRecordingResult } from './cursor-recorder';
 import type {
   EngineCommandChannel,
   EngineCommandPayload,
@@ -162,10 +164,55 @@ export interface ScreenSource {
   maxHeight: number;
   /** Reused from an earlier recording of this app run (Wayland, P3 step 8); may be stale. */
   reused?: boolean;
+  /** Electron's display id of a monitor source, when known (maps cursor positions, step 4). */
+  displayId?: string;
+}
+
+/** The cursor track's file (format v3). */
+function cursorFile(root: string): string {
+  return path.join(root, 'media', CURSOR_FILE_NAME);
+}
+
+/**
+ * The project with its cursor track (P3 step 4): a `cursor` media for the screen media, when a
+ * track was recorded. The system cursor is part of the screen video (`inVideo`).
+ */
+export function withCursorMedia(
+  project: Project,
+  result: CursorRecordingResult | null,
+  durationUs: number,
+): Project {
+  const screen = project.media.find((m) => m.role === 'screen' && m.kind === 'video');
+  if (!result || !screen) return project;
+  const media: Media = {
+    id: newId('media'),
+    role: 'cursor',
+    kind: 'cursor',
+    path: `media/${CURSOR_FILE_NAME}`,
+    status: 'ok',
+    durationUs: Math.max(durationUs, result.durationUs),
+    startOffsetUs: 0,
+    syncAdjustUs: 0,
+    clockRatio: 1,
+    cursor: {
+      screenMediaId: screen.id,
+      inVideo: true,
+      sampleRateHz: result.sampleRateHz,
+      samples: result.samples,
+      clicks: result.clicks,
+    },
+  };
+  return { ...project, media: [...project.media, media] };
 }
 
 /** How long a reused screen source may take to show its first frame (P3 step 8, S8). */
 export const REUSED_SOURCE_FIRST_FRAME_MS = 2_000;
+
+/** A cursor track being recorded (P3 step 4, `cursor-recorder.ts`). */
+export interface CursorRecording {
+  /** Stops and closes the file; null when nothing usable was written. */
+  stop(): Promise<CursorRecordingResult | null>;
+}
 
 /** The region picker's answer: a rect in stream pixels, null for the full frame, or cancelled. */
 export type RegionChoice = { rect: NRect | null } | 'cancelled';
@@ -201,6 +248,17 @@ export interface SessionManagerDeps {
    * the shared screen ended during a recording. Absent where nothing is remembered.
    */
   forgetScreen?: (reason: 'stale' | 'ended') => void;
+  /**
+   * Starts the cursor track of a monitor recording (P3 step 4) once the session clock runs, or
+   * returns null where none can be recorded. `file` is inside the project's media folder.
+   */
+  startCursorTrack?: (args: {
+    file: string;
+    source: ScreenSource & { kind: 'monitor' | 'window'; widthPx: number; heightPx: number };
+    /** The region encoded at record time, in frame pixels; null for the full frame. */
+    crop: NRect | null;
+    t0Us: number;
+  }) => CursorRecording | null;
   /** Region mode (§4.3.7). Without a picker the last matching region (or full frame) is used. */
   pickRegion?: (source: { width: number; height: number }) => Promise<RegionChoice>;
   /**
@@ -282,6 +340,8 @@ interface Session {
   root: string | null;
   createdAt: string | null;
   // Per start (reset by restart).
+  cursor: CursorRecording | null;
+  cursorResult: CursorRecordingResult | null;
   startedAt: string | null;
   t0Us: number | null;
   mainStartUs: number | null;
@@ -556,6 +616,8 @@ export class SessionManager {
         mainStartUs: null,
         utilityOffsetUs: null,
         streams: new Map(),
+        cursor: null,
+        cursorResult: null,
         pauses: [],
         pausedMainUs: 0,
         pauseStartedMainUs: null,
@@ -1040,6 +1102,8 @@ export class SessionManager {
     });
     session.t0Us = started.t0Us;
     session.mainStartUs = this.mainNowUs();
+    session.cursorResult = null;
+    session.cursor = this.startCursor(session, cropped);
     session.startedAt = this.now().toISOString();
     for (const entry of parseStreamReports(started.streams)) {
       const stream = session.streams.get(entry.kind);
@@ -1375,6 +1439,24 @@ export class SessionManager {
   }
 
   /** Region mode with "crop at record time" and a region smaller than the frame. */
+  /** Starts the cursor track of a monitor recording, or null (P3 step 4). */
+  private startCursor(session: Session, cropped: boolean): CursorRecording | null {
+    const start = this.deps.startCursorTrack;
+    if (!start || !session.root || !session.hasScreen || session.t0Us === null) return null;
+    if (session.source.kind !== 'monitor') return null;
+    try {
+      return start({
+        file: cursorFile(session.root),
+        source: session.source,
+        crop: cropped ? session.region : null,
+        t0Us: session.t0Us,
+      });
+    } catch (error) {
+      this.logger.warn('recording: the cursor track could not start', error);
+      return null;
+    }
+  }
+
   private cropsAtRecord(session: Session): boolean {
     return (
       session.region !== null &&
@@ -1473,6 +1555,16 @@ export class SessionManager {
     let reports: EngineStreamReport[] = [];
     let engine: EngineCommandResponse<'engine.stop'> | null = null;
     let engineStopped = false;
+    if (session.cursor) {
+      const cursor = session.cursor;
+      session.cursor = null;
+      const result = await cursor.stop();
+      session.cursorResult = reason === 'stop' ? result : null;
+      // A restart records the track again; an abort deletes the folder anyway.
+      if (reason !== 'stop' && session.root) {
+        await fs.rm(cursorFile(session.root), { force: true });
+      }
+    }
     try {
       const result = await session.engine.command(
         'engine.stop',
@@ -1656,10 +1748,11 @@ export class SessionManager {
     const built = this.buildProject(manifest);
     if (!built.ok)
       throw new Error(`project is invalid: ${built.error.issues.slice(0, 3).join('; ')}`);
-    await this.deps.store.write(root, built.value);
+    const project = withCursorMedia(built.value, session.cursorResult, durationUs);
+    await this.deps.store.write(root, project);
     await writeSessionLog(root, { ...this.sessionLog(session), manifest }).catch(() => undefined);
     await removeLock(root);
-    return { projectId, root, media: built.value.media };
+    return { projectId, root, media: project.media };
   }
 
   /** Peaks and thumbnails after the project is ready, off the finalize path (R1.20, R1.44). */

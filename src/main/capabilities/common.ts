@@ -3,6 +3,7 @@
  */
 import {
   available,
+  degraded,
   unavailable,
   type Capability,
   type FfmpegEncoderReport,
@@ -34,6 +35,35 @@ export function secretsCapability(status: SecretsStatusLike | null): Capability 
         status.reason ?? `Backend ${status.backend} does not encrypt; secrets stay in memory.`,
         `memory (backend ${status.backend})`,
       );
+}
+
+/** Whether the native helper loaded (P3 step 4), and its backend or why not. */
+export interface NativeHelperStatus {
+  /** `x11`, `win32`, `macos` or `unsupported`; null when the helper did not load. */
+  backend: string | null;
+  reason: string | null;
+}
+
+/**
+ * `capture.cursor.track` where cursor positions can be read (X11, Windows, macOS): the helper
+ * gives 120 Hz positions and clicks; without it Electron's cursor position is polled (no clicks).
+ * `clicksBlocked` is the reason clicks cannot be read even with the helper (macOS permission).
+ */
+export function cursorTrackCapability(
+  helper: NativeHelperStatus | null,
+  backend: 'x11' | 'win32' | 'macos',
+  clicksBlocked: string | null = null,
+): Capability {
+  if (helper?.backend === backend) {
+    return clicksBlocked
+      ? degraded('native-helper', `${clicksBlocked} Positions are recorded; clicks are not.`)
+      : available('native-helper', 'Cursor positions at 120 Hz and clicks.');
+  }
+  const why = helper?.reason ?? 'The native helper is not available.';
+  return degraded(
+    'electron-poll',
+    `${why} Cursor positions are polled, without clicks, so click rings and auto-zoom have nothing to show.`,
+  );
 }
 
 /** The engine measures WebCodecs hardware encoding when recording starts (an override). */

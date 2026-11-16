@@ -19,9 +19,11 @@ import {
   type FfmpegEncoderReport,
 } from '../../shared/capabilities/types';
 import {
+  cursorTrackCapability,
   ffmpegHardwareCapability,
   secretsCapability,
   webcodecsPending,
+  type NativeHelperStatus,
   type SecretsStatusLike,
 } from './common';
 
@@ -42,6 +44,7 @@ export interface MacDetectInput {
   permissions: MacPermissions | null;
   secrets: SecretsStatusLike | null;
   encoders: FfmpegEncoderReport | null;
+  nativeHelper?: NativeHelperStatus | null;
 }
 
 /** The macOS major version from the Darwin version (Darwin 25 is macOS 26), or null. */
@@ -106,8 +109,10 @@ export function detectMacCapabilities(input: MacDetectInput): CapabilityMap {
       'Hiding the cursor is not verified on macOS yet.',
       'cursor-visible',
     ),
-    'capture.cursor.track': unavailable(
-      'Cursor tracking is not available yet; cursor effects are disabled, manual zoom works.',
+    'capture.cursor.track': cursorTrackCapability(
+      input.nativeHelper ?? null,
+      'macos',
+      p && !p.accessibility ? 'Clicks need Accessibility permission (System Settings).' : null,
     ),
     'capture.screenshot.silent': screen,
     'audio.system': unavailable(

@@ -1,0 +1,37 @@
+[package]
+name = "cs-native"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Capture Studio native helper: cursor track, clicks and window list"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+napi = { version = "=2.16.17", default-features = false, features = ["napi6"] }
+napi-derive = "=2.16.13"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "=0.13.1", features = ["xinput", "xtest"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.58.0", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "=0.10.0"
+
+[build-dependencies]
+napi-build = "=2.1.6"
+
+[profile.release]
+lto = true
+strip = "symbols"

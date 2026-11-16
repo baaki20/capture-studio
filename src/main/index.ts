@@ -21,6 +21,7 @@ import {
   Notification,
   protocol,
   safeStorage,
+  screen,
   shell,
   systemPreferences,
   webContents,
@@ -50,6 +51,8 @@ import {
 } from './ipc/automation-handlers';
 import { registerCoreHandlers } from './ipc/core-handlers';
 import { ScreenSourceMemory, selectWithMemory } from './screen-memory';
+import { loadNativeHelper } from './native/cs-native';
+import { createCursorTrackStarter } from './recording/cursor-track-start';
 import { registerEditorHandlers } from './ipc/editor-handlers';
 import { registerExportHandlers, type ExportService } from './ipc/export-handlers';
 import { IpcRouter } from './ipc/router';
@@ -316,6 +319,16 @@ async function start(): Promise<void> {
   const ffmpeg: FfmpegLocation | null = located.ok ? located.value : null;
   if (!located.ok) log.error(located.error.message);
 
+  // The optional native helper (P3 step 4): cursor track with clicks, window list.
+  const native = loadNativeHelper({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appPath: app.getAppPath(),
+    env: process.env,
+  });
+  if (native.helper) log.info(`native helper: ${native.helper.backend()}`);
+  else log.info(`native helper: not loaded (${native.reason})`);
+
   const devOrigin = renderer.devServerUrl ? new URL(renderer.devServerUrl).origin : null;
   protocol.handle(
     MEDIA_SCHEME,
@@ -339,6 +352,9 @@ async function start(): Promise<void> {
           : null,
       osRelease: os.release(),
       macPermissions: process.platform === 'darwin' ? readMacPermissions(systemPreferences) : null,
+      nativeHelper: native.helper
+        ? { backend: native.helper.backend(), reason: null }
+        : { backend: null, reason: native.reason },
       secrets: secrets.status,
       encoders: null,
     },
@@ -542,6 +558,19 @@ async function start(): Promise<void> {
       return usesPortal ? selectWithMemory(screenMemory, kind, select) : select(kind);
     },
     forgetScreen: (reason) => screenMemory.forget(reason),
+    startCursorTrack: createCursorTrackStarter({
+      helper: native.helper,
+      available: () => capabilities.get('capture.cursor.track').state !== 'unavailable',
+      displays: () => screen.getAllDisplays(),
+      primaryDisplay: () => screen.getPrimaryDisplay(),
+      cursorPoint: () => screen.getCursorScreenPoint(),
+      ...(process.platform === 'win32'
+        ? { dipToScreenRect: (rect) => screen.dipToScreenRect(null, rect) }
+        : {}),
+      platform: process.platform,
+      mainNowUs: () => (performance.timeOrigin + performance.now()) * 1000,
+      logger: log,
+    }),
     pickRegion: (source) => picker.pick(source),
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
     systemAudioOutputLatencyUs: () => estimateSinkOutputLatencyUs(defaultExec),

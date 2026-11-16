@@ -189,22 +189,28 @@ export function cursorTrackFromEvents(
   return { header, t, x, y, clicks };
 }
 
-/** Serializes events as a `cursor.jsonl` file (the helper's writer format; tests, fixtures). */
-export function serializeCursorTrack(
-  header: CursorTrackHeader,
-  events: readonly CursorEvent[],
-): string {
-  const head = JSON.stringify({
+/** The header line of a `cursor.jsonl` file (without the newline). */
+export function cursorHeaderLine(header: CursorTrackHeader): string {
+  return JSON.stringify({
     format: CURSOR_FILE_FORMAT,
     version: CURSOR_FILE_VERSION,
     sampleRateHz: header.sampleRateHz,
     width: header.width,
     height: header.height,
   });
-  const body = events.map((e) =>
-    JSON.stringify('action' in e ? [e.tUs, e.x, e.y, e.action, e.button] : [e.tUs, e.x, e.y]),
-  );
-  return [head, ...body].join('\n') + '\n';
+}
+
+/** One event line of a `cursor.jsonl` file (without the newline). */
+export function cursorEventLine(e: CursorEvent): string {
+  return JSON.stringify('action' in e ? [e.tUs, e.x, e.y, e.action, e.button] : [e.tUs, e.x, e.y]);
+}
+
+/** Serializes events as a `cursor.jsonl` file (the recorder writes the same lines, streamed). */
+export function serializeCursorTrack(
+  header: CursorTrackHeader,
+  events: readonly CursorEvent[],
+): string {
+  return [cursorHeaderLine(header), ...events.map(cursorEventLine)].join('\n') + '\n';
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -32,6 +32,7 @@
     "test:wayland": "tsx tests/wayland/run.ts",
     "test:soak": "tsx tests/wayland/run.ts soak",
     "fetch:ffmpeg": "tsx scripts/fetch-ffmpeg.ts",
+    "build:native": "tsx scripts/build-native.ts",
     "gen:schema": "tsx scripts/gen-schema.ts",
     "gen:icons": "tsx scripts/gen-icons.ts",
     "mcp": "tsx src/mcp/server.ts",

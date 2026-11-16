@@ -47,6 +47,7 @@ export async function selectScreenSource(
   return {
     sourceId: pick.screen.sourceId,
     label: pick.source.name,
+    ...(pick.source.display_id ? { displayId: pick.source.display_id } : {}),
     maxWidth: pick.screen.maxWidth,
     maxHeight: pick.screen.maxHeight,
   };
