@@ -57,7 +57,7 @@ import { CachedEncoderProbe } from './pipeline/probe-cache';
 import { missingResult, streamResult } from './pipeline/results';
 import { STATS_INTERVAL_MS, StatsAggregator } from './pipeline/stats';
 import type { EngineToWorker, WorkerInit, WorkerResult, WorkerToEngine } from './protocol';
-import { probeAudioTrack, probeVideoTrack, snapshotVideoTrack } from './track-probe';
+import { NoSampleError, probeAudioTrack, probeVideoTrack, snapshotVideoTrack } from './track-probe';
 import { audioChunks, videoFrames } from './track-processor';
 import { createWebCodecsProbe } from './webcodecs-probe';
 
@@ -178,7 +178,14 @@ export class CaptureEngine {
     try {
       const [screen, camera, mic] = await Promise.all([
         screenStream && screenTrack && payload.screen
-          ? this.addVideo(acquisition, 'screen', screenStream, screenTrack, payload.screen.fps)
+          ? this.addVideo(
+              acquisition,
+              'screen',
+              screenStream,
+              screenTrack,
+              payload.screen.fps,
+              payload.screen.firstFrameTimeoutMs,
+            )
           : Promise.resolve(null),
         payload.camera
           ? this.openCamera(acquisition, payload.camera, warnings)
@@ -208,6 +215,11 @@ export class CaptureEngine {
       };
     } catch (error) {
       this.release();
+      // A reused source that shows nothing: main forgets it and asks the portal again (step 8).
+      if (payload.screen?.firstFrameTimeoutMs !== undefined && error instanceof NoSampleError) {
+        console.info(`engine: the reused screen source is stale (${error.message})`);
+        return { status: 'stale', screen: null, camera: null, mic: null, warnings };
+      }
       throw error;
     }
   }
@@ -271,6 +283,7 @@ export class CaptureEngine {
     stream: MediaStream,
     track: MediaStreamTrack,
     fps: number,
+    firstFrameTimeoutMs?: number,
   ): Promise<VideoTrack> {
     // Registered before probing so a track that ends meanwhile is still released and reported.
     acquisition.tracks.set(kind, {
@@ -285,7 +298,7 @@ export class CaptureEngine {
       still: null,
     });
     this.watch(acquisition, kind, track);
-    const probe = await probeVideoTrack(track, undefined, kind === 'screen');
+    const probe = await probeVideoTrack(track, undefined, kind === 'screen', firstFrameTimeoutMs);
     const video: VideoTrack = {
       kind,
       stream,

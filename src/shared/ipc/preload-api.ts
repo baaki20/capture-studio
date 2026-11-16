@@ -109,6 +109,8 @@ export interface ShellPreloadApi extends PreloadBase {
     get(): Promise<InvokeResponse<'diag.get'>>;
     /** Puts the report on the clipboard (main does the copy) and returns its text. */
     copyReport(): Promise<InvokeResponse<'diag.copyReport'>>;
+    /** "Choose the screen again": the next recording asks the portal (P3 step 8). */
+    forgetScreen(): Promise<InvokeResponse<'diag.forgetScreen'>>;
   };
 }
 

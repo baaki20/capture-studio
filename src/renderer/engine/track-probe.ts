@@ -67,17 +67,26 @@ async function readWithTimeout<T extends { close(): void }>(
   }
 }
 
+/** A track delivered no first sample in time (a stale screen source, a dead device). */
+export class NoSampleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NoSampleError';
+  }
+}
+
 export async function probeVideoTrack(
   track: MediaStreamTrack,
   rateWindowMs = RATE_WINDOW_MS,
   keepStill = false,
+  firstTimeoutMs = FIRST_SAMPLE_TIMEOUT_MS,
 ): Promise<VideoProbe> {
   const clone = track.clone();
   const reader = videoFrames(clone).getReader();
   let last: VideoFrame | null = null;
   try {
-    const first = await readWithTimeout(reader, FIRST_SAMPLE_TIMEOUT_MS);
-    if (!first) throw new Error(`no video frame within ${String(FIRST_SAMPLE_TIMEOUT_MS)} ms`);
+    const first = await readWithTimeout(reader, firstTimeoutMs);
+    if (!first) throw new NoSampleError(`no video frame within ${String(firstTimeoutMs)} ms`);
     const meter = new FrameRateMeter();
     const probe = { width: first.displayWidth, height: first.displayHeight };
     meter.onFrame(first.timestamp);

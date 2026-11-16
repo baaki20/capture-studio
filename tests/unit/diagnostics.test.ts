@@ -71,6 +71,33 @@ describe('Diagnostics report (R1.1, R1.4)', async () => {
     expect(packaged.automation?.connectCommand).toBeNull();
   });
 
+  it('shows the remembered shared screen where the portal picks it (P3 step 8)', () => {
+    const inputs = {
+      capabilities,
+      versions: report.versions,
+      paths: report.paths,
+      ffmpegError: null,
+      encoders: null,
+      secrets: report.secrets,
+      launch: { isPackaged: true, execPath: '/usr/bin/capture-studio', appPath: '/x' },
+    };
+    const kept = buildDiagnosticsReport({
+      ...inputs,
+      sharedScreen: { kind: 'screen', label: 'Built-in display' },
+    });
+    expect(DiagnosticsReportSchema.parse(kept)).toEqual(kept);
+    expect(formatDiagnosticsText(kept)).toContain(
+      'Shared screen: remembered (screen) for this run',
+    );
+    const asks = buildDiagnosticsReport({ ...inputs, sharedScreen: null });
+    expect(formatDiagnosticsText(asks)).toContain('Shared screen: the next recording asks');
+    expect(report.sharedScreen).toBeUndefined();
+    expect(capabilities.capabilities['capture.screen.restoreToken']).toMatchObject({
+      state: 'degraded',
+      strategy: 'in-memory',
+    });
+  });
+
   it('formats a copyable text report with every capability, path and command', () => {
     const text = formatDiagnosticsText(report);
     for (const key of CAPABILITY_KEYS) expect(text).toContain(`  ${key}: `);

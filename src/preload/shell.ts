@@ -58,6 +58,7 @@ const api: ShellPreloadApi = {
   diag: {
     get: () => invoke('diag.get'),
     copyReport: () => invoke('diag.copyReport'),
+    forgetScreen: () => invoke('diag.forgetScreen'),
   },
 };
 

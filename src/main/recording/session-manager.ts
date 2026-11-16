@@ -160,7 +160,12 @@ export interface ScreenSource {
   /** Upper bounds passed to the engine; Chromium otherwise caps at 1920×1080 (§9.1). */
   maxWidth: number;
   maxHeight: number;
+  /** Reused from an earlier recording of this app run (Wayland, P3 step 8); may be stale. */
+  reused?: boolean;
 }
+
+/** How long a reused screen source may take to show its first frame (P3 step 8, S8). */
+export const REUSED_SOURCE_FIRST_FRAME_MS = 2_000;
 
 /** The region picker's answer: a rect in stream pixels, null for the full frame, or cancelled. */
 export type RegionChoice = { rect: NRect | null } | 'cancelled';
@@ -191,6 +196,11 @@ export interface SessionManagerDeps {
   engine: () => Promise<EngineLike>;
   /** The portal (or in-app picker) for a monitor or, in window mode, one window (P2). */
   selectScreen: (kind: 'screen' | 'window') => Promise<ScreenSource | null>;
+  /**
+   * Drops a remembered screen source (P3 step 8): `stale` when it showed no frame, `ended` when
+   * the shared screen ended during a recording. Absent where nothing is remembered.
+   */
+  forgetScreen?: (reason: 'stale' | 'ended') => void;
   /** Region mode (§4.3.7). Without a picker the last matching region (or full frame) is used. */
   pickRegion?: (source: { width: number; height: number }) => Promise<RegionChoice>;
   /**
@@ -456,36 +466,49 @@ export class SessionManager {
     try {
       engine = await this.deps.engine();
       // Audio only asks for no screen; the project still gets a canvas of this size.
-      const source = audioOnly
+      const kind = config.captureMode === 'window' ? 'window' : 'screen';
+      let source = audioOnly
         ? { sourceId: '', maxWidth: 1920, maxHeight: 1080 }
-        : await this.deps.selectScreen(config.captureMode === 'window' ? 'window' : 'screen');
+        : await this.deps.selectScreen(kind);
       if (!source) return await this.portalCancelled(null);
       if (this.current() !== 'acquiring') return { status: 'cancelled' };
 
-      const acquired = await engine.command(
-        'engine.acquire',
-        {
-          screen: audioOnly
-            ? null
-            : {
-                sourceId: source.sourceId,
-                maxWidth: source.maxWidth,
-                maxHeight: source.maxHeight,
-                fps: config.fps,
-              },
-          camera: config.cameraId && !audioOnly ? { deviceId: config.cameraId } : null,
-          mic: config.micId
-            ? {
-                deviceId: config.micId,
-                echoCancellation: config.micProcessing.ec,
-                noiseSuppression: config.micProcessing.ns,
-                autoGainControl: config.micProcessing.agc,
-              }
-            : null,
-        },
-        120_000,
-      );
-      if (acquired.status === 'cancelled' || (!acquired.screen && !audioOnly)) {
+      const acquire = (screen: ScreenSource) =>
+        engine.command(
+          'engine.acquire',
+          {
+            screen: audioOnly
+              ? null
+              : {
+                  sourceId: screen.sourceId,
+                  maxWidth: screen.maxWidth,
+                  maxHeight: screen.maxHeight,
+                  fps: config.fps,
+                  ...(screen.reused ? { firstFrameTimeoutMs: REUSED_SOURCE_FIRST_FRAME_MS } : {}),
+                },
+            camera: config.cameraId && !audioOnly ? { deviceId: config.cameraId } : null,
+            mic: config.micId
+              ? {
+                  deviceId: config.micId,
+                  echoCancellation: config.micProcessing.ec,
+                  noiseSuppression: config.micProcessing.ns,
+                  autoGainControl: config.micProcessing.agc,
+                }
+              : null,
+          },
+          120_000,
+        );
+      let acquired = await acquire(source);
+      if (acquired.status === 'stale') {
+        // The remembered screen no longer shows anything: forget it and ask once more.
+        this.logger.info('recording: the remembered screen is stale; asking again');
+        this.deps.forgetScreen?.('stale');
+        source = await this.deps.selectScreen(kind);
+        if (!source) return await this.portalCancelled(engine);
+        if (this.current() !== 'acquiring') return { status: 'cancelled' };
+        acquired = await acquire(source);
+      }
+      if (acquired.status !== 'ready' || (!acquired.screen && !audioOnly)) {
         return await this.portalCancelled(engine);
       }
       if (this.current() !== 'acquiring') {
@@ -747,6 +770,8 @@ export class SessionManager {
     const session = this.session;
     if (!session || !isCapturing(this.stateValue)) return;
     if (payload.kind === 'screen') {
+      // Stopped from the shell's sharing indicator: the next recording asks again.
+      this.deps.forgetScreen?.('ended');
       this.notice('info', 'Screen sharing ended; the recording was stopped.', 'screen');
       void this.stop('screen-ended').catch((error: unknown) =>
         this.logger.error('recording: stop after screen end failed', error),

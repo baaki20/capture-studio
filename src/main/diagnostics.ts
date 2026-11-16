@@ -20,6 +20,8 @@ export interface DiagnosticsInputs {
   secrets: DiagnosticsReport['secrets'];
   launch: LaunchCommandContext;
   automation?: { enabled: boolean; listening: boolean; socketPath: string };
+  /** Where the portal picks the screen: the remembered one, or null (P3 step 8). */
+  sharedScreen?: DiagnosticsReport['sharedScreen'];
 }
 
 /**
@@ -69,6 +71,7 @@ export function buildDiagnosticsReport(inputs: DiagnosticsInputs): DiagnosticsRe
           },
         }
       : {}),
+    ...(inputs.sharedScreen !== undefined ? { sharedScreen: inputs.sharedScreen } : {}),
   };
 }
 
@@ -103,6 +106,12 @@ export function formatDiagnosticsText(report: DiagnosticsReport): string {
     );
   } else {
     lines.push('  not probed yet');
+  }
+  if (report.sharedScreen !== undefined) {
+    lines.push(
+      '',
+      `Shared screen: ${report.sharedScreen ? `remembered (${report.sharedScreen.kind}) for this run` : 'the next recording asks'}`,
+    );
   }
   lines.push('', 'Capabilities');
   for (const key of CAPABILITY_KEYS) {

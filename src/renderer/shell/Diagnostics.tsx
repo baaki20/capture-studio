@@ -12,6 +12,7 @@ export function Diagnostics() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copy, setCopy] = useState<CopyState>('idle');
+  const [reloads, setReloads] = useState(0);
 
   // Loads the report now and again whenever capabilities change (a refresh broadcasts
   // `caps.changed`, and so does the encoder probe finishing).
@@ -35,7 +36,13 @@ export function Diagnostics() {
       active = false;
       off();
     };
-  }, [api]);
+  }, [api, reloads]);
+
+  /** "Choose the screen again" (P3 step 8): the next recording asks the portal. */
+  const forgetScreen = async () => {
+    await api.diag.forgetScreen();
+    setReloads((n) => n + 1);
+  };
 
   const refresh = async () => {
     setBusy(true);
@@ -98,6 +105,22 @@ export function Diagnostics() {
           {report.secrets.backend} ({report.secrets.persistent ? 'persistent' : 'session only'})
         </dd>
       </dl>
+
+      {report.sharedScreen !== undefined ? (
+        <>
+          <h3>Screen sharing</h3>
+          <p className={styles.muted} data-testid="shared-screen">
+            {report.sharedScreen
+              ? `Later recordings reuse the ${report.sharedScreen.kind === 'window' ? 'window' : 'screen'} you shared${report.sharedScreen.label ? ` (${report.sharedScreen.label})` : ''} without asking, until Capture Studio quits.`
+              : 'The next recording asks which screen to share. After that, recordings reuse it until Capture Studio quits.'}
+          </p>
+          {report.sharedScreen ? (
+            <button type="button" data-testid="forget-screen" onClick={() => void forgetScreen()}>
+              Choose the screen again
+            </button>
+          ) : null}
+        </>
+      ) : null}
 
       <h3>Paths</h3>
       <dl className={styles.facts}>

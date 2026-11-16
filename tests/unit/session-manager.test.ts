@@ -11,8 +11,10 @@ import { ActionBus } from '../../src/main/action-bus';
 import { ProjectRootRegistry } from '../../src/main/projects/media-protocol';
 import { ProjectStore } from '../../src/main/projects/project-store';
 import { readLock, readSessionLog } from '../../src/main/recording/assemble';
+import { ScreenSourceMemory, selectWithMemory } from '../../src/main/screen-memory';
 import { selectScreenSource } from '../../src/main/screen-source';
 import {
+  REUSED_SOURCE_FIRST_FRAME_MS,
   SessionManager,
   type EngineLike,
   type SessionEvents,
@@ -364,6 +366,7 @@ function harness(
     countdownTickMs?: number;
     pickRegion?: SessionManagerDeps['pickRegion'];
     selectScreen?: SessionManagerDeps['selectScreen'];
+    forgetScreen?: SessionManagerDeps['forgetScreen'];
     generateCaches?: SessionManagerDeps['generateCaches'];
   } = {},
 ): Harness {
@@ -430,6 +433,7 @@ function harness(
           maxHeight: 2160,
         })),
     ...(options.pickRegion ? { pickRegion: options.pickRegion } : {}),
+    ...(options.forgetScreen ? { forgetScreen: options.forgetScreen } : {}),
     systemAudioAvailable: () => options.systemAudio ?? true,
     systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
     platform: () => ({
@@ -632,6 +636,65 @@ describe('session manager', () => {
     await h.manager.stop();
     expect(await projectDirs(h)).toEqual([path.basename(root)]);
     expect((await readProject(root)).recording?.state).toBe('complete');
+  });
+
+  it('reuses the shared screen, and asks again when it is stale or ended (P3 step 8, R3.19)', async () => {
+    const logger = { info: () => undefined, warn: () => undefined, error: () => undefined };
+    const memory = new ScreenSourceMemory(logger);
+    let asked = 0;
+    const portal = () => {
+      asked += 1;
+      return Promise.resolve({
+        sourceId: `screen:${String(asked)}:0`,
+        label: 'Entire screen',
+        maxWidth: 3840,
+        maxHeight: 2160,
+      });
+    };
+    const h = harness({
+      selectScreen: (kind) => selectWithMemory(memory, kind, portal),
+      forgetScreen: (reason) => memory.forget(reason),
+    });
+    const acquires = () =>
+      h.engine.calls
+        .filter((c) => c.channel === 'engine.acquire')
+        .map((c) => (c.payload as EngineCommandPayload<'engine.acquire'>).screen);
+
+    await startRecording(h);
+    await h.manager.abort();
+    await startRecording(h);
+    await h.manager.abort();
+    // The second recording reused the first source, with a short first-frame limit.
+    expect(asked).toBe(1);
+    expect(acquires().map((s) => [s?.sourceId, s?.firstFrameTimeoutMs])).toEqual([
+      ['screen:1:0', undefined],
+      ['screen:1:0', REUSED_SOURCE_FIRST_FRAME_MS],
+    ]);
+
+    // Stale: no frame in time → forgotten, the portal asks, and the new source records.
+    let stale = true;
+    h.engine.respond['engine.acquire'] = (payload) => {
+      const p = payload;
+      if (stale && p.screen?.firstFrameTimeoutMs !== undefined) {
+        stale = false;
+        return { status: 'stale', screen: null, camera: null, mic: null };
+      }
+      return {
+        status: 'ready',
+        screen: { label: 'Entire screen', width: 1920, height: 1080, frameRate: 30 },
+        camera: null,
+        mic: null,
+      };
+    };
+    await startRecording(h);
+    expect(asked).toBe(2);
+    expect(acquires().at(-1)?.sourceId).toBe('screen:2:0');
+    expect(memory.current).toMatchObject({ kind: 'screen' });
+
+    // The user stops sharing from the shell: the next recording asks again.
+    h.manager.onTrackEnded({ kind: 'screen', reason: 'ended', atUs: T0 + S });
+    expect(memory.current).toBeNull();
+    await waitFor(() => h.manager.state === 'completed', 4000);
   });
 
   it('abort deletes the project folder', async () => {

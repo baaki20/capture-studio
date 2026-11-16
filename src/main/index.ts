@@ -49,6 +49,7 @@ import {
   type AutomationHandle,
 } from './ipc/automation-handlers';
 import { registerCoreHandlers } from './ipc/core-handlers';
+import { ScreenSourceMemory, selectWithMemory } from './screen-memory';
 import { registerEditorHandlers } from './ipc/editor-handlers';
 import { registerExportHandlers, type ExportService } from './ipc/export-handlers';
 import { IpcRouter } from './ipc/router';
@@ -382,11 +383,18 @@ async function start(): Promise<void> {
     }
   });
 
+  // The screen the portal shared, reused by later recordings of this run (P3 step 8).
+  const screenMemory = new ScreenSourceMemory(log);
   registerCoreHandlers({
     router,
     capabilities,
     settings,
     probeEncoders,
+    forgetScreen: () => {
+      const had = screenMemory.current !== null;
+      screenMemory.forget('user');
+      return had;
+    },
     writeClipboard: (text) => clipboard.writeText(text),
     // Settings → folders: chosen here, never sent as paths by the renderer (§1.3).
     chooseFolder: async (which, senderId) => {
@@ -422,6 +430,7 @@ async function start(): Promise<void> {
         appPath: app.getAppPath(),
         appImage: process.env.APPIMAGE,
       },
+      ...(usesPortal ? { sharedScreen: screenMemory.current } : {}),
       automation: {
         enabled: settings.get().automation.enabled,
         listening: automation?.listening ?? false,
@@ -513,21 +522,26 @@ async function start(): Promise<void> {
     utility,
     engine: () => engine.ensure(),
     // Cancelling the portal returns to the panel without an error (R1.8).
-    selectScreen: (kind) =>
-      selectScreenSource(
-        (options) => desktopCapturer.getSources(options),
-        {
-          fps: settings.get().recorder.fps,
-          sourceType: kind,
-          portal: usesPortal,
-          ...screenPickerOptions({
+    selectScreen: (kind) => {
+      const select = (sourceType: 'screen' | 'window') =>
+        selectScreenSource(
+          (options) => desktopCapturer.getSources(options),
+          {
+            fps: settings.get().recorder.fps,
+            sourceType,
             portal: usesPortal,
-            commandLine: app.commandLine,
-            choose: (sources, initialId) => sourcePicker.choose(sources, initialId),
-          }),
-        },
-        log,
-      ),
+            ...screenPickerOptions({
+              portal: usesPortal,
+              commandLine: app.commandLine,
+              choose: (sources, initialId) => sourcePicker.choose(sources, initialId),
+            }),
+          },
+          log,
+        );
+      // Only the portal asks every time; elsewhere the picker is quick and remembers by itself.
+      return usesPortal ? selectWithMemory(screenMemory, kind, select) : select(kind);
+    },
+    forgetScreen: (reason) => screenMemory.forget(reason),
     pickRegion: (source) => picker.pick(source),
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
     systemAudioOutputLatencyUs: () => estimateSinkOutputLatencyUs(defaultExec),

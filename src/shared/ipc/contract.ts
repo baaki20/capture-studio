@@ -374,6 +374,14 @@ export const DiagnosticsReportSchema = z.object({
       connectCommand: z.string().nullable(),
     })
     .optional(),
+  /**
+   * P3 step 8, where the ScreenCast portal picks the screen: the screen reused by the next
+   * recording (this app run only), or null when the next recording asks. Absent elsewhere.
+   */
+  sharedScreen: z
+    .object({ kind: z.enum(['screen', 'window']), label: z.string().nullable() })
+    .nullable()
+    .optional(),
 });
 export type DiagnosticsReport = z.infer<typeof DiagnosticsReportSchema>;
 
@@ -514,6 +522,8 @@ export const INVOKE_CHANNELS = {
 
   'diag.get': invoke(NoPayload, DiagnosticsReportSchema, SHELL),
   'diag.copyReport': invoke(NoPayload, z.object({ text: z.string() }), SHELL),
+  /** "Choose the screen again" (P3 step 8): the next recording asks the portal. */
+  'diag.forgetScreen': invoke(NoPayload, z.object({ forgotten: z.boolean() }), SHELL),
 } as const;
 
 export type InvokeChannel = keyof typeof INVOKE_CHANNELS;
@@ -590,6 +600,11 @@ export const EngineAcquireSchema = z.strictObject({
       maxWidth: z.int().positive(),
       maxHeight: z.int().positive(),
       fps: z.literal([30, 60]),
+      /**
+       * P3 (step 8): a source reused from an earlier recording of this app run (Wayland). With
+       * no first frame within this time the acquisition answers `stale`, so main asks again.
+       */
+      firstFrameTimeoutMs: z.int().min(100).max(10_000).optional(),
     })
     .nullable(),
   camera: z.strictObject({ deviceId: z.string().min(1) }).nullable(),
@@ -622,7 +637,8 @@ export const EngineAcquireWarningSchema = z.object({
 });
 
 export const EngineAcquireResultSchema = z.object({
-  status: z.enum(['ready', 'cancelled']),
+  /** `stale`: a reused screen source delivered no frame in time (P3 step 8); nothing is held. */
+  status: z.enum(['ready', 'cancelled', 'stale']),
   /** Real sizes, read from the first frame (§9.1). */
   screen: TrackInfoSchema.nullable(),
   camera: TrackInfoSchema.nullable(),

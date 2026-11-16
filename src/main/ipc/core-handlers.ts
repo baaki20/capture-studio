@@ -27,6 +27,8 @@ export interface CoreHandlerDeps {
    * Resolves with the chosen folder, or null when cancelled.
    */
   chooseFolder?: (which: 'projectsDir' | 'exportsDir', senderId: number) => Promise<string | null>;
+  /** Forgets the remembered screen (P3 step 8); false when none was remembered. */
+  forgetScreen?: () => boolean;
 }
 
 export function registerCoreHandlers(deps: CoreHandlerDeps): void {
@@ -66,6 +68,8 @@ export function registerCoreHandlers(deps: CoreHandlerDeps): void {
     await deps.writeClipboard(text);
     return { text };
   });
+
+  router.handle('diag.forgetScreen', () => ({ forgotten: deps.forgetScreen?.() ?? false }));
 
   router.handle('export.probeEncoders', () => deps.probeEncoders());
 }

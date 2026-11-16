@@ -160,10 +160,16 @@ export async function detectLinuxCapabilities(input: LinuxDetectInput): Promise<
 
   return {
     'capture.screen.source': wayland
-      ? available('portal', 'The system picker appears on every recording (Phase 1).')
+      ? available(
+          'portal',
+          'The system picker appears on the first recording; later ones reuse that screen until the app quits.',
+        )
       : available('desktopCapturer', 'In-app source picker.'),
     'capture.screen.restoreToken': wayland
-      ? unavailable('The portal asks again on every recording until Phase 3.', 'prompt-each-time')
+      ? degraded(
+          'in-memory',
+          'The shared screen is reused while the app runs; after a restart the portal asks once again.',
+        )
       : available('not-needed', 'X11 capture needs no permission prompt.'),
     'capture.screen.allMonitors': waylandOnly(
       'entire-screen',
