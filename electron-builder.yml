@@ -9,7 +9,6 @@
 # `CSC_KEY_PASSWORD` (or `WIN_CSC_LINK`). Unsigned macOS builds cannot auto-update.
 appId: org.capturestudio.CaptureStudio
 productName: Capture Studio
-executableName: capture-studio
 copyright: Copyright © 2026 baaki20 <huduabdulbaakijunior20@gmail.com>
 
 directories:
@@ -114,6 +113,9 @@ dmg:
   artifactName: capture-studio-${version}-${arch}.${ext}
 
 linux:
+  # Linux only: on macOS this would also rename the bundle (capture-studio.app in Finder), and on
+  # Windows the executable keeps the product name.
+  executableName: capture-studio
   target:
     - AppImage
     - deb

@@ -81,7 +81,9 @@ describe('packaging configuration', () => {
     expect(yaml).toMatch(/^ {2}syncDesktopName: true$/m);
     expect(yaml).toMatch(/^ {2}category: AudioVideo;Video;Recorder;$/m);
     expect(yaml).toMatch(/^ {2}icon: build\/icons$/m);
-    expect(yamlScalar(yaml, 'executableName')).toBe('capture-studio');
+    // Linux only: top-level, it would also name the macOS bundle capture-studio.app.
+    expect(yamlScalar(yaml, 'executableName')).toBeUndefined();
+    expect(yaml).toMatch(/^linux:\n(?: {2}.*\n|\s*\n)*? {2}executableName: capture-studio$/m);
     expect(pkg.license).toBe('GPL-3.0-or-later');
     expect(pkg.homepage).toMatch(/^https:\/\//);
   });
