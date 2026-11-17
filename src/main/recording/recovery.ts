@@ -239,8 +239,9 @@ export class RecoveryService {
       const file = files.find((f) => f.kind === meta.kind) ?? null;
       if (file && !file.ok) this.logger.warn(`recovery: ${meta.kind}: ${file.error ?? 'failed'}`);
       let sync = file?.sync ?? null;
-      if (sync && meta.kind === 'system') {
-        // On the utility clock; without t0 the slope (all the fit needs) is still right.
+      if (sync && meta.kind === 'system' && candidate.log?.systemCaptureId) {
+        // pw-record's checkpoints are on the utility clock (the engine's system audio, P3, is on
+        // session time like the mic); without t0 the slope (all the fit needs) is still right.
         sync = shiftCheckpoints(sync, (t0Us ?? 0) + offsetUs);
       }
       const drift = fitDrift(sync);

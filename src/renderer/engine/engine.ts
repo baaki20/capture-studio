@@ -15,6 +15,10 @@
  * 4. `stop` stops the workers (flush, finalize, port close), calibrates with every sample, and
  *    returns each stream's result. A `restart` keeps the tracks for the next take.
  *
+ * System audio on Windows and macOS (P3 step 2) arrives as the screen stream's audio track
+ * (`screen.systemAudio`) and is recorded like the mic, as its own `system` stream: same Opus
+ * pipeline, arrival-calibrated. A capture without it records on with a `system` warning.
+ *
  * A track that ends (GNOME stop-sharing, unplugged device) is reported once on
  * `engine.trackEnded`; main decides (screen → graceful stop, R1.15; camera/mic → that component
  * ends, R1.16). Its worker finalizes its own file at that point.
@@ -90,7 +94,7 @@ interface VideoTrack {
 }
 
 interface AudioTrack {
-  kind: 'mic';
+  kind: 'mic' | 'system';
   stream: MediaStream;
   track: MediaStreamTrack;
   label: string;
@@ -160,9 +164,7 @@ export class CaptureEngine {
     let screenStream: MediaStream | null = null;
     if (payload.screen) {
       try {
-        screenStream = await navigator.mediaDevices.getUserMedia(
-          screenConstraints(payload.screen) as unknown as MediaStreamConstraints,
-        );
+        screenStream = await this.openScreen(payload.screen, warnings);
       } catch (error) {
         if (isCancelError(error)) {
           console.info(`engine: screen acquisition cancelled (${describeError(error)})`);
@@ -174,6 +176,15 @@ export class CaptureEngine {
     const screenTrack = screenStream ? firstTrack(screenStream, 'video') : null;
     if (screenTrack) screenTrack.contentHint = CONTENT_HINTS.screen;
     this.acquisition = acquisition;
+    const systemTrack = payload.screen?.systemAudio
+      ? (screenStream?.getAudioTracks()[0] ?? null)
+      : null;
+    if (payload.screen?.systemAudio && screenStream && !systemTrack) {
+      warnings.push({
+        kind: 'system',
+        message: 'the screen capture carries no system audio on this system',
+      });
+    }
 
     try {
       const [screen, camera, mic] = await Promise.all([
@@ -192,6 +203,7 @@ export class CaptureEngine {
           : Promise.resolve(null),
         payload.mic ? this.openMic(acquisition, payload.mic, warnings) : Promise.resolve(null),
       ]);
+      const system = systemTrack ? await this.addSystem(acquisition, systemTrack, warnings) : null;
       // Pre-select encoders with the real sizes; the warm-up result is cached for `start`.
       if (screen) {
         const screenEncoder = await this.selectEncoder(screen, 'standard');
@@ -211,6 +223,7 @@ export class CaptureEngine {
         screen: screen ? trackInfo(screen) : null,
         camera: cameraInfo,
         mic: mic ? trackInfo(mic) : null,
+        ...(payload.screen?.systemAudio ? { system: system ? trackInfo(system) : null } : {}),
         warnings,
       };
     } catch (error) {
@@ -221,6 +234,66 @@ export class CaptureEngine {
         return { status: 'stale', screen: null, camera: null, mic: null, warnings };
       }
       throw error;
+    }
+  }
+
+  /**
+   * The screen stream; with `systemAudio`, its audio track too. A system that refuses desktop
+   * audio outright (not a cancel) gets the screen alone and a `system` warning.
+   */
+  private async openScreen(
+    screen: NonNullable<AcquirePayload['screen']>,
+    warnings: AcquireWarning[],
+  ): Promise<MediaStream> {
+    const open = (withAudio: boolean) =>
+      navigator.mediaDevices.getUserMedia(
+        screenConstraints(screen, withAudio) as unknown as MediaStreamConstraints,
+      );
+    if (!screen.systemAudio) return open(false);
+    try {
+      return await open(true);
+    } catch (error) {
+      if (isCancelError(error)) throw error;
+      console.warn(
+        `engine: screen with system audio failed (${describeError(error)}); retrying without`,
+      );
+      warnings.push({
+        kind: 'system',
+        message: `system audio unavailable: ${describeError(error)}`,
+      });
+      return open(false);
+    }
+  }
+
+  /** The screen stream's audio track as the `system` stream (its own stream, so dropping it leaves the screen). */
+  private async addSystem(
+    acquisition: Acquisition,
+    track: MediaStreamTrack,
+    warnings: AcquireWarning[],
+  ): Promise<AudioTrack | null> {
+    const stream = new MediaStream([track]);
+    try {
+      track.contentHint = CONTENT_HINTS.system;
+      this.watch(acquisition, 'system', track);
+      const probe = await probeAudioTrack(track);
+      const audio: AudioTrack = {
+        kind: 'system',
+        stream,
+        track,
+        label: 'System audio',
+        sampleRate: probe.sampleRate,
+        channels: probe.channels,
+      };
+      acquisition.tracks.set('system', audio);
+      return audio;
+    } catch (error) {
+      warnings.push({
+        kind: 'system',
+        message: `system audio unavailable: ${describeError(error)}`,
+      });
+      acquisition.ended.add('system');
+      track.stop();
+      return null;
     }
   }
 
@@ -379,7 +452,7 @@ export class CaptureEngine {
     if (!acquisition) return;
     for (const fn of acquisition.cleanup) fn();
     for (const entry of acquisition.tracks.values()) {
-      if (entry.kind !== 'mic') entry.still?.close();
+      if (!isAudioTrack(entry)) entry.still?.close();
       for (const track of entry.stream.getTracks()) track.stop();
     }
   }
@@ -488,7 +561,7 @@ export class CaptureEngine {
     // Encoders for the chosen quality (warm-ups are cached from acquire).
     const encoders = new Map<string, SelectedVideoEncoder>();
     for (const p of plan) {
-      if (p.track.kind === 'mic') continue;
+      if (isAudioTrack(p.track)) continue;
       const crop =
         p.track.kind === 'screen' && payload.cropToRegion && payload.region ? payload.region : null;
       const picked = await this.selectEncoder(
@@ -539,26 +612,27 @@ export class CaptureEngine {
 
     const streams: StartResult['streams'] = [];
     for (const p of plan) {
-      if (p.track.kind === 'mic') {
+      if (isAudioTrack(p.track)) {
+        const role = p.track.kind === 'mic' ? 'microphone' : 'system-audio';
         const config = {
-          ...audioEncoderConfig('microphone', p.track.channels),
+          ...audioEncoderConfig(role, p.track.channels),
           sampleRate: p.track.sampleRate,
         };
         const init: WorkerInit = {
           type: 'init',
           media: 'audio',
           streamId: p.streamId,
-          kind: 'mic',
+          kind: p.track.kind,
           port: p.port,
           t0Us,
           readable: audioChunks(p.track.track),
-          role: 'microphone',
+          role,
           config,
         };
         const encoder = { name: 'Opus (WebCodecs)', hardware: false };
         this.launch(session, init, encoder);
         streams.push({
-          kind: 'mic',
+          kind: p.track.kind,
           streamId: p.streamId,
           encoder,
           codec: 'opus',
@@ -653,7 +727,9 @@ export class CaptureEngine {
         session.stats.update(message.stats);
         return;
       case 'level':
-        if (run.kind === 'mic') this.api.sendLevels({ atUs: sessionNowUs(), mic: message.peak });
+        if (run.kind === 'mic' || run.kind === 'system') {
+          this.api.sendLevels({ atUs: sessionNowUs(), [run.kind]: message.peak });
+        }
         return;
       case 'calibration-samples':
         run.samples = message.samples;
@@ -846,8 +922,12 @@ function firstTrack(stream: MediaStream, kind: 'video' | 'audio'): MediaStreamTr
   return track;
 }
 
+function isAudioTrack(track: AcquiredTrack): track is AudioTrack {
+  return track.kind === 'mic' || track.kind === 'system';
+}
+
 function trackInfo(track: AcquiredTrack): TrackInfo {
-  if (track.kind === 'mic') {
+  if (isAudioTrack(track)) {
     return { label: track.label, sampleRate: track.sampleRate, channels: track.channels };
   }
   return {

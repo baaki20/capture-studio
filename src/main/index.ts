@@ -32,6 +32,7 @@ import { SecondInstanceDataSchema, type SecondInstanceData } from '../shared/ipc
 import { ActionBus } from './action-bus';
 import { appMenuTemplate } from './app-menu';
 import { CapabilityService, defaultExec } from './capabilities/detect';
+import { systemAudioWithScreen } from './capabilities/common';
 import { estimateSinkOutputLatencyUs } from './system-audio/linux-latency';
 import { inferOzonePlatform } from './capabilities/linux';
 import { readMacPermissions } from './capabilities/mac-permissions';
@@ -506,7 +507,9 @@ async function start(): Promise<void> {
   // The setup panel's system-audio meter runs only while the recorder is idle (R1.5).
   let systemMonitor = false;
   const setSystemMonitor = (enabled: boolean): void => {
-    const next = enabled && capabilityAvailable('audio.system');
+    // Windows and macOS take system audio with the screen: nothing to meter before recording.
+    const next =
+      enabled && capabilityAvailable('audio.system') && !systemAudioWithScreen(process.platform);
     if (next === systemMonitor) return;
     systemMonitor = next;
     utility.monitorSystemAudio(next);
@@ -577,6 +580,7 @@ async function start(): Promise<void> {
     }),
     pickRegion: (source) => picker.pick(source),
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
+    systemAudioWithScreen: systemAudioWithScreen(process.platform),
     systemAudioOutputLatencyUs: () => estimateSinkOutputLatencyUs(defaultExec),
     platform,
     appVersion: app.getVersion(),

@@ -108,6 +108,8 @@ export function NewRecording({ recState }: Props) {
 
   const system = caps?.capabilities['audio.system'];
   const systemAvailable = system?.state === 'available' || system?.state === 'degraded';
+  // Windows and macOS (P3 step 2): it comes with the screen capture, so there is no idle meter.
+  const systemWithScreen = system?.strategy === 'desktop-loopback';
 
   const camera = useCameraPreview(config?.cameraId ?? null, previews, video);
   const mic = useMicMeter(
@@ -115,7 +117,9 @@ export function NewRecording({ recState }: Props) {
     config?.micProcessing ?? { ec: false, ns: false, agc: false },
     previews,
   );
-  const systemPeak = useSystemLevel(previews && systemAvailable && (config?.systemAudio ?? false));
+  const systemPeak = useSystemLevel(
+    previews && systemAvailable && !systemWithScreen && (config?.systemAudio ?? false),
+  );
 
   /** Applies a change and persists it (R1.6). */
   const update = (patch: Partial<RecorderConfig>) => {
@@ -386,7 +390,11 @@ export function NewRecording({ recState }: Props) {
             />
             System audio
           </label>
-          {systemAvailable ? (
+          {systemAvailable && systemWithScreen ? (
+            <p className={styles.muted} data-testid="system-audio-reason">
+              {system.reason}
+            </p>
+          ) : systemAvailable ? (
             <Meter label="System" peak={systemPeak} testId="system-meter" />
           ) : (
             <p className={styles.muted} data-testid="system-audio-reason">

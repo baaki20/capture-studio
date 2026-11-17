@@ -7,7 +7,7 @@ import {
   type ExecFn,
   type ExecResult,
 } from '../../src/main/capabilities/linux';
-import { cursorTrackCapability } from '../../src/main/capabilities/common';
+import { cursorTrackCapability, systemAudioWithScreen } from '../../src/main/capabilities/common';
 import { readMacPermissions } from '../../src/main/capabilities/mac-permissions';
 import { macosMajor, type MacPermissions } from '../../src/main/capabilities/macos';
 import { windowsBuild } from '../../src/main/capabilities/windows';
@@ -210,8 +210,8 @@ describe('Windows capability detection (Phase 3)', () => {
     });
     expect(c['hotkeys.global'].state).toBe('available');
     expect(c['secrets.persistent'].state).toBe('available');
-    // Not built yet: no capability may claim what the app cannot do.
-    expect(c['audio.system'].state).toBe('unavailable');
+    // System audio comes with the screen capture (P3 step 2).
+    expect(c['audio.system']).toMatchObject({ state: 'available', strategy: 'desktop-loopback' });
     // Without the native helper the cursor is polled (no clicks).
     expect(c['capture.cursor.track']).toMatchObject({
       state: 'degraded',
@@ -270,6 +270,19 @@ describe('macOS capability detection (Phase 3)', () => {
     expect(c['capture.screenshot.silent'].state).toBe('unavailable');
     expect(c['video.camera'].state).toBe('degraded');
     expect(c['audio.mic'].reason).toContain('blocked');
+  });
+
+  it('offers system audio with the screen from macOS 13, degraded until checked (P3 step 2)', async () => {
+    expect((await mac('23.6.0')).capabilities['audio.system']).toMatchObject({
+      state: 'degraded',
+      strategy: 'desktop-loopback',
+    });
+    expect((await mac('21.6.0')).capabilities['audio.system'].state).toBe('unavailable');
+    const denied = await mac('23.6.0', { ...granted, screen: 'denied' });
+    expect(denied.capabilities['audio.system'].state).toBe('unavailable');
+    expect(systemAudioWithScreen('darwin')).toBe(true);
+    expect(systemAudioWithScreen('win32')).toBe(true);
+    expect(systemAudioWithScreen('linux')).toBe(false);
   });
 
   it('treats unread permissions as not asked yet', async () => {

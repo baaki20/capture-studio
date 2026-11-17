@@ -268,6 +268,11 @@ export interface SessionManagerDeps {
   generateCaches?: (projectId: string, root: string, media: readonly Media[]) => Promise<void>;
   /** `audio.system` is available. */
   systemAudioAvailable: () => boolean;
+  /**
+   * P3 step 2: system audio comes with the screen capture (Windows and macOS loopback, recorded
+   * by the engine) instead of `pw-record` in the utility (Linux). It then needs a screen.
+   */
+  systemAudioWithScreen?: boolean;
   /** Output latency of the default sink in µs (system audio is shifted by it). */
   systemAudioOutputLatencyUs?: () => Promise<number>;
   platform: () => RecordingInfo['platform'];
@@ -333,6 +338,8 @@ interface Session {
   labels: { camera: string | null; mic: string | null };
   hasCamera: boolean;
   hasMic: boolean;
+  /** The engine records system audio from the screen capture (`systemAudioWithScreen`). */
+  engineSystem: boolean;
   region: NRect | null;
   // Project folder (set at the first start).
   projectId: string | null;
@@ -518,7 +525,9 @@ export class SessionManager {
     let engine: EngineLike;
     let session: Session;
     const audioOnly = config.captureMode === 'audio-only';
-    if (audioOnly && !config.micId && !(config.systemAudio && this.deps.systemAudioAvailable())) {
+    const withScreen = this.deps.systemAudioWithScreen === true;
+    const utilitySystem = config.systemAudio && !withScreen && this.deps.systemAudioAvailable();
+    if (audioOnly && !config.micId && !utilitySystem) {
       const text = 'Audio only needs a microphone or system audio.';
       await this.failAndSettle(text);
       return { status: 'failed', message: text };
@@ -533,6 +542,7 @@ export class SessionManager {
       if (!source) return await this.portalCancelled(null);
       if (this.current() !== 'acquiring') return { status: 'cancelled' };
 
+      const screenSystem = config.systemAudio && withScreen && this.deps.systemAudioAvailable();
       const acquire = (screen: ScreenSource) =>
         engine.command(
           'engine.acquire',
@@ -545,6 +555,7 @@ export class SessionManager {
                   maxHeight: screen.maxHeight,
                   fps: config.fps,
                   ...(screen.reused ? { firstFrameTimeoutMs: REUSED_SOURCE_FIRST_FRAME_MS } : {}),
+                  ...(screenSystem ? { systemAudio: true } : {}),
                 },
             camera: config.cameraId && !audioOnly ? { deviceId: config.cameraId } : null,
             mic: config.micId
@@ -591,6 +602,21 @@ export class SessionManager {
           `The microphone${named('mic')} could not be opened; recording without it.`,
           'mic',
         );
+      if (screenSystem && !audioOnly && !acquired.system) {
+        const why = acquired.warnings?.find((w) => w.kind === 'system')?.message;
+        this.logger.warn(`recording: no system audio with the screen (${why ?? 'none delivered'})`);
+        this.notice(
+          'warning',
+          'System audio did not come with the screen capture; recording without it.',
+          'system',
+        );
+      } else if (config.systemAudio && withScreen && audioOnly) {
+        this.notice(
+          'warning',
+          'On this system, system audio is recorded with the screen; audio only records without it.',
+          'system',
+        );
+      }
 
       session = {
         sessionId: newId('session'),
@@ -606,6 +632,7 @@ export class SessionManager {
         labels: { camera: acquired.camera?.label ?? null, mic: acquired.mic?.label ?? null },
         hasCamera: acquired.camera !== null,
         hasMic: acquired.mic !== null,
+        engineSystem: !audioOnly && screenSystem && acquired.system != null,
         region: null,
         projectId: null,
         name: null,
@@ -821,10 +848,16 @@ export class SessionManager {
     });
   }
 
-  /** `engine.levels` (about 15 Hz): the mic meter while capturing (R1.12). */
+  /** `engine.levels` (about 15 Hz): the mic and engine system-audio meters while capturing (R1.12). */
   onEngineLevels(payload: EngineEventPayload<'engine.levels'>): void {
-    if (!this.session?.hasMic || !isCapturing(this.stateValue)) return;
-    this.deps.events.levels?.({ mic: Math.max(0, payload.mic) });
+    const session = this.session;
+    if (!session || !isCapturing(this.stateValue)) return;
+    if (payload.mic !== undefined && session.hasMic) {
+      this.deps.events.levels?.({ mic: Math.max(0, payload.mic) });
+    }
+    if (payload.system !== undefined && session.engineSystem) {
+      this.deps.events.levels?.({ system: Math.max(0, payload.system) });
+    }
   }
 
   /** `engine.trackEnded`: screen → graceful stop (R1.15); others end early (R1.16). */
@@ -1072,6 +1105,7 @@ export class SessionManager {
     const kinds: StreamKind[] = session.hasScreen ? ['screen'] : [];
     if (session.hasCamera) kinds.push('camera');
     if (session.hasMic) kinds.push('mic');
+    if (session.engineSystem) kinds.push('system');
     const created = kinds.map((kind) => this.newStream(session, kind));
     session.streams = new Map(created.map((stream) => [stream.kind, stream]));
     session.pauses = [];
@@ -1114,7 +1148,7 @@ export class SessionManager {
     session.utilityOffsetUs =
       started.utilityClockOffsetUs ?? started.clock?.offsetUs ?? (await mainOffset)?.offsetUs ?? 0;
 
-    if (session.config.systemAudio) {
+    if (session.config.systemAudio && !this.deps.systemAudioWithScreen) {
       if (this.deps.systemAudioAvailable()) {
         const system = this.newStream(session, 'system');
         system.label = 'System audio';
@@ -1151,7 +1185,7 @@ export class SessionManager {
             ? session.labels.mic
             : kind === 'screen'
               ? (session.source.label ?? null)
-              : null,
+              : 'System audio',
       encoder: null,
       // §9.2 hybrid default until the engine reports its calibration.
       sync: {
@@ -1299,7 +1333,7 @@ export class SessionManager {
   private async flushSyncFiles(session: Session): Promise<void> {
     if (!session.root) return;
     for (const stream of session.streams.values()) {
-      if (!stream.checkpointsDirty || stream.kind === 'system') continue;
+      if (!stream.checkpointsDirty || this.utilitySystem(session, stream)) continue;
       stream.checkpointsDirty = false;
       await this.writeSyncFile(session.root, stream.kind, stream.nominalRate, stream.checkpoints);
     }
@@ -1377,8 +1411,15 @@ export class SessionManager {
     return sessionUs + (session.t0Us ?? 0) + (session.utilityOffsetUs ?? 0);
   }
 
+  /** The `pw-record` capture's id (Linux); null when the engine records system audio. */
   private systemCaptureId(session: Session): string | null {
+    if (session.engineSystem) return null;
     return session.streams.get('system')?.streamId ?? null;
+  }
+
+  /** System audio from `pw-record`: on the utility clock, with its own pause and stop. */
+  private utilitySystem(session: Session, stream: StreamState): boolean {
+    return stream.kind === 'system' && !session.engineSystem;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1589,7 +1630,9 @@ export class SessionManager {
 
     // The engine closes each stream over its port; wait for the utility to confirm, then
     // force-close whatever is left (engine failure) so the files are complete on disk.
-    const engineStreams = [...session.streams.values()].filter((s) => s.kind !== 'system');
+    const engineStreams = [...session.streams.values()].filter(
+      (s) => !this.utilitySystem(session, s),
+    );
     if (engineStopped && reason === 'stop') {
       const deadline = Date.now() + (this.deps.streamCloseTimeoutMs ?? 10_000);
       while (engineStreams.some((s) => !s.closed) && Date.now() < deadline) await delay(20);
@@ -1651,7 +1694,7 @@ export class SessionManager {
     }
     // The engine cannot write files: its drift checkpoints go to `<kind>.sync.json` here.
     for (const stream of session.streams.values()) {
-      if (stream.kind === 'system' || stream.checkpoints.length === 0) continue;
+      if (this.utilitySystem(session, stream) || stream.checkpoints.length === 0) continue;
       await this.writeSyncFile(root, stream.kind, stream.nominalRate, stream.checkpoints);
     }
     // The mic's capture-timestamp series, for offline comparison with the arrival series.
@@ -1711,7 +1754,7 @@ export class SessionManager {
       }
       // System-audio checkpoints are on the utility clock; shift them into session time.
       const sync =
-        file?.sync && stream.kind === 'system'
+        file?.sync && this.utilitySystem(session, stream)
           ? shiftCheckpoints(file.sync, (session.t0Us ?? 0) + (session.utilityOffsetUs ?? 0))
           : (file?.sync ?? null);
       const drift = fitDrift(sync);

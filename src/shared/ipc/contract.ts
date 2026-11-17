@@ -628,6 +628,11 @@ export const EngineAcquireSchema = z.strictObject({
        * no first frame within this time the acquisition answers `stale`, so main asks again.
        */
       firstFrameTimeoutMs: z.int().min(100).max(10_000).optional(),
+      /**
+       * P3 (step 2): also take the system audio with the screen (Windows and macOS loopback).
+       * The recording goes on without it when the capture carries none (`warnings`).
+       */
+      systemAudio: z.boolean().optional(),
     })
     .nullable(),
   camera: z.strictObject({ deviceId: z.string().min(1) }).nullable(),
@@ -666,6 +671,8 @@ export const EngineAcquireResultSchema = z.object({
   screen: TrackInfoSchema.nullable(),
   camera: TrackInfoSchema.nullable(),
   mic: TrackInfoSchema.nullable(),
+  /** P3 (step 2): the system audio that came with the screen; missing when not asked for. */
+  system: TrackInfoSchema.nullable().optional(),
   /** Added in step 9: requested devices that are missing or failed to open (R1.6 notice). */
   warnings: z.array(EngineAcquireWarningSchema).optional(),
 });
@@ -925,8 +932,15 @@ export const ENGINE_EVENTS = {
     atUs: z.number(),
     message: z.string().optional(),
   }),
-  /** Added in step 11: mic peak (linear 0–1) at about 15 Hz while recording (R1.12 meters). */
-  'engine.levels': z.object({ atUs: z.number(), mic: z.number().min(0) }),
+  /**
+   * Added in step 11: mic peak (linear 0–1) at about 15 Hz while recording (R1.12 meters); P3
+   * step 2 adds the system audio recorded with the screen. Each message carries one of them.
+   */
+  'engine.levels': z.object({
+    atUs: z.number(),
+    mic: z.number().min(0).optional(),
+    system: z.number().min(0).optional(),
+  }),
 } as const;
 
 export type EngineEventChannel = keyof typeof ENGINE_EVENTS;

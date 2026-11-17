@@ -16,8 +16,13 @@ type AcquirePayload = EngineCommandPayload<'engine.acquire'>;
 
 export const CAMERA_IDEAL = { width: 1280, height: 720, frameRate: 30 } as const;
 
+/** Chromium's desktop audio: the system mix (loopback) on Windows and macOS (P3 step 2). */
+export interface DesktopAudioConstraints {
+  mandatory: { chromeMediaSource: 'desktop' };
+}
+
 export interface DesktopVideoConstraints {
-  audio: false;
+  audio: false | DesktopAudioConstraints;
   video: {
     mandatory: {
       chromeMediaSource: 'desktop';
@@ -29,11 +34,16 @@ export interface DesktopVideoConstraints {
   };
 }
 
+/**
+ * With `withSystemAudio`, the system mix comes as the stream's audio track. Only Windows and
+ * macOS deliver it; main asks for it there (`systemAudio`), never on Linux (pw-record).
+ */
 export function screenConstraints(
   screen: NonNullable<AcquirePayload['screen']>,
+  withSystemAudio = false,
 ): DesktopVideoConstraints {
   return {
-    audio: false,
+    audio: withSystemAudio ? { mandatory: { chromeMediaSource: 'desktop' } } : false,
     video: {
       mandatory: {
         chromeMediaSource: 'desktop',
@@ -72,7 +82,12 @@ export function micConstraints(mic: NonNullable<AcquirePayload['mic']>) {
 }
 
 /** `track.contentHint` per stream (§4.3.2). */
-export const CONTENT_HINTS = { screen: 'detail', camera: 'motion', mic: 'speech' } as const;
+export const CONTENT_HINTS = {
+  screen: 'detail',
+  camera: 'motion',
+  mic: 'speech',
+  system: 'music',
+} as const;
 
 /**
  * Error names `getUserMedia` uses when the user (or the portal) refused the screen. With path (a)

@@ -8,7 +8,9 @@
  * - `ui.excludeFromCapture`: reports say ScreenCaptureKit on macOS 15 and later captures windows
  *   that set `NSWindowSharingNone`, so it is degraded there (the controls minimize) until spike
  *   S10 checks it.
- * - Features that need the native helper or later Phase 3 steps stay unavailable until then.
+ * - `audio.system`: ScreenCaptureKit's audio with the screen capture, macOS 13+ (P3 step 2),
+ *   degraded until spike S10 checks it on a real Mac.
+ * - Features that need later Phase 3 steps stay unavailable until then.
  */
 import {
   available,
@@ -81,6 +83,28 @@ function permissionGated(
   }
 }
 
+/** First macOS whose ScreenCaptureKit captures system audio. */
+export const MACOS_SYSTEM_AUDIO_MAJOR = 13;
+
+/**
+ * System audio (P3 step 2): ScreenCaptureKit's audio as the screen capture's audio track, from
+ * macOS 13. Degraded until spike S10 confirms the pinned Electron delivers it: a capture without
+ * audio records on without it.
+ */
+function macSystemAudio(major: number | null, screen: Capability): Capability {
+  if (major !== null && major < MACOS_SYSTEM_AUDIO_MAJOR) {
+    return unavailable(
+      'System audio needs macOS 13 or later. Recording continues without it.',
+      'desktop-loopback',
+    );
+  }
+  if (screen.state === 'unavailable') return screen;
+  return degraded(
+    'desktop-loopback',
+    'Recorded with the screen capture (ScreenCaptureKit); not yet verified on this macOS, so a capture without audio records on without it. Audio-only recordings go without it.',
+  );
+}
+
 export function detectMacCapabilities(input: MacDetectInput): CapabilityMap {
   const major = macosMajor(input.osRelease);
   const p = input.permissions;
@@ -115,9 +139,7 @@ export function detectMacCapabilities(input: MacDetectInput): CapabilityMap {
       p && !p.accessibility ? 'Clicks need Accessibility permission (System Settings).' : null,
     ),
     'capture.screenshot.silent': screen,
-    'audio.system': unavailable(
-      'System audio is not supported on macOS in this build yet. Recording continues without it.',
-    ),
+    'audio.system': macSystemAudio(major, screen),
     'audio.mic': permissionGated(
       p?.microphone,
       'getUserMedia',

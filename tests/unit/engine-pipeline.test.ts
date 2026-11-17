@@ -223,6 +223,15 @@ describe('acquisition constraints (§4.3.2, §9.1)', () => {
     });
   });
 
+  it('asks for the desktop audio (system loopback) with the screen when told to (P3 step 2)', () => {
+    const screen = { sourceId: 'screen:1:0', maxWidth: 3840, maxHeight: 2160, fps: 30 } as const;
+    expect(screenConstraints(screen, true).audio).toEqual({
+      mandatory: { chromeMediaSource: 'desktop' },
+    });
+    expect(screenConstraints(screen, true).video.mandatory.chromeMediaSourceId).toBe('screen:1:0');
+    expect(screenConstraints(screen).audio).toBe(false);
+  });
+
   it('opens camera and mic by exact device id with the setup choices', () => {
     expect(cameraConstraints({ deviceId: 'cam' }).video).toMatchObject({
       deviceId: { exact: 'cam' },

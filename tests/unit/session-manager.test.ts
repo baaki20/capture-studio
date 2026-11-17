@@ -247,6 +247,9 @@ class FakeEngine implements EngineLike {
           screen: { label: 'Entire screen', width: 1920, height: 1080, frameRate: 30 },
           camera: p.camera ? { label: 'HD Webcam', width: 1280, height: 720 } : null,
           mic: p.mic ? { label: 'Built-in Mic', sampleRate: 48_000, channels: 1 } : null,
+          ...(p.screen?.systemAudio
+            ? { system: { label: 'System audio', sampleRate: 48_000, channels: 2 } }
+            : {}),
         };
       }
       case 'engine.start':
@@ -363,6 +366,8 @@ const CONFIG: RecorderConfig = {
 function harness(
   options: {
     systemAudio?: boolean;
+    /** P3 step 2: Windows/macOS, system audio comes with the screen capture. */
+    systemAudioWithScreen?: boolean;
     countdownTickMs?: number;
     pickRegion?: SessionManagerDeps['pickRegion'];
     selectScreen?: SessionManagerDeps['selectScreen'];
@@ -437,6 +442,7 @@ function harness(
     ...(options.forgetScreen ? { forgetScreen: options.forgetScreen } : {}),
     ...(options.startCursorTrack ? { startCursorTrack: options.startCursorTrack } : {}),
     systemAudioAvailable: () => options.systemAudio ?? true,
+    ...(options.systemAudioWithScreen ? { systemAudioWithScreen: true } : {}),
     systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
     platform: () => ({
       os: 'linux',
@@ -1283,5 +1289,122 @@ describe('P2 recorder modes (R2.29–R2.33)', () => {
     expect(start.payload).not.toHaveProperty('cropToRegion');
     expect(start.payload).not.toHaveProperty('requireHardware');
     await h.manager.abort();
+  });
+});
+
+describe('system audio with the screen capture (P3 step 2, Windows and macOS)', () => {
+  const systemReport = {
+    kind: 'system',
+    framesIn: 470,
+    framesEncoded: 470,
+    framesDropped: 0,
+    bytes: 300,
+    discontinuities: 0,
+    queueDepth: 0,
+    startOffsetUs: 15_000,
+    calibration: { mode: 'arrival-calibrated', offsetUs: -20_000_000 },
+    nominalRate: 48_000,
+    checkpoints: Array.from({ length: 61 }, (_, i) => [15_000 + i * S, i * 48_000]),
+  };
+
+  it('asks the engine for it with the screen and records it as an engine stream', async () => {
+    const h = harness({ systemAudioWithScreen: true });
+    const stop = h.engine.respond;
+    const root = await startRecording(h);
+    const acquire = h.engine.calls.find((c) => c.channel === 'engine.acquire');
+    expect((acquire?.payload as EngineCommandPayload<'engine.acquire'>).screen).toMatchObject({
+      systemAudio: true,
+    });
+    // One port per engine stream, system included; no pw-record capture in the utility.
+    expect(h.engine.ports[0]!.payload.streams.map((s) => s.kind)).toEqual([
+      'screen',
+      'camera',
+      'mic',
+      'system',
+    ]);
+    expect(h.utility.system).toBeNull();
+    expect((await readSessionLog(root))?.systemCaptureId).toBeNull();
+
+    // Its meter comes from the engine.
+    h.manager.onEngineLevels({ atUs: T0 + S, system: 0.4 });
+    expect(h.levels).toEqual([{ system: 0.4 }]);
+
+    // Pauses go to the engine only.
+    await h.manager.pause();
+    await h.manager.resume();
+    expect(h.utility.systemCalls).toEqual([]);
+
+    stop['engine.stop'] = (payload) => {
+      if (payload.reason === 'stop') setTimeout(() => h.utility.confirmClosed(), 5);
+      return { streams: [systemReport] } as never;
+    };
+    h.clock.us = 10 * S;
+    await h.manager.stop();
+    const doc = await readProject(root);
+    const system = doc.media.find((m) => m.role === 'system-audio');
+    expect(system).toMatchObject({ status: 'ok', path: 'media/system.mp4', startOffsetUs: 15_000 });
+    expect(system?.device).toEqual({ label: 'System audio' });
+    // Its drift checkpoints are on session time like the mic's, written by main, not shifted.
+    expect(system?.audio?.syncCheckpointsPath).toBe('media/system.sync.json');
+    expect(h.utility.systemCalls).toEqual([]);
+    // The utility closed nothing by force: the engine closed the system port like the others.
+    expect(h.utility.closed).toEqual([]);
+  });
+
+  it('records on without it, with a notice, when the capture carries none', async () => {
+    const h = harness({ systemAudioWithScreen: true });
+    h.engine.respond['engine.acquire'] = () => ({
+      status: 'ready',
+      screen: { label: 'Entire screen', width: 1920, height: 1080, frameRate: 30 },
+      camera: null,
+      mic: null,
+      system: null,
+      warnings: [{ kind: 'system', message: 'no audio track' }],
+    });
+    await startRecording(h, { ...CONFIG, cameraId: null, micId: null });
+    expect(h.engine.ports[0]!.payload.streams.map((s) => s.kind)).toEqual(['screen']);
+    expect(h.notices.some((n) => n.stream === 'system' && n.level === 'warning')).toBe(true);
+    expect(h.utility.system).toBeNull();
+    await h.manager.abort();
+  });
+
+  it('does not ask for it when the setting is off or the capability is missing', async () => {
+    for (const [systemAudio, available] of [
+      [false, true],
+      [true, false],
+    ] as const) {
+      const h = harness({ systemAudioWithScreen: true, systemAudio: available });
+      await startRecording(h, { ...CONFIG, systemAudio });
+      const acquire = h.engine.calls.find((c) => c.channel === 'engine.acquire');
+      expect(
+        (acquire?.payload as EngineCommandPayload<'engine.acquire'>).screen?.systemAudio,
+      ).toBeUndefined();
+      expect(h.engine.ports[0]!.payload.streams.map((s) => s.kind)).not.toContain('system');
+      await h.manager.abort();
+    }
+  });
+
+  it('cannot take it in audio-only mode: records the mic and says why', async () => {
+    const h = harness({ systemAudioWithScreen: true, selectScreen: () => Promise.resolve(null) });
+    h.engine.respond['engine.acquire'] = (payload) => {
+      expect(payload.screen).toBeNull();
+      return {
+        status: 'ready',
+        screen: null,
+        camera: null,
+        mic: { label: 'Built-in Mic', sampleRate: 48_000, channels: 1 },
+      };
+    };
+    await startRecording(h, { ...CONFIG, captureMode: 'audio-only' });
+    expect(h.engine.ports[0]!.payload.streams.map((s) => s.kind)).toEqual(['mic']);
+    expect(h.notices.some((n) => n.stream === 'system')).toBe(true);
+    await h.manager.abort();
+  });
+
+  it('refuses audio only with neither a microphone nor pw-record system audio', async () => {
+    const h = harness({ systemAudioWithScreen: true });
+    await h.manager.configure({ ...CONFIG, captureMode: 'audio-only', micId: null });
+    const result = await h.manager.record();
+    expect(result.status).toBe('failed');
   });
 });

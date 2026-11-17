@@ -59,6 +59,14 @@ async function loopback(page, screenSource) {
   await tone.loadURL('data:text/html,<script>const c=new AudioContext();const o=c.createOscillator();o.frequency.value=440;o.connect(c.destination);o.start();</script>');
   await new Promise((r) => setTimeout(r, 500));
   log('loopback', await page.webContents.executeJavaScript('loopbackLevel()', true));
+  // The engine window gets no user gesture: does getDisplayMedia still work there?
+  log('loopbackNoGesture', await page.webContents
+    .executeJavaScript('loopbackLevel()', false)
+    .catch((e) => ({ error: String(e) })));
+  // The app's own path (engine, step 2): getUserMedia desktop audio, without a user gesture.
+  log('loopbackDesktopAudio', await page.webContents
+    .executeJavaScript(`desktopAudioLevel(${JSON.stringify(screenSource.id)})`, false)
+    .catch((e) => ({ error: String(e) })));
   tone.destroy();
 }
 

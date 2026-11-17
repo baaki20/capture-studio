@@ -14,7 +14,16 @@ async function magentaShare(id) {
   return { magentaFraction: +(n / (d.length / 16)).toFixed(4) };
 }
 async function loopbackLevel() {
-  const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+  return audioLevel(await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }));
+}
+// What the app's engine does (P3 step 2): the desktop audio with the screen, no user gesture.
+async function desktopAudioLevel(id) {
+  return audioLevel(await navigator.mediaDevices.getUserMedia({
+    audio: { mandatory: { chromeMediaSource: 'desktop' } },
+    video: { mandatory: { chromeMediaSource: 'desktop', chromeMediaSourceId: id, maxWidth: 3840, maxHeight: 2160 } },
+  }));
+}
+async function audioLevel(s) {
   const a = s.getAudioTracks()[0];
   if (!a) { s.getTracks().forEach((t) => t.stop()); return { audioTrack: false }; }
   const r = new MediaStreamTrackProcessor({ track: a }).readable.getReader();

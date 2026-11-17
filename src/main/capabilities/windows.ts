@@ -7,8 +7,10 @@
  * - `ui.excludeFromCapture`: `setContentProtection` uses `WDA_EXCLUDEFROMCAPTURE` from Windows 10
  *   2004 (build 19041). Older builds only black the window out in captures, which still shows a
  *   box, so the controls minimize there instead.
- * - Features that need the native helper or later Phase 3 steps (system audio, cursor track,
- *   on-screen overlay, whole desktop) stay unavailable until those steps land.
+ * - `audio.system`: Chromium's desktop audio, the system mix as the screen capture's audio track
+ *   (P3 step 2); the engine records it. Not yet checked on a real Windows machine.
+ * - Features that need later Phase 3 steps (on-screen overlay, whole desktop) stay unavailable
+ *   until those steps land.
  */
 import {
   available,
@@ -68,8 +70,9 @@ export function detectWindowsCapabilities(input: WindowsDetectInput): Capability
     ),
     'capture.cursor.track': cursorTrackCapability(input.nativeHelper ?? null, 'win32'),
     'capture.screenshot.silent': available('desktopCapturer'),
-    'audio.system': unavailable(
-      'System audio is not supported on Windows in this build yet. Recording continues without it.',
+    'audio.system': available(
+      'desktop-loopback',
+      'Recorded with the screen capture (Windows loopback); audio-only recordings go without it.',
     ),
     'audio.mic': available('getUserMedia', 'Devices are listed in the setup panel.'),
     'video.camera': available('getUserMedia', 'Devices are listed in the setup panel.'),

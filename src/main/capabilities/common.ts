@@ -71,3 +71,12 @@ export const webcodecsPending: Capability = unavailable(
   'Probed by the capture engine when recording starts; software H.264 (WebCodecs) is used meanwhile.',
   'webcodecs-software',
 );
+
+/**
+ * P3 step 2: on Windows and macOS the system audio is Chromium's desktop audio (loopback), an
+ * audio track of the screen capture the engine records; on Linux it is `pw-record` in the media
+ * utility. With the screen, it needs a screen or window recording and has no idle meter.
+ */
+export function systemAudioWithScreen(platform: NodeJS.Platform): boolean {
+  return platform === 'win32' || platform === 'darwin';
+}
