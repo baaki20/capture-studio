@@ -15,7 +15,11 @@ import {
   type CursorSource,
   type RawCursorSample,
 } from '../../src/main/recording/cursor-source';
-import { createCursorTrackStarter, displayRect } from '../../src/main/recording/cursor-track-start';
+import {
+  createCursorTrackStarter,
+  displayRect,
+  unionRect,
+} from '../../src/main/recording/cursor-track-start';
 import { withCursorMedia } from '../../src/main/recording/session-manager';
 import { parseCursorTrack } from '../../src/shared/project/cursor-track';
 import { checkProjectInvariants } from '../../src/shared/project/invariants';
@@ -83,6 +87,15 @@ describe('cursor mapping', () => {
       width: 9,
       height: 10,
     });
+  });
+
+  it('spans every monitor for "All screens" (P3 step 7)', () => {
+    expect(
+      unionRect([
+        { x: 0, y: 0, width: 1920, height: 1080 },
+        { x: 1920, y: -200, width: 1280, height: 1024 },
+      ]),
+    ).toEqual({ x: 0, y: -200, width: 3200, height: 1280 });
   });
 
   it('finds the clock offset from back-to-back readings', () => {

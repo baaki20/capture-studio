@@ -68,6 +68,11 @@ export const SettingsV1Schema = z.object({
     cropAtRecord: z.boolean().default(false),
     /** Fail instead of recording with a software encoder when no hardware one works (P2). */
     requireHardware: z.boolean().default(false),
+    /**
+     * P3 step 6 (D11): a highlight around the pointer, drawn on screen and recorded into the
+     * picture for good. Off by default: the editor's click effects can be changed later.
+     */
+    liveHighlighter: z.boolean().default(false),
     lastRegion: z
       .object({
         sourceWidth: z.int().positive(),
@@ -128,6 +133,7 @@ export function createDefaultSettings(paths: SettingsPathDefaults): Settings {
       durationLimitSec: 0,
       cropAtRecord: false,
       requireHardware: false,
+      liveHighlighter: false,
       lastRegion: null,
     },
     export: { preset: 'standard', encoder: 'auto' },

@@ -215,3 +215,8 @@ export interface EnginePreloadApi extends PreloadBase {
   sendTrackEnded(event: EngineEventPayload<'engine.trackEnded'>): void;
   sendLevels(levels: EngineEventPayload<'engine.levels'>): void;
 }
+
+/** `window.csOverlay`: the on-screen overlay windows (P3 step 6). */
+export interface OverlayPreloadApi extends PreloadBase {
+  onState(listener: Listener<EventPayload<'overlay.state'>>): Unsubscribe;
+}

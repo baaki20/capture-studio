@@ -174,20 +174,25 @@ export async function detectLinuxCapabilities(input: LinuxDetectInput): Promise<
           'The shared screen is reused while the app runs; after a restart the portal asks once again.',
         )
       : available('not-needed', 'X11 capture needs no permission prompt.'),
-    'capture.screen.allMonitors': waylandOnly(
-      'entire-screen',
-      'The portal gives one monitor per stream; one monitor is captured.',
-    ),
+    'capture.screen.allMonitors': wayland
+      ? unavailable('The portal gives one monitor per stream; one monitor is captured.', null)
+      : available(
+          'full-desktop-source',
+          'With several monitors, the source picker offers "All screens": every monitor in one picture.',
+        ),
     'capture.window.enumerate': waylandOnly(
       'desktopCapturer',
       'Windows cannot be listed on Wayland; the portal’s window tab arrives in Phase 2.',
     ),
-    'capture.region.onScreenOverlay': unavailable(
-      wayland
-        ? 'Wayland does not let apps position overlay windows; the in-app frozen-frame picker is used.'
-        : 'The on-screen overlay arrives in Phase 3; the in-app frozen-frame picker is used.',
-      'in-app-picker',
-    ),
+    'capture.region.onScreenOverlay': wayland
+      ? unavailable(
+          'Wayland does not let apps position overlay windows; the in-app frozen-frame picker is used.',
+          'in-app-picker',
+        )
+      : available(
+          'overlay-window',
+          'The region is drawn over the live desktop (needs a compositing window manager, as GNOME and KDE have).',
+        ),
     'capture.cursor.hide': unavailable(
       wayland ? 'The portal bakes the cursor into the stream.' : 'Not verified on X11 yet.',
       'cursor-visible',

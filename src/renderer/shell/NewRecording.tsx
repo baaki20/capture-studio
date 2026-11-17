@@ -34,6 +34,7 @@ function configFrom(settings: Settings): RecorderConfig {
     cropAtRecord: r.cropAtRecord,
     requireHardware: r.requireHardware,
     afterRecording: r.afterRecording,
+    liveHighlighter: r.liveHighlighter,
   };
 }
 
@@ -110,6 +111,9 @@ export function NewRecording({ recState }: Props) {
 
   const system = caps?.capabilities['audio.system'];
   const systemAvailable = system?.state === 'available' || system?.state === 'degraded';
+  // P3 step 6: overlays need a display to cover (not on Wayland).
+  const overlayAvailable =
+    caps?.capabilities['capture.region.onScreenOverlay'].state === 'available';
   // Windows and macOS (P3 step 2): it comes with the screen capture, so there is no idle meter.
   const systemWithScreen = system?.strategy === 'desktop-loopback';
 
@@ -284,6 +288,26 @@ export function NewRecording({ recState }: Props) {
             />
             Record only the region (smaller files; the rest of the screen cannot be shown later)
           </label>
+        ) : null}
+        {overlayAvailable &&
+        (config.captureMode === 'fullscreen' || config.captureMode === 'region') ? (
+          <>
+            <label className={styles.toggle}>
+              <input
+                type="checkbox"
+                data-testid="live-highlighter"
+                checked={config.liveHighlighter ?? false}
+                onChange={(e) => update({ liveHighlighter: e.target.checked })}
+              />
+              Highlight the pointer on screen while recording
+            </label>
+            {config.liveHighlighter ? (
+              <p className={styles.muted} data-testid="live-highlighter-note">
+                The highlight is recorded into the picture for good. The editor’s click rings and
+                cursor highlight can be changed later instead.
+              </p>
+            ) : null}
+          </>
         ) : null}
       </fieldset>
 

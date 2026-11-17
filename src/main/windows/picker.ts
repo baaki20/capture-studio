@@ -9,6 +9,9 @@
  * - The submitted rect is normalised again here (clamped, even, at least 64 × 64); a rect that
  *   covers the whole frame means "no crop" (`{rect: null}`).
  * - Closing the window, or the recorder leaving `picking-region` (`cancel()`), cancels.
+ * - **On screen** (P3 step 6, `capture.region.onScreenOverlay`): with the recorded display's
+ *   bounds, the window is transparent and covers exactly that display, so the user drags over
+ *   the live desktop. Wayland (no display to place it on) keeps the frozen-frame picker.
  */
 import path from 'node:path';
 import { app, BrowserWindow } from 'electron';
@@ -41,7 +44,15 @@ export interface PickerHostOptions {
   snapshot: () => Promise<PickerSnapshot>;
   lastRegion: () => Settings['recorder']['lastRegion'];
   /** Tests inject a fake window. */
-  createWindow?: (location: RendererLocation) => BrowserWindow;
+  createWindow?: (location: RendererLocation, bounds?: DisplayBounds) => BrowserWindow;
+}
+
+/** A display's bounds in DIPs (`screen.getAllDisplays()`). */
+export interface DisplayBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 interface PendingPick {
@@ -51,14 +62,26 @@ interface PendingPick {
   resolve: (choice: RegionChoice) => void;
 }
 
-export function createPickerWindow(location: RendererLocation): BrowserWindow {
+export function createPickerWindow(
+  location: RendererLocation,
+  bounds?: DisplayBounds,
+): BrowserWindow {
   const window = new BrowserWindow({
     show: false,
-    fullscreen: true,
+    ...(bounds
+      ? {
+          ...bounds,
+          transparent: true,
+          hasShadow: false,
+          skipTaskbar: true,
+          enableLargerThanScreen: true,
+          alwaysOnTop: true,
+        }
+      : { fullscreen: true }),
     frame: false,
     resizable: false,
     title: 'Select a region – Capture Studio',
-    backgroundColor: '#000000',
+    backgroundColor: bounds ? '#00000000' : '#000000',
     webPreferences: {
       ...secureWebPreferences(path.join(location.preloadDir, 'picker.cjs')),
       additionalArguments: [`--cs-app-version=${app.getVersion()}`],
@@ -105,8 +128,11 @@ export class RegionPickerHost {
     return this.pending !== null;
   }
 
-  /** Shows the picker for a stream of `source` size and resolves with the user's choice. */
-  async pick(source: Size): Promise<RegionChoice> {
+  /**
+   * Shows the picker for a stream of `source` size and resolves with the user's choice. With
+   * `display`, on screen over that display (P3 step 6).
+   */
+  async pick(source: Size, display?: DisplayBounds): Promise<RegionChoice> {
     this.finish('cancelled');
     const still = await this.options.snapshot();
     if (still.width !== source.width || still.height !== source.height) {
@@ -119,8 +145,13 @@ export class RegionPickerHost {
       sourceHeight: source.height,
       imageUrl: `data:image/png;base64,${Buffer.from(still.png).toString('base64')}`,
       lastRegion: matchingLastRegion(this.options.lastRegion(), source),
+      ...(display ? { overlay: true } : {}),
     };
-    const window = (this.options.createWindow ?? createPickerWindow)(this.options.renderer);
+    const window = (this.options.createWindow ?? createPickerWindow)(
+      this.options.renderer,
+      display,
+    );
+    if (display) window.setAlwaysOnTop(true, 'screen-saver');
     const unregister = this.options.router.registerWindow(window.webContents, 'picker');
     return new Promise<RegionChoice>((resolve) => {
       this.pending = { source, load, window, resolve };

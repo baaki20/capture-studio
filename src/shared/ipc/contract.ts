@@ -21,7 +21,7 @@ import {
 import { CLI_ACTIONS } from './actions';
 import { EditorAutomationReplySchema, EditorAutomationRequestSchema } from './editor-automation';
 
-export const WINDOW_KINDS = ['shell', 'controls', 'picker', 'editor', 'engine'] as const;
+export const WINDOW_KINDS = ['shell', 'controls', 'picker', 'editor', 'engine', 'overlay'] as const;
 export type WindowKind = (typeof WINDOW_KINDS)[number];
 
 /** Media streams written by the recorder, one file each (§1.5). */
@@ -60,6 +60,7 @@ export const SettingsPatchSchema = z.strictObject({
       durationLimitSec: z.int().min(0).max(86_400).optional(),
       cropAtRecord: z.boolean().optional(),
       requireHardware: z.boolean().optional(),
+      liveHighlighter: z.boolean().optional(),
       lastRegion: R.lastRegion.optional(),
     })
     .optional(),
@@ -88,6 +89,8 @@ export const RecorderConfigSchema = z.strictObject({
   cropAtRecord: z.boolean().optional(),
   requireHardware: z.boolean().optional(),
   afterRecording: R.afterRecording.optional(),
+  /** P3 step 6: draw a highlight around the pointer into the recording (D11). */
+  liveHighlighter: z.boolean().optional(),
 });
 export type RecorderConfig = z.infer<typeof RecorderConfigSchema>;
 
@@ -169,6 +172,11 @@ export const PickerLoadResultSchema = z.object({
   imageUrl: z.string().startsWith('data:image/'),
   /** The persisted last region, only when its source size matches (R1.9). */
   lastRegion: NRectSchema.nullable(),
+  /**
+   * P3 step 6: the window covers the recorded display over the live desktop (transparent); the
+   * still only feeds the magnifier.
+   */
+  overlay: z.boolean().optional(),
 });
 
 export const COMPONENT_BADGES = ['screen', 'face', 'voice', 'system'] as const;
@@ -401,6 +409,19 @@ export const UpdateStateSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('error'), message: z.string() }),
 ]);
 export type UpdateStatePayload = z.infer<typeof UpdateStateSchema>;
+
+/**
+ * What an on-screen overlay window draws (P3 step 6, `main/windows/overlays.ts`), in CSS pixels
+ * of the window, which covers one display: the recording frame around the region, and the live
+ * highlighter around the cursor.
+ */
+export const OverlayStateSchema = z.object({
+  frame: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .nullable(),
+  cursor: z.object({ x: z.number(), y: z.number() }).nullable(),
+});
+export type OverlayState = z.infer<typeof OverlayStateSchema>;
 
 /** macOS privacy permissions the app uses (P3 step 3, `main/permissions/`). */
 export const PERMISSION_KINDS = ['screen', 'camera', 'microphone', 'inputMonitoring'] as const;
@@ -642,6 +663,7 @@ export const EVENT_CHANNELS = {
   'media.cachesReady': { payload: z.object({ projectId: Id }), windows: ['shell', 'editor'] },
   'caps.changed': { payload: CapabilityReportSchema, windows: UI },
   'updates.changed': { payload: UpdateStateSchema, windows: ['shell'] },
+  'overlay.state': { payload: OverlayStateSchema, windows: ['overlay'] },
   /** A macOS permission changed (re-read when the app gets focus, P3 step 3). */
   'perms.changed': { payload: PermissionsReportSchema, windows: ['shell'] },
   /** An assistant edit, undo, snapshot or frame capture for this editor (`editor-automation.ts`). */

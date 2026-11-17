@@ -39,6 +39,10 @@ class FakeWindow extends EventEmitter {
   focus() {
     this.focused = true;
   }
+  onTop: string | null = null;
+  setAlwaysOnTop(_flag: boolean, level: string) {
+    this.onTop = level;
+  }
   close() {
     this.destroyed = true;
     this.emit('closed');
@@ -51,19 +55,21 @@ const PNG = new Uint8Array([137, 80, 78, 71]);
 function host(lastRegion: unknown = null) {
   const { router, call, registered } = fakeRouter();
   const windows: FakeWindow[] = [];
+  const placements: unknown[] = [];
   const picker = new RegionPickerHost({
     router,
     renderer: { rendererDir: '/r', preloadDir: '/p' },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     snapshot: () => Promise.resolve({ ...HD, png: PNG }),
     lastRegion: () => lastRegion as never,
-    createWindow: () => {
+    createWindow: (_location: unknown, bounds?: unknown) => {
       const w = new FakeWindow();
       windows.push(w);
+      placements.push(bounds ?? null);
       return w as never;
     },
   });
-  return { picker, call, registered, windows };
+  return { picker, call, registered, windows, placements };
 }
 
 const flush = () => new Promise((r) => setImmediate(r));
@@ -132,5 +138,29 @@ describe('region picker host (§4.3.7, R1.9)', () => {
     h.picker.cancel();
     await expect(viaState).resolves.toBe('cancelled');
     expect(() => h.call('picker.load')).toThrow(/no region/);
+  });
+});
+
+describe('on-screen region picker (P3 step 6)', () => {
+  it('covers the recorded display over the live desktop when given its bounds', async () => {
+    const h = host();
+    const bounds = { x: 1920, y: 0, width: 1280, height: 720 };
+    const choice = h.picker.pick(HD, bounds);
+    await flush();
+    expect(h.placements).toEqual([bounds]);
+    expect(h.windows[0]?.onTop).toBe('screen-saver');
+    expect(h.call('picker.load')).toMatchObject({ overlay: true, sourceWidth: 1920 });
+    h.call('picker.cancel');
+    expect(await choice).toBe('cancelled');
+  });
+
+  it('keeps the frozen-frame picker without a display', async () => {
+    const h = host();
+    const choice = h.picker.pick(HD);
+    await flush();
+    expect(h.placements).toEqual([null]);
+    expect(h.call('picker.load')).not.toHaveProperty('overlay');
+    h.call('picker.cancel');
+    await choice;
   });
 });

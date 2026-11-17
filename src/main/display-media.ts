@@ -20,6 +20,16 @@ import type { EngineCommandPayload } from '../shared/ipc/contract';
 /** Capture cap passed to Chromium (§9.1); the encoder scales larger sources down to 1440p (§8). */
 export const SCREEN_CAPTURE_MAX = { width: 3840, height: 2160 } as const;
 
+/**
+ * P3 step 7: Chromium's whole-desktop source (WebRTC's full-desktop screen id) on X11 and
+ * Windows: every monitor in one picture. `desktopCapturer` does not list it; the in-app picker
+ * offers it as "All screens" when several monitors are listed.
+ */
+export const ALL_SCREENS_SOURCE_ID = 'screen:-1:0';
+export const ALL_SCREENS_NAME = 'All screens';
+/** Wide enough for two or three monitors side by side; the encoder scales it down (§8). */
+export const ALL_SCREENS_CAPTURE_MAX = { width: 7680, height: 2160 } as const;
+
 export interface DesktopSourceLike {
   id: string;
   name: string;
@@ -64,6 +74,8 @@ export interface PickScreenOptions {
   chooseSource?: ChooseSource;
   /** `--auto-select-desktop-capture-source=<name>`: the source of this name, without asking. */
   autoSelectName?: string;
+  /** P3 step 7: offer "All screens" when several monitors are listed (`capture.screen.allMonitors`). */
+  allScreens?: boolean;
 }
 
 /** Thumbnail size for the in-app picker (16:9, enough for a 2-column grid at 1×). */
@@ -135,6 +147,9 @@ export async function pickScreenSource(
   } catch (error) {
     return { status: 'failed', message: error instanceof Error ? error.message : String(error) };
   }
+  if (options.allScreens && (options.sourceType ?? 'screen') === 'screen' && sources.length > 1) {
+    sources = [...sources, { id: ALL_SCREENS_SOURCE_ID, name: ALL_SCREENS_NAME }];
+  }
   const decision = decideScreenSource(sources, {
     canAsk,
     ...(options.preferredSourceId !== undefined
@@ -161,13 +176,18 @@ export async function pickScreenSource(
       return { status: 'failed', message: `source picker returned unknown id ${chosen}` };
   }
   if (!source) return { status: 'cancelled' };
+  const max = source.id === ALL_SCREENS_SOURCE_ID ? ALL_SCREENS_CAPTURE_MAX : SCREEN_CAPTURE_MAX;
   return {
     status: 'selected',
-    source: { id: source.id, name: source.name },
+    source: {
+      id: source.id,
+      name: source.name,
+      ...(source.display_id ? { display_id: source.display_id } : {}),
+    },
     screen: {
       sourceId: source.id,
-      maxWidth: SCREEN_CAPTURE_MAX.width,
-      maxHeight: SCREEN_CAPTURE_MAX.height,
+      maxWidth: max.width,
+      maxHeight: max.height,
       fps: options.fps,
     },
   };

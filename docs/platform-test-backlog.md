@@ -62,6 +62,35 @@ On a real Mac:
 - [ ] Windows: cursor positions and clicks in `cursor.jsonl` line up with the video (S11).
 - [ ] macOS: same, with and without Input Monitoring (clicks need it; step 3 corrected this from Accessibility).
 
+## Step 6: on-screen overlays
+
+Tested here on X11 under Xvfb (`tests/e2e/recorder-ui.spec.ts`, region mode). Not yet seen:
+
+- [ ] A real X11 session (log into "Ubuntu on Xorg"): the region picker shows the live desktop
+      through its transparent window (needs a compositing window manager; without one it would
+      be black), the frame and the highlighter look right, two monitors put them on the
+      recorded one.
+- [ ] Windows: same, with two monitors and display scaling (125 %, 150 %); the frame stays out of
+      the recording (content protection from Windows 10 2004); the highlighter is in it.
+- [ ] macOS: same on Retina and with two displays; whether content protection keeps the frame out
+      of ScreenCaptureKit captures (S10; otherwise it still never shows in a region crop, being
+      drawn outside the region).
+- [ ] The highlighter does not appear in **window** recordings (it is a separate window); the
+      setup panel offers it only for full screen and region.
+
+## Step 7: all monitors and window recording
+
+"All screens" is Chromium's whole-desktop source (`screen:-1:0`); on X11 it was checked with one
+screen (Xvfb cannot fake two monitors here). Window recording from the in-app list is tested on
+X11 (`tests/e2e/window-recording.spec.ts`).
+
+- [ ] X11 with two real monitors (an Xorg login): "All screens" records both side by side, the
+      cursor track maps over both, and a region over both uses the frozen-frame picker.
+- [ ] Windows with two monitors at different scales: same (spike S9 `sources`).
+- [ ] macOS: stays one display (`capture.screen.allMonitors` unavailable) unless S10 finds a path.
+- [ ] Window recording on Windows and macOS from the in-app list (same code as X11), including a
+      window that resizes (letterboxing, Phase 2) and one that closes mid-recording.
+
 ## Step 9: packages and updates
 
 - [ ] Windows: install (per user), start, file association `.cstudiopack`, update from an older

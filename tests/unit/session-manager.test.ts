@@ -16,6 +16,7 @@ import { selectScreenSource } from '../../src/main/screen-source';
 import {
   REUSED_SOURCE_FIRST_FRAME_MS,
   SessionManager,
+  type CaptureInfo,
   type EngineLike,
   type SessionEvents,
   type SessionManagerDeps,
@@ -369,6 +370,7 @@ function harness(
     /** P3 step 2: Windows/macOS, system audio comes with the screen capture. */
     systemAudioWithScreen?: boolean;
     recordingBlocked?: SessionManagerDeps['recordingBlocked'];
+    onCapture?: SessionManagerDeps['onCapture'];
     countdownTickMs?: number;
     pickRegion?: SessionManagerDeps['pickRegion'];
     selectScreen?: SessionManagerDeps['selectScreen'];
@@ -445,6 +447,7 @@ function harness(
     systemAudioAvailable: () => options.systemAudio ?? true,
     ...(options.systemAudioWithScreen ? { systemAudioWithScreen: true } : {}),
     ...(options.recordingBlocked ? { recordingBlocked: options.recordingBlocked } : {}),
+    ...(options.onCapture ? { onCapture: options.onCapture } : {}),
     systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
     platform: () => ({
       os: 'linux',
@@ -1441,5 +1444,48 @@ describe('macOS Screen Recording permission (P3 step 3)', () => {
     });
     await startRecording(h, { ...CONFIG, captureMode: 'audio-only' });
     await h.manager.abort();
+  });
+});
+
+describe('on-screen overlays (P3 step 6)', () => {
+  it('reports the capture while recording a region, and null once it ends', async () => {
+    const captures: (CaptureInfo | null)[] = [];
+    const sources: unknown[] = [];
+    const h = harness({
+      onCapture: (c) => captures.push(c),
+      pickRegion: (_size, source) => {
+        sources.push(source);
+        return Promise.resolve({ rect: { x: 100, y: 100, width: 640, height: 360 } });
+      },
+    });
+    h.settings.recorder.liveHighlighter = true;
+    await startRecording(h, { ...CONFIG, captureMode: 'region' });
+    expect(sources).toEqual([expect.objectContaining({ sourceId: 'screen:1:0', kind: 'monitor' })]);
+    expect(captures).toEqual([
+      expect.objectContaining({
+        region: { x: 100, y: 100, width: 640, height: 360 },
+        liveHighlighter: true,
+        source: expect.objectContaining({ widthPx: 1920, heightPx: 1080 }) as unknown,
+      }),
+    ]);
+    await h.manager.pause();
+    expect(captures).toHaveLength(1);
+    h.clock.us = 3 * S;
+    await h.manager.stop();
+    expect(captures.at(-1)).toBeNull();
+  });
+
+  it('reports nothing for audio only', async () => {
+    const captures: (CaptureInfo | null)[] = [];
+    const h = harness({ onCapture: (c) => captures.push(c) });
+    h.engine.respond['engine.acquire'] = () => ({
+      status: 'ready',
+      screen: null,
+      camera: null,
+      mic: { label: 'Built-in Mic', sampleRate: 48_000, channels: 1 },
+    });
+    await startRecording(h, { ...CONFIG, captureMode: 'audio-only' });
+    await h.manager.abort();
+    expect(captures.filter((c) => c !== null)).toEqual([]);
   });
 });

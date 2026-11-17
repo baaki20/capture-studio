@@ -44,6 +44,16 @@ export interface CursorTrackStarterDeps {
   logger: Logger;
 }
 
+/** The bounding box of several rects (all monitors, P3 step 7). */
+export function unionRect(rects: readonly Rect[]): Rect {
+  if (rects.length === 0) return { x: 0, y: 0, width: 1, height: 1 };
+  const left = Math.min(...rects.map((r) => r.x));
+  const top = Math.min(...rects.map((r) => r.y));
+  const right = Math.max(...rects.map((r) => r.x + r.width));
+  const bottom = Math.max(...rects.map((r) => r.y + r.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
 /** The display's rect in a source's coordinate space. */
 export function displayRect(
   display: DisplayLike,
@@ -70,12 +80,10 @@ export function createCursorTrackStarter(
       deps.primaryDisplay();
     const frame = { width: source.widthPx, height: source.heightPx };
     const record = (cursorSource: CursorSource) => {
-      const rect = displayRect(
-        display,
-        cursorSource.coordinateSpace,
-        deps.platform,
-        deps.dipToScreenRect,
-      );
+      const toRect = (d: DisplayLike) =>
+        displayRect(d, cursorSource.coordinateSpace, deps.platform, deps.dipToScreenRect);
+      // All screens (P3 step 7): the frame is the bounding box of every monitor.
+      const rect = source.allScreens ? unionRect(displays.map(toRect)) : toRect(display);
       const recorder = new CursorRecorder({
         source: cursorSource,
         file,

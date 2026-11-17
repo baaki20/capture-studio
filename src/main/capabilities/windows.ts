@@ -9,8 +9,8 @@
  *   box, so the controls minimize there instead.
  * - `audio.system`: Chromium's desktop audio, the system mix as the screen capture's audio track
  *   (P3 step 2); the engine records it. Not yet checked on a real Windows machine.
- * - Features that need later Phase 3 steps (on-screen overlay, whole desktop) stay unavailable
- *   until those steps land.
+ * - `capture.screen.allMonitors`: Chromium's whole-desktop source (P3 step 7), checked on X11;
+ *   not yet on a real Windows machine (spike S9).
  */
 import {
   available,
@@ -55,14 +55,14 @@ export function detectWindowsCapabilities(input: WindowsDetectInput): Capability
       'not-needed',
       'Windows asks no permission to capture.',
     ),
-    'capture.screen.allMonitors': unavailable(
-      'Recording all monitors at once is not supported yet; one monitor is captured.',
-      'one-monitor',
+    'capture.screen.allMonitors': available(
+      'full-desktop-source',
+      'With several monitors, the source picker offers "All screens": every monitor in one picture.',
     ),
     'capture.window.enumerate': available('desktopCapturer'),
-    'capture.region.onScreenOverlay': unavailable(
-      'The on-screen region overlay is not available yet; the in-app frozen-frame picker is used.',
-      'in-app-picker',
+    'capture.region.onScreenOverlay': available(
+      'overlay-window',
+      'The region is drawn over the live desktop.',
     ),
     'capture.cursor.hide': unavailable(
       'Hiding the cursor is not verified on Windows yet.',

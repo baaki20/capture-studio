@@ -36,7 +36,7 @@ export function createShellWindow(location: RendererLocation): BrowserWindow {
 export function loadRendererPage(
   window: BrowserWindow,
   location: RendererLocation,
-  page: 'shell' | 'controls' | 'picker' | 'editor' | 'engine',
+  page: 'shell' | 'controls' | 'picker' | 'editor' | 'engine' | 'overlay',
   query: Record<string, string> = {},
 ): void {
   if (location.devServerUrl) {

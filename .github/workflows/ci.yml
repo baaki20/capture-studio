@@ -67,6 +67,16 @@ jobs:
         env:
           CS_NATIVE_INPUT_TEST: '1'
 
+      # Window recording (P3 step 7) needs a window manager: Chromium lists windows from its
+      # _NET_CLIENT_LIST. Only this spec runs under it, so the other tests keep bare Xvfb.
+      - name: Window recording E2E (Xvfb with a window manager)
+        run: |
+          sudo apt-get install -y openbox
+          xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
+            sh -c 'openbox & sleep 1; npx playwright test tests/e2e/window-recording.spec.ts'
+        env:
+          CS_E2E_REQUIRE_WINDOWS: '1'
+
       # Playwright's logs, traces and the app's main.log, to diagnose a failure on the runner.
       - name: Upload E2E results
         if: failure()

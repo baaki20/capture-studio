@@ -10,7 +10,12 @@
  * logged, so a portal that never shows up is still visible in the log.
  */
 import type { Logger } from '../shared/logger';
-import { pickScreenSource, type GetSources, type PickScreenOptions } from './display-media';
+import {
+  ALL_SCREENS_SOURCE_ID,
+  pickScreenSource,
+  type GetSources,
+  type PickScreenOptions,
+} from './display-media';
 import type { ScreenSource } from './recording/session-manager';
 
 export interface SelectScreenOptions extends PickScreenOptions {
@@ -48,6 +53,7 @@ export async function selectScreenSource(
     sourceId: pick.screen.sourceId,
     label: pick.source.name,
     ...(pick.source.display_id ? { displayId: pick.source.display_id } : {}),
+    ...(pick.screen.sourceId === ALL_SCREENS_SOURCE_ID ? { allScreens: true } : {}),
     maxWidth: pick.screen.maxWidth,
     maxHeight: pick.screen.maxHeight,
   };

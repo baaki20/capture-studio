@@ -4,7 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { isPortalCancellation, selectScreenSource } from '../../src/main/screen-source';
-import type { GetSources } from '../../src/main/display-media';
+import { ALL_SCREENS_SOURCE_ID, type GetSources } from '../../src/main/display-media';
 
 const logger = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() });
 const rejecting: GetSources = () => Promise.reject(new Error('Failed to get sources.'));
@@ -45,6 +45,65 @@ describe('selectScreenSource (R1.8)', () => {
     await expect(
       selectScreenSource(empty, { fps: 30, portal: true }, logger()),
     ).resolves.toBeNull();
+  });
+
+  it('keeps the monitor’s display id (cursor mapping and overlays need it)', async () => {
+    const sources: GetSources = () =>
+      Promise.resolve([{ id: 'screen:1:0', name: 'Left', display_id: '42' }]);
+    await expect(
+      selectScreenSource(sources, { fps: 30, portal: false }, logger()),
+    ).resolves.toMatchObject({ sourceId: 'screen:1:0', displayId: '42' });
+  });
+
+  it('offers "All screens" with several monitors, at a wider capture cap (P3 step 7)', async () => {
+    const seen: string[][] = [];
+    const two: GetSources = () =>
+      Promise.resolve([
+        { id: 'screen:1:0', name: 'Left', display_id: '1' },
+        { id: 'screen:2:0', name: 'Right', display_id: '2' },
+      ]);
+    const all = await selectScreenSource(
+      two,
+      {
+        fps: 30,
+        portal: false,
+        allScreens: true,
+        chooseSource: (list) => {
+          seen.push(list.map((s) => s.name));
+          return Promise.resolve(ALL_SCREENS_SOURCE_ID);
+        },
+      },
+      logger(),
+    );
+    expect(seen).toEqual([['Left', 'Right', 'All screens']]);
+    expect(all).toEqual({
+      sourceId: 'screen:-1:0',
+      label: 'All screens',
+      allScreens: true,
+      maxWidth: 7680,
+      maxHeight: 2160,
+    });
+
+    // Not with one monitor, not for windows, not when the capability is missing.
+    const lists: string[][] = [];
+    const record = (list: readonly { name: string }[]) => {
+      lists.push(list.map((s) => s.name));
+      return Promise.resolve(null);
+    };
+    await selectScreenSource(two, { fps: 30, portal: false, chooseSource: record }, logger());
+    await selectScreenSource(
+      two,
+      { fps: 30, portal: false, allScreens: true, sourceType: 'window', chooseSource: record },
+      logger(),
+    );
+    expect(lists).toEqual([
+      ['Left', 'Right'],
+      ['Left', 'Right'],
+    ]);
+    const one: GetSources = () => Promise.resolve([{ id: 'screen:1:0', name: 'Only' }]);
+    await expect(
+      selectScreenSource(one, { fps: 30, portal: false, allScreens: true }, logger()),
+    ).resolves.toMatchObject({ sourceId: 'screen:1:0' });
   });
 
   it('recognises the Chromium message', () => {

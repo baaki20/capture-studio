@@ -92,13 +92,16 @@ test('X11 with several screens: the picker offers each, Esc cancels, the chosen 
     const shell = await app.firstWindow();
     await expect(shell.getByTestId('setup-panel')).toBeVisible();
 
-    // First recording: both screens offered, each with a thumbnail. Esc cancels.
+    // First recording: both screens offered, each with a thumbnail, and "All screens" (P3 step
+    // 7, no thumbnail). Esc cancels.
     await shell.getByTestId('record-button').click();
     let picker = await pickerPage();
     const cards = picker.getByRole('option');
-    await expect(cards).toHaveCount(2);
+    await expect(cards).toHaveCount(3);
     await expect(cards.first()).toHaveAttribute('aria-selected', 'true');
-    for (const card of await cards.all()) {
+    await expect(cards.nth(2)).toHaveAttribute('data-source-id', 'screen:-1:0');
+    await expect(cards.nth(2)).toContainText('All screens');
+    for (const card of (await cards.all()).slice(0, 2)) {
       await expect
         .poll(() => card.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth))
         .toBeGreaterThan(0);
@@ -131,6 +134,24 @@ test('X11 with several screens: the picker offers each, Esc cancels, the chosen 
     await expect(picker.getByRole('option').nth(1)).toHaveAttribute('aria-selected', 'true');
     await pressClosing(picker, 'Escape');
     await expect.poll(() => recState(shell), { timeout: 15_000 }).toBe('configuring');
+
+    // Fourth: "All screens" records Chromium's whole-desktop source (one real screen here, so
+    // the picture is that screen's size).
+    await shell.getByTestId('record-button').click();
+    picker = await pickerPage();
+    await picker.getByRole('option').nth(2).click();
+    await pressClosing(picker, 'Enter');
+    await expect.poll(() => recState(shell), { timeout: 20_000 }).toBe('recording');
+    await shell.waitForTimeout(1_500);
+    await shell.evaluate(() => window.captureStudio.rec.stop());
+    await expect
+      .poll(() => readdirSync(projects).filter((n) => n.endsWith('.cstudio')).length, {
+        timeout: 60_000,
+      })
+      .toBe(2);
+    expect(JSON.parse(readFileSync(path.join(userData, 'source-picker.json'), 'utf8'))).toEqual({
+      lastSourceId: 'screen:-1:0',
+    });
   } finally {
     await app.close().catch(() => undefined);
     await test

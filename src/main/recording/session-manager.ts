@@ -166,6 +166,8 @@ export interface ScreenSource {
   reused?: boolean;
   /** Electron's display id of a monitor source, when known (maps cursor positions, step 4). */
   displayId?: string;
+  /** P3 step 7: every monitor in one picture (Chromium's whole-desktop source). */
+  allScreens?: boolean;
 }
 
 /** The cursor track's file (format v3). */
@@ -217,6 +219,14 @@ export interface CursorRecording {
 /** The region picker's answer: a rect in stream pixels, null for the full frame, or cancelled. */
 export type RegionChoice = { rect: NRect | null } | 'cancelled';
 
+/** A screen being recorded, for the on-screen overlays (P3 step 6). */
+export interface CaptureInfo {
+  source: ScreenSource & { kind: 'monitor' | 'window'; widthPx: number; heightPx: number };
+  /** Region mode's rectangle in source pixels; null for the full frame. */
+  region: NRect | null;
+  liveHighlighter: boolean;
+}
+
 export interface SessionEvents {
   state(payload: EventPayload<'rec.state'>): void;
   stats(payload: EventPayload<'rec.stats'>): void;
@@ -259,8 +269,19 @@ export interface SessionManagerDeps {
     crop: NRect | null;
     t0Us: number;
   }) => CursorRecording | null;
-  /** Region mode (§4.3.7). Without a picker the last matching region (or full frame) is used. */
-  pickRegion?: (source: { width: number; height: number }) => Promise<RegionChoice>;
+  /**
+   * Region mode (§4.3.7). Without a picker the last matching region (or full frame) is used.
+   * `screen` is the recorded source (its display, for the on-screen picker, P3 step 6).
+   */
+  pickRegion?: (
+    source: { width: number; height: number },
+    screen: ScreenSource & { kind: 'monitor' | 'window' },
+  ) => Promise<RegionChoice>;
+  /**
+   * P3 step 6: what is being recorded, for the on-screen overlays (recording frame, live
+   * highlighter); null when nothing is. Called on every change.
+   */
+  onCapture?: (capture: CaptureInfo | null) => void;
   /**
    * Generates the peaks and thumbnails of a finished project in the background (the shared,
    * low-priority queue in main). Without it, the utility's jobs run one after another.
@@ -396,6 +417,8 @@ export class SessionManager {
    * the UI instead of flashing "recording" first.
    */
   private engineStarting = false;
+  /** The last capture sent to `onCapture` (JSON), so repeats are skipped. */
+  private captureKey: string | null = null;
   private finishing: Promise<void> | null = null;
   private readonly logger: Logger;
   private readonly offUtility: () => void;
@@ -930,6 +953,24 @@ export class SessionManager {
   private emitState(failureReason: string | null = null): void {
     if (this.engineStarting) return;
     this.deps.events.state(this.statePayload(failureReason));
+    this.syncCapture();
+  }
+
+  /** Tells the overlays what is recorded while capturing a screen, and null otherwise. */
+  private syncCapture(): void {
+    const session = this.session;
+    const capture: CaptureInfo | null =
+      session?.hasScreen && isCapturing(this.stateValue)
+        ? {
+            source: session.source,
+            region: session.region,
+            liveHighlighter: this.recorderOption(session, 'liveHighlighter'),
+          }
+        : null;
+    const key = capture ? JSON.stringify(capture) : null;
+    if (key === this.captureKey) return;
+    this.captureKey = key;
+    this.deps.onCapture?.(capture);
   }
 
   private statePayload(failureReason: string | null): EventPayload<'rec.state'> {
@@ -1033,7 +1074,7 @@ export class SessionManager {
 
   private async chooseRegion(session: Session): Promise<RegionChoice> {
     const size = { width: session.source.widthPx, height: session.source.heightPx };
-    if (this.deps.pickRegion) return this.deps.pickRegion(size);
+    if (this.deps.pickRegion) return this.deps.pickRegion(size, session.source);
     const last = this.deps.settings.get().recorder.lastRegion;
     const matches = last?.sourceWidth === size.width && last.sourceHeight === size.height;
     return { rect: matches ? last.rect : null };
@@ -1517,10 +1558,9 @@ export class SessionManager {
   }
 
   /** A P2 recorder option: the session's choice, else the saved setting. */
-  private recorderOption<K extends 'cropAtRecord' | 'requireHardware' | 'durationLimitSec'>(
-    session: Session,
-    key: K,
-  ): NonNullable<RecorderConfig[K]> {
+  private recorderOption<
+    K extends 'cropAtRecord' | 'requireHardware' | 'durationLimitSec' | 'liveHighlighter',
+  >(session: Session, key: K): NonNullable<RecorderConfig[K]> {
     return session.config[key] ?? this.deps.settings.get().recorder[key];
   }
 

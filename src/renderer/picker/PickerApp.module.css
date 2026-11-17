@@ -20,6 +20,12 @@
   pointer-events: none;
 }
 
+/* On-screen mode: the still only feeds the magnifier; the live desktop shows through. */
+.hiddenFrame {
+  composes: frame;
+  visibility: hidden;
+}
+
 .dim {
   position: absolute;
   inset: 0;

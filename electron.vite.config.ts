@@ -40,6 +40,7 @@ const PRELOADS = [
   'engine',
   'source-picker',
   'render',
+  'overlay',
 ] as const;
 
 /**

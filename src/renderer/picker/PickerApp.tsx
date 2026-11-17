@@ -163,7 +163,14 @@ export function PickerApp() {
 
   useEffect(() => {
     openedAt.current = performance.now();
-    api.load().then(setLoad, (e: unknown) => setError(errorText(e)));
+    api.load().then(
+      (loaded) => {
+        // On-screen mode (P3 step 6): the window sits over the live desktop and lets it show.
+        if (loaded.overlay) document.body.style.background = 'transparent';
+        setLoad(loaded);
+      },
+      (e: unknown) => setError(errorText(e)),
+    );
   }, [api]);
 
   const source = useMemo<Size | null>(
@@ -327,6 +334,7 @@ export function PickerApp() {
     <main
       className={styles.stage}
       style={{ cursor }}
+      data-overlay={load.overlay ? 'true' : undefined}
       data-testid="picker-stage"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -338,7 +346,7 @@ export function PickerApp() {
     >
       <img
         ref={image}
-        className={styles.frame}
+        className={load.overlay ? styles.hiddenFrame : styles.frame}
         src={load.imageUrl}
         alt="The frozen frame of the chosen screen"
         draggable={false}

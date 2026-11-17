@@ -1,0 +1,28 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+/* The recording frame sits just outside the region, so a cropped recording never shows it. */
+#frame {
+  position: absolute;
+  display: none;
+  box-sizing: content-box;
+  border: 3px dashed #e8590c;
+  border-radius: 2px;
+  pointer-events: none;
+}
+#cursor {
+  position: absolute;
+  display: none;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border: 3px solid rgb(255 212 59 / 90%);
+  border-radius: 50%;
+  background: rgb(255 212 59 / 30%);
+  pointer-events: none;
+}

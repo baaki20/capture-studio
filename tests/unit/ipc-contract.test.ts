@@ -77,6 +77,7 @@ describe('IPC contract (§4.3.11)', () => {
         'rec.stats',
         'updates.changed',
         'perms.changed',
+        'overlay.state',
       ].sort(),
     );
     expect(Object.keys(ENGINE_COMMANDS)).toEqual([

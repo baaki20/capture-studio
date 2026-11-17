@@ -53,6 +53,7 @@ import { registerCoreHandlers } from './ipc/core-handlers';
 import { ScreenSourceMemory, selectWithMemory } from './screen-memory';
 import { DocumentOpener, documentArgs } from './open-documents';
 import { registerUpdates } from './updates/register';
+import { RecordingOverlays } from './windows/overlays';
 import { createPermissions, parseFakeMacPermissions } from './permissions/register';
 import type { UpdateService } from './updates/update-service';
 import { loadNativeHelper } from './native/cs-native';
@@ -166,6 +167,7 @@ let mediaUtility: MediaUtilityHandle | null = null;
 let engineHost: EngineHost | null = null;
 let sessionManager: SessionManager | null = null;
 let controlsHost: ControlsWindowHost | null = null;
+let overlaysHost: RecordingOverlays | null = null;
 let exportService: ExportService | null = null;
 /** The assistants' automation socket (on only while enabled in Settings). */
 let automation: AutomationHandle | null = null;
@@ -493,10 +495,45 @@ async function start(): Promise<void> {
   });
   engineHost = new EngineHost({ router, renderer, logger: log });
   const engine = engineHost;
-  const capabilityAvailable = (key: 'ui.excludeFromCapture' | 'audio.system'): boolean =>
+  const capabilityAvailable = (
+    key:
+      | 'ui.excludeFromCapture'
+      | 'audio.system'
+      | 'capture.region.onScreenOverlay'
+      | 'capture.screen.allMonitors',
+  ): boolean =>
     ['available', 'degraded'].includes(
       capabilities.current()?.capabilities[key].state ?? 'unavailable',
     );
+  // On-screen overlays (P3 step 6): the region picker over the live desktop, the recording frame
+  // and the live highlighter cover the recorded monitor; none without a display to cover.
+  const overlays = new RecordingOverlays({
+    router,
+    renderer,
+    logger: log,
+    excludeFromCapture: () => capabilityAvailable('ui.excludeFromCapture'),
+    cursorPoint: () => screen.getCursorScreenPoint(),
+  });
+  overlaysHost = overlays;
+  const overlayDisplay = (source: {
+    kind: 'monitor' | 'window';
+    displayId?: string;
+    allScreens?: boolean;
+  }) => {
+    // All screens (P3 step 7) spans monitors of different scales: the frozen-frame picker is used.
+    if (
+      source.kind !== 'monitor' ||
+      source.allScreens ||
+      !capabilityAvailable('capture.region.onScreenOverlay')
+    ) {
+      return null;
+    }
+    const displays = screen.getAllDisplays();
+    const display =
+      displays.find((d) => String(d.id) === source.displayId) ??
+      (displays.length === 1 ? displays[0] : undefined);
+    return display ? { ...display.bounds } : null;
+  };
   const picker = new RegionPickerHost({
     router,
     renderer,
@@ -572,6 +609,7 @@ async function start(): Promise<void> {
             fps: settings.get().recorder.fps,
             sourceType,
             portal: usesPortal,
+            allScreens: capabilityAvailable('capture.screen.allMonitors'),
             ...screenPickerOptions({
               portal: usesPortal,
               commandLine: app.commandLine,
@@ -597,7 +635,20 @@ async function start(): Promise<void> {
       mainNowUs: () => (performance.timeOrigin + performance.now()) * 1000,
       logger: log,
     }),
-    pickRegion: (source) => picker.pick(source),
+    pickRegion: (size, source) => picker.pick(size, overlayDisplay(source) ?? undefined),
+    onCapture: (capture) => {
+      const display = capture ? overlayDisplay(capture.source) : null;
+      overlays.update(
+        capture && display
+          ? {
+              display,
+              source: { width: capture.source.widthPx, height: capture.source.heightPx },
+              region: capture.region,
+              highlighter: capture.liveHighlighter,
+            }
+          : null,
+      );
+    },
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
     systemAudioWithScreen: systemAudioWithScreen(process.platform),
     recordingBlocked: () => permissions.recordingBlocked(),
@@ -1046,6 +1097,7 @@ if (relaunchX11 || !app.requestSingleInstanceLock(secondInstanceData)) {
     void automation?.dispose();
     tray?.destroy();
     controlsHost?.dispose();
+    overlaysHost?.dispose();
     sessionManager?.dispose();
     engineHost?.dispose();
     exportService?.dispose();

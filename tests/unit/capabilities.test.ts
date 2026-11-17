@@ -150,6 +150,16 @@ describe('Linux capability detection (§1.4, §9)', () => {
     expect(c['capture.window.enumerate'].state).toBe('available');
     expect(c['hotkeys.global']).toMatchObject({ state: 'available', strategy: 'globalShortcut' });
     expect(c['ui.alwaysOnTop'].state).toBe('available');
+    // P3 step 7: every monitor in one picture (Chromium's whole-desktop source).
+    expect(c['capture.screen.allMonitors']).toMatchObject({
+      state: 'available',
+      strategy: 'full-desktop-source',
+    });
+    // P3 step 6: the region is drawn over the live desktop.
+    expect(c['capture.region.onScreenOverlay']).toMatchObject({
+      state: 'available',
+      strategy: 'overlay-window',
+    });
   });
 
   it('uses a verified hardware encoder and reports session-only secrets', async () => {
@@ -217,7 +227,7 @@ describe('Windows capability detection (Phase 3)', () => {
       state: 'degraded',
       strategy: 'electron-poll',
     });
-    expect(c['capture.region.onScreenOverlay'].strategy).toBe('in-app-picker');
+    expect(c['capture.region.onScreenOverlay'].strategy).toBe('overlay-window');
   });
 
   it('minimizes the controls on builds before 19041, which only black windows out', async () => {

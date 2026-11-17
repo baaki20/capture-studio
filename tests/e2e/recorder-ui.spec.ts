@@ -311,16 +311,20 @@ test('record → countdown → controls (meters, pause, restart) → stop → sa
   }
 });
 
-test('region mode: the picker shows the frozen frame, selects in stream pixels, then abort leaves no project (R1.9, R1.12, R1.18)', async () => {
+test('region mode: the picker selects over the screen in stream pixels, the frame and highlighter show while recording, then abort leaves no project (R1.9, R1.12, R1.18, R3.13–R3.16)', async () => {
   test.setTimeout(120_000);
-  const run = await launch({ captureMode: 'region', countdownSec: 0 });
+  const run = await launch({ captureMode: 'region', countdownSec: 0, liveHighlighter: true });
   try {
     const { app, shell } = run;
     await shell.getByTestId('record-button').click();
     await waitPastAcquiring(shell);
 
     const picker = await windowFor(app, 'picker/index.html');
-    const frame = picker.getByRole('img', { name: /frozen frame/ });
+    // X11 (P3 step 6): over the live desktop; the still only feeds the magnifier.
+    await expect(picker.getByTestId('picker-stage')).toHaveAttribute('data-overlay', 'true', {
+      timeout: 15_000,
+    });
+    const frame = picker.locator('img');
     await expect
       .poll(() => frame.evaluate((img: HTMLImageElement) => img.naturalWidth), {
         timeout: 15_000,
@@ -364,10 +368,36 @@ test('region mode: the picker shows the frozen frame, selects in stream pixels, 
     expect(saved?.rect).toMatchObject({ width: w, height: h });
     expect(saved?.sourceWidth).toBeGreaterThan(0);
 
+    // Two click-through overlays cover the display: the frame around the region and the
+    // highlighter, which follows the pointer.
+    await expect
+      .poll(() => app.windows().filter((page) => page.url().includes('overlay/index.html')).length)
+      .toBe(2);
+    const overlays = app.windows().filter((page) => page.url().includes('overlay/index.html'));
+    const states = await Promise.all(
+      overlays.map((page) =>
+        page.evaluate(() => ({
+          frame: getComputedStyle(document.getElementById('frame')!).display,
+          width: document.getElementById('frame')!.style.width,
+        })),
+      ),
+    );
+    const framed = states.filter((st) => st.frame === 'block');
+    expect(framed).toHaveLength(1);
+    expect(parseFloat(framed[0]!.width)).toBeGreaterThan(0);
+    const clickThrough = await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()
+        .filter((win) => win.webContents.getURL().includes('overlay/index.html'))
+        .map((win) => win.isFocusable()),
+    );
+    expect(clickThrough).toEqual([false, false]);
+
     await controls.getByRole('button', { name: 'Abort' }).click();
     await controls.getByRole('alertdialog').getByRole('button', { name: 'Abort' }).click();
     await expect.poll(() => recState(shell), { timeout: 20_000 }).toBe('aborted');
     await expect.poll(() => windowVisible(app, 'controls/index.html')).toBe(false);
+    // The overlays go with the recording.
+    await expect.poll(() => windowVisible(app, 'overlay/index.html')).toBe(false);
     // The state flips first; the engine stops and then the folder goes (R1.18).
     await expect
       .poll(() => readdirSync(run.projects).filter((n) => n.endsWith('.cstudio')), {
@@ -449,7 +479,8 @@ test('region cropped at record time, then a quick GIF (R2.31, R2.33)', async () 
     await shell.getByTestId('record-button').click();
     await waitPastAcquiring(shell);
     const picker = await windowFor(app, 'picker/index.html');
-    const frame = picker.getByRole('img', { name: /frozen frame/ });
+    // The still (hidden on X11, where the picker sits over the live desktop) has loaded.
+    const frame = picker.locator('img');
     await expect
       .poll(() => frame.evaluate((img: HTMLImageElement) => img.naturalWidth), { timeout: 15_000 })
       .toBeGreaterThan(0);

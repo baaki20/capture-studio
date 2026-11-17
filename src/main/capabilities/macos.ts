@@ -130,9 +130,9 @@ export function detectMacCapabilities(input: MacDetectInput): CapabilityMap {
     ),
     'capture.window.enumerate':
       screen.state === 'available' ? available('desktopCapturer') : screen,
-    'capture.region.onScreenOverlay': unavailable(
-      'The on-screen region overlay is not available yet; the in-app frozen-frame picker is used.',
-      'in-app-picker',
+    'capture.region.onScreenOverlay': available(
+      'overlay-window',
+      'The region is drawn over the live desktop.',
     ),
     'capture.cursor.hide': unavailable(
       'Hiding the cursor is not verified on macOS yet.',
