@@ -11,16 +11,16 @@ per-OS checklist (step 10), then tick the items here and fix the capabilities th
 wrong. Reports use generic stand-ins for devices and machines; recordings are deleted after
 analysis.
 
-## Waiting for the next push (CI)
+## Automated on CI (done 2026-11-17, run 44103754373 at fe28eb2)
 
-Written on Linux in step 10; they first run on GitHub's runners after `phase3` is pushed:
-
-- [ ] The end-to-end suite on the Windows and macOS runners (`desktop` job): specs that need only a
-      display everywhere, recording specs on Windows (`tests/e2e/platform.ts`). Expect a round of
-      platform fixes, as the first Windows/macOS unit and integration runs needed.
-- [ ] The capability smoke test (`tests/e2e/capabilities.spec.ts`, acceptance e) on Windows and
-      both Macs.
-- [ ] Window recording under a window manager on Linux CI (`Window recording E2E` step).
+- [x] End-to-end suite on the runners: Windows 26 passed (recording included: record and stop,
+      region picker over the desktop, window recording, editor, parity, preview sync), macOS
+      Apple silicon 15 passed, macOS Intel 8 passed (no GPU there, so the WebGL specs are skipped
+      and run on Apple silicon). Recording on macOS stays manual (no Screen Recording on runners).
+- [x] Capability smoke test on Windows and both Macs.
+- [x] Window recording under a window manager on Linux CI.
+- Real fixes this found: keyframes more than 1 s apart on change-only sources (R1.13), and jobs
+  failing when sent before the media utility's FFmpeg check finished.
 
 ## Spikes (step 0)
 
