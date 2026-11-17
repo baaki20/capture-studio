@@ -40,6 +40,37 @@ export const LINUX_ENCODER_CANDIDATES: readonly EncoderCandidate[] = [
   },
 ];
 
+const LIBX264: EncoderCandidate = {
+  name: 'libx264',
+  kind: 'software',
+  args: (input) => [...input, '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p'],
+};
+
+/** Windows candidates (P3 step 2): NVIDIA, Intel and AMD through the BtbN build, then libx264. */
+export const WINDOWS_ENCODER_CANDIDATES: readonly EncoderCandidate[] = [
+  { name: 'h264_nvenc', kind: 'nvenc', args: (input) => [...input, '-c:v', 'h264_nvenc'] },
+  { name: 'h264_qsv', kind: 'qsv', args: (input) => [...input, '-c:v', 'h264_qsv'] },
+  { name: 'h264_amf', kind: 'amf', args: (input) => [...input, '-c:v', 'h264_amf'] },
+  LIBX264,
+];
+
+/** macOS candidates (P3 step 2): VideoToolbox (our own build has it, D6), then libx264. */
+export const MACOS_ENCODER_CANDIDATES: readonly EncoderCandidate[] = [
+  {
+    name: 'h264_videotoolbox',
+    kind: 'videotoolbox',
+    args: (input) => [...input, '-c:v', 'h264_videotoolbox', '-pix_fmt', 'yuv420p'],
+  },
+  LIBX264,
+];
+
+/** The candidates for an OS, preferred first. */
+export function encoderCandidates(platform: NodeJS.Platform): readonly EncoderCandidate[] {
+  if (platform === 'win32') return WINDOWS_ENCODER_CANDIDATES;
+  if (platform === 'darwin') return MACOS_ENCODER_CANDIDATES;
+  return LINUX_ENCODER_CANDIDATES;
+}
+
 /** Encoder names from `ffmpeg -encoders` output (lines like ` V....D libx264  …`). */
 export function parseEncoderList(output: string): Set<string> {
   const names = new Set<string>();
@@ -82,7 +113,7 @@ export interface ProbeEncodersOptions {
 }
 
 export async function probeEncoders(options: ProbeEncodersOptions): Promise<FfmpegEncoderReport> {
-  const candidates = options.candidates ?? LINUX_ENCODER_CANDIDATES;
+  const candidates = options.candidates ?? encoderCandidates(process.platform);
   const listed = await listEncoders(options.ffmpegPath, options.signal);
   const encoders: FfmpegEncoderProbe[] = [];
 

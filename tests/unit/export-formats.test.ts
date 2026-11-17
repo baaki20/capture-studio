@@ -26,6 +26,7 @@ import {
 import {
   buildExportGraph,
   resolveExportSettings,
+  videotoolboxBitrate,
 } from '../../src/utility/media/export/graph-builder';
 import { recordedProject } from '../fixtures/editor-project';
 
@@ -172,6 +173,21 @@ describe('command line per format', () => {
     expect(
       after(unwrap(graph({ encoder: 'auto', format: 'webm-vp9' }, 'h264_vaapi')).args, '-c:v'),
     ).toBe('libvpx-vp9');
+  });
+
+  it('drives the Windows and macOS hardware encoders (P3 step 2)', () => {
+    const amf = unwrap(graph({ encoder: 'auto', quality: 'high' }, 'h264_amf')).args;
+    expect(after(amf, '-c:v')).toBe('h264_amf');
+    expect(after(amf, '-quality')).toBe('quality');
+    expect(after(amf, '-rc')).toBe('cqp');
+    const vt = unwrap(graph({ encoder: 'auto' }, 'h264_videotoolbox')).args;
+    expect(after(vt, '-c:v')).toBe('h264_videotoolbox');
+    // No constant-quality flag: Intel Macs reject it.
+    expect(vt).not.toContain('-q:v');
+    expect(Number(after(vt, '-b:v'))).toBeGreaterThan(1_000_000);
+    expect(videotoolboxBitrate({ width: 1920, height: 1080, fps: 30, quality: 'standard' })).toBe(
+      6_220_800,
+    );
   });
 
   it('puts advanced arguments before the muxer, and checks them again', () => {

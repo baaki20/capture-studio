@@ -14,7 +14,7 @@ import {
   MediaUtilityEventSchema,
   type MediaUtilityEvent,
 } from '../../src/shared/ipc/media-utility';
-import { probeEncoders } from '../../src/utility/media/encoder-probe';
+import { encoderCandidates, probeEncoders } from '../../src/utility/media/encoder-probe';
 import { finalizeRecording } from '../../src/utility/media/finalize';
 import { PcmIngest } from '../../src/utility/media/pcm-ingest';
 import { generatePeaks } from '../../src/utility/media/peaks';
@@ -333,10 +333,13 @@ describe('encoder probe', () => {
       works: true,
       error: null,
     });
-    for (const name of ['h264_vaapi', 'h264_nvenc', 'h264_qsv']) {
+    const hardware = encoderCandidates(process.platform)
+      .filter((c) => c.kind !== 'software')
+      .map((c) => c.name);
+    for (const name of hardware) {
       const entry = report.encoders.find((e) => e.name === name);
       expect(entry, name).toBeDefined();
-      // On the dev machine these fail (no VA driver, no NVENC); that is expected.
+      // Without the hardware or its driver these fail (CI, most dev machines); that is expected.
       if (!entry!.works) expect(entry!.error, name).toBeTruthy();
     }
     if (report.hardware)

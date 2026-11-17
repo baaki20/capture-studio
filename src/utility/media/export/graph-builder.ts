@@ -99,7 +99,14 @@ import { err, ok, type Result } from '../../../shared/result';
 export { exportSize, QUALITY_SETTINGS, type ExportQuality } from '../../../shared/export/presets';
 
 /** H.264 encoders the exporter knows how to drive. */
-export const EXPORT_VIDEO_ENCODERS = ['libx264', 'h264_vaapi', 'h264_nvenc', 'h264_qsv'] as const;
+export const EXPORT_VIDEO_ENCODERS = [
+  'libx264',
+  'h264_vaapi',
+  'h264_nvenc',
+  'h264_qsv',
+  'h264_amf',
+  'h264_videotoolbox',
+] as const;
 export type ExportVideoEncoder = (typeof EXPORT_VIDEO_ENCODERS)[number];
 
 export function isExportVideoEncoder(name: string): name is ExportVideoEncoder {
@@ -644,7 +651,53 @@ function videoEncoderArgs(settings: ExportSettings): string[] {
         '-pix_fmt',
         'nv12',
       ];
+    case 'h264_amf': {
+      const quality = { draft: 'speed', standard: 'balanced', high: 'quality' }[settings.quality];
+      const qp = String(q.crf);
+      return [
+        '-c:v',
+        'h264_amf',
+        '-quality',
+        quality,
+        '-rc',
+        'cqp',
+        '-qp_i',
+        qp,
+        '-qp_p',
+        qp,
+        '-qp_b',
+        qp,
+        '-profile:v',
+        'high',
+        '-pix_fmt',
+        'nv12',
+      ];
+    }
+    case 'h264_videotoolbox':
+      // Constant quality (`-q:v`) works only on Apple silicon, so a bitrate sized from the frame.
+      return [
+        '-c:v',
+        'h264_videotoolbox',
+        '-b:v',
+        String(videotoolboxBitrate(settings)),
+        '-profile:v',
+        'high',
+        '-pix_fmt',
+        'yuv420p',
+      ];
   }
+}
+
+/** Bits per pixel per frame for VideoToolbox's bitrate, by export quality. */
+const VIDEOTOOLBOX_BPP = { draft: 0.05, standard: 0.1, high: 0.15 } as const;
+
+/** VideoToolbox target bitrate (bit/s) for the output size, rate and quality. */
+export function videotoolboxBitrate(
+  settings: Pick<ExportSettings, 'width' | 'height' | 'fps' | 'quality'>,
+): number {
+  return Math.round(
+    settings.width * settings.height * settings.fps * VIDEOTOOLBOX_BPP[settings.quality],
+  );
 }
 
 /**
