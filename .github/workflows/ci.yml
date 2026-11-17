@@ -93,7 +93,8 @@ jobs:
       matrix:
         runner: [windows-2025, macos-15, macos-15-intel]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # The E2E suite (parity alone takes about 6 minutes on Linux) runs here too.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -128,3 +129,16 @@ jobs:
 
       - name: Integration tests
         run: npm run test:integration
+
+      # P3 step 10 (acceptance a): the specs that need only a display run on both; recording
+      # specs run on Windows (macOS runners cannot grant Screen Recording; see tests/e2e/platform.ts).
+      - name: E2E tests
+        run: npm run test:e2e
+
+      - name: Upload E2E results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results-${{ matrix.runner }}
+          path: test-results/
+          retention-days: 7

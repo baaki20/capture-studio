@@ -11,6 +11,17 @@ per-OS checklist (step 10), then tick the items here and fix the capabilities th
 wrong. Reports use generic stand-ins for devices and machines; recordings are deleted after
 analysis.
 
+## Waiting for the next push (CI)
+
+Written on Linux in step 10; they first run on GitHub's runners after `phase3` is pushed:
+
+- [ ] The end-to-end suite on the Windows and macOS runners (`desktop` job): specs that need only a
+      display everywhere, recording specs on Windows (`tests/e2e/platform.ts`). Expect a round of
+      platform fixes, as the first Windows/macOS unit and integration runs needed.
+- [ ] The capability smoke test (`tests/e2e/capabilities.spec.ts`, acceptance e) on Windows and
+      both Macs.
+- [ ] Window recording under a window manager on Linux CI (`Window recording E2E` step).
+
 ## Spikes (step 0)
 
 - [ ] **S9 Windows** and **S10 macOS**: run `npx electron spikes/p3-platform/main.cjs`. It decides

@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { _electron as electron, expect, test, type Page } from '@playwright/test';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
+import { CAN_CAPTURE } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -35,7 +36,7 @@ async function recState(shell: Page): Promise<string> {
   return shell.evaluate(async () => (await window.captureStudio.rec.status()).state);
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!CAN_CAPTURE, 'needs screen capture (Linux X11 or Windows)');
 
 test('X11 with several screens: the picker offers each, Esc cancels, the chosen one is recorded and remembered (R1.53)', async () => {
   test.setTimeout(150_000);

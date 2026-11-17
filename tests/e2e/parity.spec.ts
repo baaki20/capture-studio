@@ -42,6 +42,7 @@ import {
   FIXTURES,
   type ParityFixture,
 } from './parity/fixtures';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -238,7 +239,7 @@ const SELECTED = ONLY.length
   ? FIXTURES.filter((f) => ONLY.some((o) => f.name.includes(o)))
   : FIXTURES;
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('preview and frame-render export agree for every parity fixture (R1.48, P2 a)', async () => {
   test.setTimeout(120_000 * SELECTED.length);

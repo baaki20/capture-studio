@@ -13,6 +13,7 @@ import path from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { ChannelClient } from '../wayland/lib/channel-client';
+import { CAN_CAPTURE } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -28,7 +29,7 @@ interface StatePayload {
   root: string | null;
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!CAN_CAPTURE, 'needs screen capture (Linux X11 or Windows)');
 
 test('warns below the warn threshold and stops and finalizes below the stop threshold (R1.17)', async () => {
   test.setTimeout(120_000);

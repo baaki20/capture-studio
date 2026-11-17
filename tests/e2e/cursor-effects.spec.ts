@@ -21,6 +21,7 @@ import type { Project } from '../../src/shared/project/schema';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -48,7 +49,7 @@ async function openEditor(app: ElectronApplication, channel: ChannelClient, id: 
   return page;
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('cursor panel: reasons, effects and auto-zoom as one undo step (R3.10–R3.12)', async () => {
   test.setTimeout(180_000);

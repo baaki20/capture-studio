@@ -9,11 +9,12 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('explains missing macOS permissions and blocks screen recording without Screen Recording (R3.6)', async () => {
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-perms-'));
@@ -78,6 +79,7 @@ test('explains missing macOS permissions and blocks screen recording without Scr
 });
 
 test('shows nothing on a system without these permissions', async () => {
+  test.skip(process.platform === 'darwin', 'macOS has these permissions');
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-perms-'));
   const app = await electron.launch({
     args: ['--ozone-platform=x11', MAIN],

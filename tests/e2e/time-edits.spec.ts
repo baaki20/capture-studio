@@ -18,6 +18,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { recordedProject, trackByName } from '../fixtures/editor-project';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FPS, ff } from './parity/fixtures';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -99,7 +100,7 @@ function buildProject(projectsDir: string): { root: string; doc: Project } {
   return { root, doc };
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('speed with its audio render, freeze frame, dissolve and a chapter marker', async () => {
   test.setTimeout(180_000);

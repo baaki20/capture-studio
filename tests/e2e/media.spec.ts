@@ -23,6 +23,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { buildRecordedProject } from '../fixtures/recorded-media';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG, FFMPEG_DIR, FPS } from './parity/fixtures';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -102,7 +103,7 @@ async function stubDialog(app: ElectronApplication, paths: string[]) {
 
 const docOf = async (page: Page) => (await page.evaluate(() => window.csEditorDebug?.doc()))!;
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('import a picture and add a take (R2.21, R2.22)', async () => {
   test.setTimeout(180_000);

@@ -19,6 +19,7 @@ import {
   type Page,
 } from '@playwright/test';
 import { createDefaultSettings, type Settings } from '../../src/shared/settings/schema';
+import { CAN_CAPTURE } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -137,7 +138,7 @@ async function chooseFakeDevices(shell: Page): Promise<void> {
 const meterPeak = (page: Page, testId: string) =>
   page.getByTestId(testId).getByRole('meter').getAttribute('data-peak');
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!CAN_CAPTURE, 'needs screen capture (Linux X11 or Windows)');
 
 test('the setup panel shows devices, a live preview with its real fps, meters and persists choices (R1.5, R1.6)', async () => {
   const run = await launch();

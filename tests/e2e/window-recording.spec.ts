@@ -9,12 +9,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
+import { CAN_CAPTURE } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
 const FFMPEG_DIR = path.join(ROOT, 'resources/bin', `${process.platform}-${process.arch}`);
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!CAN_CAPTURE, 'needs screen capture (Linux X11 or Windows)');
 
 test('records one window chosen from the window list (R3.18)', async () => {
   test.setTimeout(120_000);

@@ -17,6 +17,7 @@ import {
   type Page,
 } from '@playwright/test';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
+import { CAN_CAPTURE } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -160,7 +161,7 @@ function checksums(root: string): Record<string, string> {
   );
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!CAN_CAPTURE, 'needs screen capture (Linux X11 or Windows)');
 
 test('record → editor opens → preview, split/delete/undo, face corner, nudge, autosave (R1.20, R1.26, R1.28, R1.31–R1.43)', async () => {
   test.setTimeout(240_000);

@@ -18,6 +18,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import type { Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -59,7 +60,7 @@ function whiteIn(p: Picture, r: { x: number; y: number; width: number; height: n
   return n;
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('add, retype, drag, pixelate, delete and undo annotations (R2.5–R2.8)', async () => {
   test.setTimeout(180_000);

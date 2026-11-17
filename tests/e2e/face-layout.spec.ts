@@ -17,6 +17,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { keyedBox, type Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES, FPS, magenta } from './parity/fixtures';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -58,7 +59,7 @@ async function goTo(editor: Page, seconds: number) {
     .toBe(Math.round(seconds * S));
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('face mode for a section, keyframe list, delete and undo, border (R2.1–R2.4)', async () => {
   test.setTimeout(180_000);

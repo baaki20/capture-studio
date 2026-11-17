@@ -18,6 +18,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { _electron as electron, expect, test } from '@playwright/test';
+import { CAN_CAPTURE } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const FFPROBE = path.join(ROOT, 'resources/bin', `${process.platform}-${process.arch}`, 'ffprobe');
@@ -68,7 +69,7 @@ function ffprobe(file: string): {
   return JSON.parse(out) as ReturnType<typeof ffprobe>;
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!CAN_CAPTURE, 'needs screen capture (Linux X11 or Windows)');
 
 test('the engine records screen, camera and mic into fragmented MP4 files', async () => {
   test.setTimeout(90_000);

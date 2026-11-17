@@ -24,6 +24,7 @@ import { _electron as electron, expect, test, type Page } from '@playwright/test
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { recordedProject } from '../fixtures/editor-project';
 import { ChannelClient } from '../wayland/lib/channel-client';
+import { HAS_DISPLAY } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -203,7 +204,7 @@ async function measure(editor: Page, seconds: number): Promise<Measured> {
   );
 }
 
-test.skip(process.platform !== 'linux' || !process.env.DISPLAY, 'needs Linux with an X display');
+test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('the editor preview plays screen and mic within 40 ms of each other (R1.24)', async () => {
   test.setTimeout(120_000);
