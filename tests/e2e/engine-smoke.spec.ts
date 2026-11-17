@@ -336,7 +336,10 @@ test('the engine records screen, camera and mic into fragmented MP4 files', asyn
         .sort((a, b) => a - b);
       expect(keys.length).toBeGreaterThan(1);
       for (let i = 1; i < keys.length; i += 1) {
-        expect((keys[i] ?? 0) - (keys[i - 1] ?? 0)).toBeLessThanOrEqual(1.05);
+        expect(
+          (keys[i] ?? 0) - (keys[i - 1] ?? 0),
+          `${kind} keyframes at ${keys.map((k) => k.toFixed(3)).join(', ')} s`,
+        ).toBeLessThanOrEqual(1.05);
       }
     }
     const mic = ffprobe(path.join(dir, 'mic.rec.mp4'));

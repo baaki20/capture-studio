@@ -24,7 +24,7 @@ import { _electron as electron, expect, test, type Page } from '@playwright/test
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { recordedProject } from '../fixtures/editor-project';
 import { ChannelClient } from '../wayland/lib/channel-client';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -216,7 +216,7 @@ test('the editor preview plays screen and mic within 40 ms of each other (R1.24)
   });
   writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
   const doc = makeProject(projects);
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     // No GPU under Xvfb (CI): Chromium only falls back to software WebGL for the preview when asked.
     args: [

@@ -42,7 +42,7 @@ import {
   FIXTURES,
   type ParityFixture,
 } from './parity/fixtures';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath, recordConsole } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -251,7 +251,7 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
     exportsDir: path.join(projects, 'Exports'),
   });
   writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     // No GPU under Xvfb (CI): Chromium only falls back to software WebGL when asked.
     args: [
@@ -271,6 +271,7 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
       WAYLAND_DISPLAY: '',
     },
   });
+  const consoleLog = recordConsole(app);
   const channel = await ChannelClient.connect(socket);
   try {
     await app.firstWindow();
@@ -299,6 +300,11 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
     }
   } finally {
     channel.close();
+    await consoleLog.attach();
+    await test
+      .info()
+      .attach('main.log', { path: path.join(userData, 'logs', 'main.log') })
+      .catch(() => undefined);
     await app.close().catch(() => undefined);
     rmSync(userData, { recursive: true, force: true });
     // CS_PARITY_KEEP=1 keeps the projects and exports for inspection (delete them afterwards).

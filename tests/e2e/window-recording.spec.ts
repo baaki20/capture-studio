@@ -69,7 +69,7 @@ test('records one window chosen from the window list (R3.18)', async () => {
     test.skip(!hasWindows, 'this X server lists no windows (no window manager)');
     const size = await app.evaluate(({ BrowserWindow }) => {
       const main = BrowserWindow.getAllWindows().find((w) => w.isVisible());
-      return main ? main.getContentBounds() : null;
+      return main ? { content: main.getContentBounds(), outer: main.getBounds() } : null;
     });
 
     const result = await shell.evaluate(() => window.captureStudio.rec.record());
@@ -101,9 +101,13 @@ test('records one window chosen from the window list (R3.18)', async () => {
     expect(project.recording.source.kind).toBe('window');
     expect(project.media.find((m) => m.role === 'screen')?.status).toBe('ok');
     if (size) {
-      // The window's pixels (no window manager decorations under Xvfb).
-      expect(project.recording.source.widthPx).toBe(size.width);
-      expect(project.recording.source.heightPx).toBe(size.height);
+      // The window's pixels: at least its content, at most with the frame a window manager (or
+      // Windows) draws around it, which window captures include.
+      const { widthPx, heightPx } = project.recording.source;
+      expect(widthPx).toBeGreaterThanOrEqual(size.content.width);
+      expect(heightPx).toBeGreaterThanOrEqual(size.content.height);
+      expect(widthPx).toBeLessThanOrEqual(size.outer.width + 16);
+      expect(heightPx).toBeLessThanOrEqual(size.outer.height + 16);
     }
   } finally {
     await app.close().catch(() => undefined);

@@ -21,7 +21,7 @@ import type { Project } from '../../src/shared/project/schema';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -64,7 +64,7 @@ test('cursor panel: reasons, effects and auto-zoom as one undo step (R3.10–R3.
   );
   const plain = FIXTURES.find((f) => f.name === 'p1-rounded-face')!.build(projects).doc;
   const { doc } = FIXTURES.find((f) => f.name === 'p3-cursor-effects')!.build(projects);
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',

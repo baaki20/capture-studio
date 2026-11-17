@@ -19,7 +19,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { keyedBox, type Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES, FPS, magenta } from './parity/fixtures';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -78,7 +78,7 @@ test('background style, a zoomed range, zoom keyframe delete and undo (R2.9, R2.
   const fixture = FIXTURES.find((f) => f.name === 'p1-rounded-face');
   if (!fixture) throw new Error('no rounded-face fixture');
   const { doc } = fixture.build(projects);
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',

@@ -13,7 +13,7 @@ import path from 'node:path';
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { ChannelClient } from '../wayland/lib/channel-client';
-import { CAN_CAPTURE } from './platform';
+import { CAN_CAPTURE, controlSocketPath } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -48,7 +48,7 @@ test('warns below the warn threshold and stops and finalizes below the stop thre
   };
   settings.disk = { warnBytes: 3 * GB, stopBytes: 1 * GB };
   writeFileSync(path.join(userData, 'settings.json'), JSON.stringify(settings));
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
 
   let app: ElectronApplication | null = null;
   let channel: ChannelClient | null = null;

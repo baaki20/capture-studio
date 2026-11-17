@@ -18,7 +18,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { recordedProject, trackByName } from '../fixtures/editor-project';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FPS, ff } from './parity/fixtures';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -114,7 +114,7 @@ test('speed with its audio render, freeze frame, dissolve and a chapter marker',
     ),
   );
   const { root, doc } = buildProject(projects);
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',

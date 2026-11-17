@@ -173,8 +173,11 @@ test('the setup panel shows devices, a live preview with its real fps, meters an
     const toggle = shell.getByTestId('system-audio-toggle');
     if (await toggle.isDisabled()) {
       await expect(shell.getByTestId('system-audio-reason')).toContainText('Unavailable');
-    } else {
+    } else if (process.platform === 'linux') {
       await expect(shell.getByTestId('system-meter')).toBeVisible();
+    } else {
+      // Windows and macOS take system audio with the screen: no meter before recording.
+      await expect(shell.getByTestId('system-audio-reason')).toContainText('screen capture');
     }
 
     // Choices persist (R1.6).

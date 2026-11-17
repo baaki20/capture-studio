@@ -18,7 +18,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import type { Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath, recordConsole } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -76,7 +76,7 @@ test('add, retype, drag, pixelate, delete and undo annotations (R2.5–R2.8)', a
   const fixture = FIXTURES.find((f) => f.name === 'p1-rounded-face');
   if (!fixture) throw new Error('no rounded-face fixture');
   const { doc } = fixture.build(projects);
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
@@ -95,6 +95,7 @@ test('add, retype, drag, pixelate, delete and undo annotations (R2.5–R2.8)', a
       WAYLAND_DISPLAY: '',
     },
   });
+  const consoleLog = recordConsole(app);
   const channel = await ChannelClient.connect(socket);
   try {
     await app.firstWindow();
@@ -190,6 +191,11 @@ test('add, retype, drag, pixelate, delete and undo annotations (R2.5–R2.8)', a
     expect(errors).toEqual([]);
   } finally {
     channel.close();
+    await consoleLog.attach();
+    await test
+      .info()
+      .attach('main.log', { path: path.join(userData, 'logs', 'main.log') })
+      .catch(() => undefined);
     await app.close().catch(() => undefined);
     rmSync(userData, { recursive: true, force: true });
     rmSync(projects, { recursive: true, force: true });

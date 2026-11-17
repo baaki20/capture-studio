@@ -23,7 +23,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { buildRecordedProject } from '../fixtures/recorded-media';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG, FFMPEG_DIR, FPS } from './parity/fixtures';
-import { HAS_DISPLAY } from './platform';
+import { HAS_DISPLAY, controlSocketPath } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -51,7 +51,7 @@ async function launch(userData: string, projects: string) {
       createDefaultSettings({ projectsDir: projects, exportsDir: path.join(projects, 'Exports') }),
     ),
   );
-  const socket = path.join(userData, 'control.sock');
+  const socket = controlSocketPath(userData);
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
