@@ -19,7 +19,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { keyedBox, type Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES, FPS, magenta } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath } from './platform';
+import { HAS_DISPLAY, controlSocketPath, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -82,7 +82,7 @@ test('background style, a zoomed range, zoom keyframe delete and undo (R2.9, R2.
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--disable-features=WebRTCPipeWireCapturer',
       MAIN,
     ],

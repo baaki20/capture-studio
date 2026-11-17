@@ -21,7 +21,7 @@ import type { Project } from '../../src/shared/project/schema';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath } from './platform';
+import { HAS_DISPLAY, controlSocketPath, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -68,7 +68,7 @@ test('cursor panel: reasons, effects and auto-zoom as one undo step (R3.10–R3.
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--disable-features=WebRTCPipeWireCapturer',
       MAIN,
     ],

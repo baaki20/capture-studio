@@ -24,7 +24,7 @@ import { _electron as electron, expect, test, type Page } from '@playwright/test
 import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { recordedProject } from '../fixtures/editor-project';
 import { ChannelClient } from '../wayland/lib/channel-client';
-import { HAS_DISPLAY, controlSocketPath } from './platform';
+import { HAS_DISPLAY, controlSocketPath, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -221,7 +221,7 @@ test('the editor preview plays screen and mic within 40 ms of each other (R1.24)
     // No GPU under Xvfb (CI): Chromium only falls back to software WebGL for the preview when asked.
     args: [
       '--ozone-platform=x11',
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--disable-features=WebRTCPipeWireCapturer',
       '--autoplay-policy=no-user-gesture-required',
       MAIN,

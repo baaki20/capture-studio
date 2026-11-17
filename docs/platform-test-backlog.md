@@ -121,3 +121,6 @@ Found by the Phase 3 verification (`verification-p3.md`); listed in the 0.3.0 re
       editor's smoothing, size and hide need.
 - [ ] Detect a missing compositing window manager on X11 and fall back to the frozen-frame
       picker.
+- [ ] Software WebGL fallback in the app itself on machines without a usable GPU (macOS VMs show
+      "WebGL2 is not available" and the editor preview cannot draw; the tests pass
+      `--use-angle=swiftshader` there).

@@ -18,7 +18,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import type { Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath, recordConsole } from './platform';
+import { HAS_DISPLAY, controlSocketPath, recordConsole, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -80,7 +80,7 @@ test('add, retype, drag, pixelate, delete and undo annotations (R2.5–R2.8)', a
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--disable-features=WebRTCPipeWireCapturer',
       MAIN,
     ],

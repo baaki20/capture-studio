@@ -25,6 +25,7 @@ export function shouldDropForBackpressure(encodeQueueSize: number, fps: number):
 
 export class KeyframeCadence {
   private lastKeyUs: Us | null = null;
+  private forced = false;
   private readonly thresholdUs: Us;
 
   /**
@@ -43,11 +44,26 @@ export class KeyframeCadence {
 
   /** Whether the frame at file time `timeUs` must be encoded as a keyframe. Records it if so. */
   next(timeUs: Us): boolean {
-    if (this.lastKeyUs === null || timeUs - this.lastKeyUs >= this.thresholdUs) {
+    if (this.forced || this.lastKeyUs === null || timeUs - this.lastKeyUs >= this.thresholdUs) {
       this.lastKeyUs = timeUs;
+      this.forced = false;
       return true;
     }
     return false;
+  }
+
+  /** File time from which the next frame must be a keyframe (null before the first one). */
+  dueAtUs(): Us | null {
+    return this.lastKeyUs === null ? null : this.lastKeyUs + this.thresholdUs;
+  }
+
+  /**
+   * Makes the next frame a keyframe whatever its time. For sources that send frames unevenly
+   * (Windows and Wayland send one only when the screen changes): waiting for the first frame
+   * after `dueAtUs` would let a fragment run past `intervalUs` (R1.13).
+   */
+  forceNext(): void {
+    this.forced = true;
   }
 
   /** Records a keyframe the encoder produced on its own (scene cut), which restarts the interval. */

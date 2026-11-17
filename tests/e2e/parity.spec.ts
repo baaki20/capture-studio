@@ -42,7 +42,13 @@ import {
   FIXTURES,
   type ParityFixture,
 } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath, recordConsole } from './platform';
+import {
+  HAS_DISPLAY,
+  controlSocketPath,
+  recordConsole,
+  PARITY_REGION_SLACK_PX,
+  SOFTWARE_GL_ARGS,
+} from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -256,7 +262,7 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
     // No GPU under Xvfb (CI): Chromium only falls back to software WebGL when asked.
     args: [
       '--ozone-platform=x11',
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--disable-features=WebRTCPipeWireCapturer',
       MAIN,
     ],
@@ -293,7 +299,7 @@ test('preview and frame-render export agree for every parity fixture (R1.48, P2 
             MIN_PATH_SSIM,
           );
         }
-        const maxPx = fixture.maxRegionPx ?? 2;
+        const maxPx = (fixture.maxRegionPx ?? 2) + PARITY_REGION_SLACK_PX;
         expect(r.preview, `preview regions at ${at}`).toBeLessThanOrEqual(maxPx);
         expect(r.export, `export regions at ${at}`).toBeLessThanOrEqual(maxPx);
       }

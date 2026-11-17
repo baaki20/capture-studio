@@ -17,7 +17,7 @@ import {
   type Page,
 } from '@playwright/test';
 import { createDefaultSettings } from '../../src/shared/settings/schema';
-import { CAN_CAPTURE } from './platform';
+import { CAN_CAPTURE, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -50,7 +50,7 @@ async function launch(): Promise<Launched> {
     args: [
       '--ozone-platform=x11',
       // No GPU under Xvfb (CI): Chromium only falls back to software WebGL for the preview when asked.
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
       '--disable-features=WebRTCPipeWireCapturer',

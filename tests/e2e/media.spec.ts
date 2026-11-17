@@ -23,7 +23,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { buildRecordedProject } from '../fixtures/recorded-media';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG, FFMPEG_DIR, FPS } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath } from './platform';
+import { HAS_DISPLAY, controlSocketPath, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -55,7 +55,7 @@ async function launch(userData: string, projects: string) {
   const app = await electron.launch({
     args: [
       '--ozone-platform=x11',
-      '--enable-unsafe-swiftshader',
+      ...SOFTWARE_GL_ARGS,
       '--disable-features=WebRTCPipeWireCapturer',
       MAIN,
     ],

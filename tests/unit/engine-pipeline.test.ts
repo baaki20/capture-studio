@@ -139,6 +139,20 @@ describe('video policies', () => {
     expect(cadence.next(1_000_000)).toBe(false);
     expect(cadence.next(1_600_000)).toBe(true);
   });
+
+  it('keeps fragments within 1 s when frames come unevenly (R1.13, Windows and Wayland)', () => {
+    const cadence = new KeyframeCadence(33_333);
+    expect(cadence.dueAtUs()).toBeNull();
+    cadence.next(0);
+    expect(cadence.dueAtUs()).toBe(966_667);
+    // Frames 150 ms apart: without help the first frame past the due time is at 1.05 s.
+    expect(cadence.next(900_000)).toBe(false);
+    // The worker sees the key falls due before its next check and forces the next frame.
+    cadence.forceNext();
+    expect(cadence.next(950_000)).toBe(true);
+    expect(cadence.next(1_000_000)).toBe(false);
+    expect(cadence.dueAtUs()).toBe(950_000 + 966_667);
+  });
 });
 
 describe('audio rendering of continuity plans', () => {

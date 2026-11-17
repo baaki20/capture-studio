@@ -12,6 +12,9 @@
  * A still screen sends no frames on Wayland, and a fragment is only written when the next frame
  * arrives, so a crash during a still stretch would lose it. When nothing has arrived for
  * `REPEAT_AFTER_US`, the last frame is encoded again to keep fragments closing (R1.21). The
+ * Uneven sources also make fragments run long: when a keyframe falls due before the next check,
+ * the next frame is made one, and if none has come for `KEY_REPEAT_AFTER_US` the last frame is
+ * repeated as that keyframe, so fragments stay within the 1 s interval (R1.13). The
  * screen pipeline draws each frame into its own canvas for that: holding the captured frame
  * itself would keep a capture buffer from the source's small pool and starve it (seen on the
  * camera: 28 → 12 fps). The camera never goes still, so it keeps nothing.
@@ -30,7 +33,11 @@ import { describe, PipelineBase, servePipeline } from './pipeline-base';
 const REPEAT_AFTER_US = 600_000;
 /** Repeats stay this far behind the clock, so the next real frame still sorts after them. */
 const REPEAT_LAG_US = 100_000;
-const REPEAT_CHECK_MS = 200;
+const REPEAT_CHECK_MS = 100;
+/** A keyframe falls due before the next check: within this much file time. */
+const KEY_LOOKAHEAD_US = REPEAT_CHECK_MS * 1000;
+/** With a keyframe due, repeat the last frame once nothing has arrived for this long. */
+const KEY_REPEAT_AFTER_US = REPEAT_LAG_US + 50_000;
 
 class VideoPipeline extends PipelineBase<VideoFrame> {
   protected readonly muxer: StreamMuxer;
@@ -169,7 +176,10 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     );
   }
 
-  /** Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`. */
+  /**
+   * Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`, or for
+   * `KEY_REPEAT_AFTER_US` with a keyframe due; with a keyframe due soon, the next frame is one.
+   */
   private repeatLast(): void {
     const last = this.last;
     const still = this.still;
@@ -177,12 +187,12 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     const nowUs = sessionNowUs();
     // The repeat lands `REPEAT_LAG_US` back, which must not fall inside a pause either.
     const pausedAt = (us: number) => this.pauses.isPaused(us);
-    if (
-      nowUs - last.arrivalUs < REPEAT_AFTER_US ||
-      pausedAt(nowUs) ||
-      pausedAt(nowUs - REPEAT_LAG_US)
-    )
-      return;
+    if (pausedAt(nowUs) || pausedAt(nowUs - REPEAT_LAG_US)) return;
+    const stillForUs = nowUs - last.arrivalUs;
+    const dueAt = this.cadence.dueAtUs();
+    const keyDue = dueAt !== null && last.fileUs + stillForUs + KEY_LOOKAHEAD_US >= dueAt;
+    if (keyDue) this.cadence.forceNext();
+    if (stillForUs < (keyDue ? KEY_REPEAT_AFTER_US : REPEAT_AFTER_US)) return;
     if (shouldDropForBackpressure(this.encoder.encodeQueueSize, this.video.fps)) return;
     const fileUs = last.fileUs + (nowUs - last.arrivalUs) - REPEAT_LAG_US;
     if (fileUs <= this.lastFileUs) return;

@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test, type ElectronApplication } from '@playwright/test';
 
@@ -44,10 +45,29 @@ export function recordConsole(app: ElectronApplication): { attach: () => Promise
   for (const page of app.windows()) watch(page);
   app.on('window', watch);
   return {
-    attach: () =>
-      test
+    attach: async () => {
+      // A file attachment: body attachments do not reach the CI artifacts.
+      const file = test.info().outputPath('console.txt');
+      writeFileSync(file, lines.join('\n'));
+      await test
         .info()
-        .attach('console.txt', { body: lines.join('\n'), contentType: 'text/plain' })
-        .catch(() => undefined),
+        .attach('console.txt', { path: file, contentType: 'text/plain' })
+        .catch(() => undefined);
+    },
   };
 }
+
+/**
+ * Software WebGL for runners without a GPU (Xvfb, the macOS VMs). On macOS Chromium's ANGLE
+ * uses Metal unless told to use SwiftShader; without it WebGL2 is missing there.
+ */
+export const SOFTWARE_GL_ARGS: readonly string[] = [
+  '--enable-unsafe-swiftshader',
+  ...(process.platform === 'darwin' ? ['--use-angle=swiftshader'] : []),
+];
+
+/**
+ * Extra pixels a parity region may be off where the GPU path differs from Linux's SwiftShader
+ * (Apple silicon rasterises edges a pixel differently); the SSIM limits stay the same.
+ */
+export const PARITY_REGION_SLACK_PX = process.platform === 'linux' ? 0 : 1;
