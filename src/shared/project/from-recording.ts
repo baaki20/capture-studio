@@ -462,6 +462,7 @@ export function projectFromRecording(
       pauses,
     },
     media,
+    cursorTracks: [],
     components,
     timeline: {
       canvas: {

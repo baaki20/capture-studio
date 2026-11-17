@@ -1,5 +1,5 @@
 /**
- * Loads a project's cursor tracks (v3) for the cursor effects: fetches each cursor media's
+ * Loads a project's cursor tracks (v3) for the cursor effects: fetches each track's
  * `cursor.jsonl` through its `cs-media://` URL and parses it (`shared/project/cursor-track.ts`).
  * The preview worker draws without a track until it has loaded and then draws again; the export's
  * render window waits for every track and fails when one cannot be read, so an export never
@@ -39,9 +39,7 @@ export class CursorTrackStore {
    * `changed` is true when a track was added (the caller draws again).
    */
   async load(doc: Project, urls: Readonly<Record<string, string>>): Promise<{ changed: boolean }> {
-    const wanted = doc.media.filter(
-      (m) => m.kind === 'cursor' && m.status !== 'missing' && m.status !== 'failed',
-    );
+    const wanted = doc.cursorTracks.filter((t) => t.status !== 'missing' && t.status !== 'failed');
     let changed = false;
     await Promise.all(
       wanted.map((m) => {

@@ -20,7 +20,6 @@ import type { Us } from '../time';
 import { CAMERA_EASE_MAX_US, CAMERA_ZOOM_MAX, cameraAt, cameraRect } from './camera-keyframes';
 import { clipTimeAtRef, clipTimelineDurationUs } from './clip-time';
 import { cursorMediaFor, type CursorTracks } from './cursor-effects';
-import { fileToRefUs } from './media-time';
 import { layersAt } from './render-plan';
 import type { FRect, Project } from './schema';
 import { timelineDurationUs } from './timeline-ops';
@@ -82,7 +81,8 @@ export function timelineClicks(doc: Project, tracks: CursorTracks): PlacedClick[
       if (!cursor || !data || !screen?.video) continue;
       const clipEnd = clip.timelineStartUs + clipTimelineDurationUs(clip);
       for (const press of data.clicks) {
-        const refUs = fileToRefUs(cursor, press.tUs);
+        // Track times are reference (session) time already.
+        const refUs = press.tUs;
         if (refUs < clip.sourceStartUs || refUs >= clip.sourceEndUs) continue;
         const tUs = clipTimeAtRef(clip, refUs);
         if (tUs < clip.timelineStartUs || tUs >= clipEnd) continue;

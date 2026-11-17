@@ -10,7 +10,12 @@ import {
 import { checkProjectInvariants } from '../../src/shared/project/invariants';
 import { sceneAt } from '../../src/shared/project/scene';
 import { ProjectSchema, type Project } from '../../src/shared/project/schema';
-import { CURSOR_MEDIA_ID, cursorProject, cursorTrack } from '../fixtures/cursor-project';
+import {
+  CURSOR_MEDIA_ID,
+  cursorMediaItem,
+  cursorProject,
+  cursorTrack,
+} from '../fixtures/cursor-project';
 import { exampleProject } from '../fixtures/example-project';
 
 const tracks = new Map([[CURSOR_MEDIA_ID, cursorTrack()]]);
@@ -34,21 +39,21 @@ describe('cursor tracks in the project', () => {
     expect(ProjectSchema.safeParse(cursorProject()).success).toBe(true);
   });
 
-  it('requires the track to belong to a video and never be a clip', () => {
+  it('requires the track to belong to a video, and never to be a clip', () => {
     const doc = cursorProject();
-    const cursor = doc.media.find((m) => m.id === CURSOR_MEDIA_ID);
-    if (cursor?.cursor) cursor.cursor.screenMediaId = 'med_m';
+    const cursor = doc.cursorTracks.find((t) => t.id === CURSOR_MEDIA_ID);
+    if (cursor) cursor.screenMediaId = 'med_m';
     expect(checkProjectInvariants(doc).map((v) => v.code)).toContain('cursor-track');
 
+    // A clip cannot name a cursor track: it is not media.
     const clipped = cursorProject();
     const clip = clipped.timeline.tracks[0]?.clips[0];
     if (clip) clip.mediaId = CURSOR_MEDIA_ID;
-    expect(checkProjectInvariants(clipped).map((v) => v.code)).toContain('cursor-track');
+    expect(checkProjectInvariants(clipped).map((v) => v.code)).toContain('missing-media');
 
-    const roleless = cursorProject();
-    const media = roleless.media.find((m) => m.id === CURSOR_MEDIA_ID);
-    if (media) media.role = 'imported';
-    expect(checkProjectInvariants(roleless).map((v) => v.code)).toContain('cursor-track');
+    const duplicate = cursorProject();
+    duplicate.cursorTracks.push({ ...cursorMediaItem(false) });
+    expect(checkProjectInvariants(duplicate).map((v) => v.code)).toContain('duplicate-id');
   });
 });
 
@@ -64,8 +69,8 @@ describe('availability (R3.12)', () => {
 
   it('explains a missing track file', () => {
     const doc = cursorProject();
-    const media = doc.media.find((m) => m.id === CURSOR_MEDIA_ID);
-    if (media) media.status = 'missing';
+    const track = doc.cursorTracks.find((t) => t.id === CURSOR_MEDIA_ID);
+    if (track) track.status = 'missing';
     expect(cursorEffectsAvailability(doc).reason).toMatch(/missing or damaged/);
   });
 
@@ -161,14 +166,5 @@ describe('draw plans', () => {
       track.layout.crop = { x: 0, y: 0, width: 800, height: 400 };
     }
     expect(plansAt(doc, 2_100_000)).toEqual([]);
-  });
-
-  it('moves with a sync nudge of the track', () => {
-    const doc = withEffects(cursorProject());
-    const cursor = doc.media.find((m) => m.id === CURSOR_MEDIA_ID);
-    if (cursor) cursor.syncAdjustUs = 100_000;
-    // At 2.1 s the nudged track is at file time 2.0 s: the press has just happened.
-    const ring = plansAt(doc, 2_100_000).find((p) => p.picture.kind === 'ring');
-    expect(ring?.opacity).toBe(1);
   });
 });

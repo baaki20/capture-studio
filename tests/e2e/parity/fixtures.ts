@@ -737,25 +737,18 @@ const cursorEffects: ParityFixture = {
         events.push({ tUs, x, y });
       }
     }
-    const cursorMedia: Project['media'][number] = {
+    const cursorTrack: Project['cursorTracks'][number] = {
       id: 'med_01JBQ4ZJ4X6V3K8N2M7P5R9CUR',
-      role: 'cursor',
-      kind: 'cursor',
       path: 'media/cursor.jsonl',
       status: 'ok',
       durationUs: seconds * 1_000_000,
-      startOffsetUs: screen.startOffsetUs,
-      syncAdjustUs: 0,
-      clockRatio: 1,
-      cursor: {
-        screenMediaId: screen.id,
-        inVideo: false,
-        sampleRateHz: 120,
-        samples: events.length,
-        clicks: presses.length,
-      },
+      screenMediaId: screen.id,
+      inVideo: false,
+      sampleRateHz: 120,
+      samples: events.length,
+      clicks: presses.length,
     };
-    doc = { ...doc, media: [...doc.media, cursorMedia] };
+    doc = { ...doc, cursorTracks: [...doc.cursorTracks, cursorTrack] };
     doc = unwrap(
       applyOp(
         doc,

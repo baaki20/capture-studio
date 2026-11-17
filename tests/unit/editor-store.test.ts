@@ -300,7 +300,7 @@ describe('autosave', () => {
         );
       }
       revision += 1;
-      saved.push({ revision, doc: request.doc });
+      saved.push({ revision, doc: request.doc as Project });
       return Promise.resolve({ revision });
     };
     const save = vi.fn<AutosaveProjectApi['save']>(backend);

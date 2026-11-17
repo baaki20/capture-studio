@@ -752,13 +752,15 @@ describe('session manager', () => {
     expect(starts).toHaveLength(2);
     await h.manager.stop();
     const doc = await readProject(root);
-    const cursor = doc.media.find((m) => m.kind === 'cursor');
+    expect(doc.cursorTracks).toHaveLength(1);
+    const [cursor] = doc.cursorTracks;
     expect(cursor).toMatchObject({
-      role: 'cursor',
       path: 'media/cursor.jsonl',
-      cursor: { inVideo: true, samples: 120, clicks: 1 },
+      inVideo: true,
+      samples: 120,
+      clicks: 1,
     });
-    expect(cursor?.cursor?.screenMediaId).toBe(doc.media.find((m) => m.role === 'screen')?.id);
+    expect(cursor?.screenMediaId).toBe(doc.media.find((m) => m.role === 'screen')?.id);
   });
 
   it('abort deletes the project folder', async () => {

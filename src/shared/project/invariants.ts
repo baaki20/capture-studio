@@ -96,19 +96,15 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
   };
   project.media.forEach((m, i) => {
     unique(m.id, ['media', i, 'id']);
-    // v3: a cursor track has the cursor role and info, and belongs to a screen video.
-    const isCursor = m.kind === 'cursor';
-    if (isCursor !== (m.role === 'cursor') || isCursor !== (m.cursor !== undefined)) {
+  });
+  // v3: each cursor track belongs to a screen video.
+  project.cursorTracks.forEach((t, i) => {
+    unique(t.id, ['cursorTracks', i, 'id']);
+    if (mediaById.get(t.screenMediaId)?.kind !== 'video') {
       violations.push({
         code: 'cursor-track',
-        message: `media ${m.id}: kind cursor, role cursor and cursor info go together`,
-        path: ['media', i],
-      });
-    } else if (m.cursor && mediaById.get(m.cursor.screenMediaId)?.kind !== 'video') {
-      violations.push({
-        code: 'cursor-track',
-        message: `cursor track ${m.id} refers to unknown or non-video media ${m.cursor.screenMediaId}`,
-        path: ['media', i, 'cursor', 'screenMediaId'],
+        message: `cursor track ${t.id} refers to unknown or non-video media ${t.screenMediaId}`,
+        path: ['cursorTracks', i, 'screenMediaId'],
       });
     }
   });
@@ -176,12 +172,6 @@ export function checkProjectInvariants(project: Project): InvariantViolation[] {
         violations.push({
           code: 'missing-media',
           message: `clip ${clip.id} references unknown media ${clip.mediaId}`,
-          path: [...path, 'mediaId'],
-        });
-      } else if (media.kind === 'cursor') {
-        violations.push({
-          code: 'cursor-track',
-          message: `clip ${clip.id} uses cursor track ${media.id}, which is never a clip`,
           path: [...path, 'mediaId'],
         });
       } else {

@@ -324,14 +324,18 @@ describe('cursor media in the project', () => {
       source: 'native' as const,
     };
     const withTrack = withCursorMedia(doc, result, 4_000_000);
-    const cursor = withTrack.media.at(-1);
-    expect(cursor).toMatchObject({
-      role: 'cursor',
-      kind: 'cursor',
-      path: 'media/cursor.jsonl',
-      durationUs: 5_000_000,
-      cursor: { screenMediaId: 'med_s', inVideo: true, samples: 10, clicks: 2 },
-    });
+    // In the project's own list, not in `media` (0.2.0 opens it read-only, R3.24).
+    expect(withTrack.media).toEqual(doc.media);
+    expect(withTrack.cursorTracks).toEqual([
+      expect.objectContaining({
+        path: 'media/cursor.jsonl',
+        durationUs: 5_000_000,
+        screenMediaId: 'med_s',
+        inVideo: true,
+        samples: 10,
+        clicks: 2,
+      }),
+    ]);
     expect(checkProjectInvariants(withTrack)).toEqual([]);
     expect(withCursorMedia(doc, null, 1)).toBe(doc);
   });

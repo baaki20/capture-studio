@@ -5,12 +5,14 @@ import { checkProjectInvariants, type InvariantCode } from '../../src/shared/pro
 import { projectJsonSchemaText } from '../../src/shared/project/json-schema';
 import { parseProject } from '../../src/shared/project/migrations';
 import {
+  MediaSchema,
   PROJECT_EXTENSION,
   ProjectSchema,
   ProjectStructureSchema,
   type Project,
   type VideoTrack,
 } from '../../src/shared/project/schema';
+import { cursorProject } from '../fixtures/cursor-project';
 import { exampleProject } from '../fixtures/example-project';
 
 function codes(project: Project): InvariantCode[] {
@@ -260,5 +262,27 @@ describe('generated JSON Schema', () => {
       expect.arrayContaining(['format', 'formatVersion', 'id', 'media', 'timeline', 'extensions']),
     );
     expect(schema.properties).not.toHaveProperty('somethingNew');
+  });
+});
+
+describe('0.2.0 compatibility (R3.24)', () => {
+  // 0.2.0 refuses a project whose media has a role or kind it does not know, but drops unknown
+  // top-level keys, so it opens a newer project read-only only if these lists stay the same.
+  // Checked against 0.2.0's own parser (commit 3298b1d) when cursor tracks moved out of `media`.
+  it('keeps the media roles and kinds 0.2.0 knows', () => {
+    expect(MediaSchema.shape.role.options).toEqual([
+      'screen',
+      'camera',
+      'microphone',
+      'system-audio',
+      'imported',
+    ]);
+    expect(MediaSchema.shape.kind.options).toEqual(['video', 'audio']);
+  });
+
+  it('keeps cursor tracks out of the media list', () => {
+    const doc = ProjectSchema.parse(cursorProject());
+    expect(doc.cursorTracks).toHaveLength(1);
+    expect(doc.media.map((m) => m.id)).not.toContain(doc.cursorTracks[0]?.id);
   });
 });

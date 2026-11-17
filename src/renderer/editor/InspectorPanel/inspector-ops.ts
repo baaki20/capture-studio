@@ -342,7 +342,6 @@ const ROLE_LABELS: Record<Media['role'], string> = {
   microphone: 'Microphone',
   'system-audio': 'System audio',
   imported: 'Imported',
-  cursor: 'Cursor',
 };
 
 /** The components that can be nudged (Face + Voice, System audio) with their recorded sync info. */

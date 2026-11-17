@@ -60,6 +60,7 @@ import {
 } from '../../shared/project/from-recording';
 import {
   PROJECT_EXTENSION,
+  type CursorTrackEntry,
   type Media,
   type NRect,
   type Project,
@@ -176,7 +177,7 @@ function cursorFile(root: string): string {
 }
 
 /**
- * The project with its cursor track (P3 step 4): a `cursor` media for the screen media, when a
+ * The project with its cursor track (P3 step 4) in `cursorTracks`, for the screen media, when a
  * track was recorded. The system cursor is part of the screen video (`inVideo`).
  */
 export function withCursorMedia(
@@ -186,25 +187,18 @@ export function withCursorMedia(
 ): Project {
   const screen = project.media.find((m) => m.role === 'screen' && m.kind === 'video');
   if (!result || !screen) return project;
-  const media: Media = {
+  const track: CursorTrackEntry = {
     id: newId('media'),
-    role: 'cursor',
-    kind: 'cursor',
     path: `media/${CURSOR_FILE_NAME}`,
     status: 'ok',
     durationUs: Math.max(durationUs, result.durationUs),
-    startOffsetUs: 0,
-    syncAdjustUs: 0,
-    clockRatio: 1,
-    cursor: {
-      screenMediaId: screen.id,
-      inVideo: true,
-      sampleRateHz: result.sampleRateHz,
-      samples: result.samples,
-      clicks: result.clicks,
-    },
+    screenMediaId: screen.id,
+    inVideo: true,
+    sampleRateHz: result.sampleRateHz,
+    samples: result.samples,
+    clicks: result.clicks,
   };
-  return { ...project, media: [...project.media, media] };
+  return { ...project, cursorTracks: [...project.cursorTracks, track] };
 }
 
 /** How long a reused screen source may take to show its first frame (P3 step 8, S8). */

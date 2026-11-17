@@ -215,13 +215,17 @@ describe('Windows capability detection (Phase 3)', () => {
     });
     expect(c['capture.window.enumerate'].state).toBe('available');
     expect(c['ui.excludeFromCapture']).toMatchObject({
-      state: 'available',
-      strategy: 'setContentProtection',
+      state: 'degraded',
+      strategy: 'minimize-controls',
     });
     expect(c['hotkeys.global'].state).toBe('available');
     expect(c['secrets.persistent'].state).toBe('available');
     // System audio comes with the screen capture (P3 step 2).
-    expect(c['audio.system']).toMatchObject({ state: 'available', strategy: 'desktop-loopback' });
+    // Built, not yet checked on a real Windows machine: degraded, not available.
+    expect(c['audio.system']).toMatchObject({ state: 'degraded', strategy: 'desktop-loopback' });
+    expect(c['audio.system'].reason).toMatch(/not yet checked/i);
+    expect(c['capture.screen.allMonitors'].state).toBe('degraded');
+    expect(c['capture.region.onScreenOverlay'].state).toBe('degraded');
     // Without the native helper the cursor is polled (no clicks).
     expect(c['capture.cursor.track']).toMatchObject({
       state: 'degraded',
@@ -230,10 +234,17 @@ describe('Windows capability detection (Phase 3)', () => {
     expect(c['capture.region.onScreenOverlay'].strategy).toBe('overlay-window');
   });
 
-  it('minimizes the controls on builds before 19041, which only black windows out', async () => {
-    expect((await win('10.0.18363')).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
-    expect((await win('10.0.19041')).capabilities['ui.excludeFromCapture'].state).toBe('available');
-    expect((await win('garbage')).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
+  it('minimizes the controls until hiding from captures is checked on a real machine', async () => {
+    // Before 19041 Windows only blacks windows out; from 19041 it hides them, but unverified.
+    expect((await win('10.0.18363')).capabilities['ui.excludeFromCapture'].reason).toMatch(
+      /black box/,
+    );
+    expect((await win('10.0.19041')).capabilities['ui.excludeFromCapture'].reason).toMatch(
+      /not yet checked/,
+    );
+    for (const release of ['10.0.18363', '10.0.19041', 'garbage']) {
+      expect((await win(release)).capabilities['ui.excludeFromCapture'].state).toBe('degraded');
+    }
   });
 });
 

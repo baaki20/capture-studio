@@ -84,12 +84,14 @@ test('a recording gets a cursor track with positions and clicks (R3.7–R3.9)', 
     const root = path.join(projects, folder!);
     const doc = JSON.parse(readFileSync(path.join(root, 'project.json'), 'utf8')) as Project;
     const screen = doc.media.find((m) => m.role === 'screen');
-    const cursor = doc.media.find((m) => m.kind === 'cursor');
-    expect(cursor).toMatchObject({
-      role: 'cursor',
+    expect(doc.cursorTracks).toHaveLength(1);
+    expect(doc.cursorTracks[0]).toMatchObject({
       path: 'media/cursor.jsonl',
       status: 'ok',
-      cursor: { screenMediaId: screen?.id, inVideo: true, sampleRateHz: 120, clicks: 1 },
+      screenMediaId: screen?.id,
+      inVideo: true,
+      sampleRateHz: 120,
+      clicks: 1,
     });
     const track = parseCursorTrack(readFileSync(path.join(root, 'media', 'cursor.jsonl'), 'utf8'));
     expect(track.header).toMatchObject({

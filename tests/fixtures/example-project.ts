@@ -105,6 +105,7 @@ export function exampleProject(): Project {
         audio: { codec: 'opus', sampleRate: 48000, channels: 2, discontinuities: 1 },
       },
     ],
+    cursorTracks: [],
     components: [
       { id: 'cmp_screen', type: 'screen', mediaIds: ['med_s'] },
       { id: 'cmp_face', type: 'face-voice', mediaIds: ['med_c', 'med_m'] },

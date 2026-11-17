@@ -198,10 +198,8 @@ export class CacheJobs {
    * missing, peaks before thumbnails. Resolves when all are done (failures are only logged).
    */
   async generateAll(projectId: string, root: string, media: readonly Media[]): Promise<void> {
-    // Cursor tracks (v3) are data, with no peaks or thumbnails.
     const usable = media.filter(
-      (m) =>
-        m.kind !== 'cursor' && m.status !== 'failed' && m.status !== 'missing' && m.durationUs > 0,
+      (m) => m.status !== 'failed' && m.status !== 'missing' && m.durationUs > 0,
     );
     const exists = await Promise.all(
       usable.map((m) =>

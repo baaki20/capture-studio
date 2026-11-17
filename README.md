@@ -11,13 +11,17 @@ FOR A PARTICULAR PURPOSE. See `LICENSE` for the full text.
 
 ## Development
 
-Node 24 is required (`.nvmrc`):
+Node 24 is required (`.nvmrc`). The native helper (cursor track, window list) is Rust: install a
+stable toolchain with [rustup](https://rustup.rs) once; `npm run build:native` finds `cargo` in
+`~/.cargo/bin` even when it is not on `PATH`. Without the helper the app still runs (cursor
+positions are polled, without clicks).
 
 ```sh
 nvm use               # or: export PATH="$HOME/.nvm/versions/node/v24.22.1/bin:$PATH"
 npm install
 node node_modules/electron/install.js   # downloads the Electron binary (also done lazily on first run)
 npm run fetch:ffmpeg  # pinned, SHA-256 verified FFmpeg + ffprobe into resources/bin/
+npm run build:native  # the cs-native helper into resources/native/ (optional)
 npm run dev
 ```
 
@@ -30,10 +34,14 @@ npm run dev
 | `npm test`              | Vitest unit tests and the FFmpeg integration smoke test              |
 | `npm run test:e2e`      | builds, then runs Playwright `_electron` tests                       |
 | `npm run fetch:ffmpeg`  | downloads the pinned FFmpeg build for this platform                  |
-| `npm run gen:schema`    | regenerates `docs/schemas/project-1.schema.json` from the zod schema |
+| `npm run gen:schema`    | regenerates `docs/schemas/project-3.schema.json` from the zod schema |
+| `npm run build:native`  | builds the Rust helper `native/cs-native` and its crate notices      |
 | `npm run gen:icons`     | regenerates the app icons in `build/` from `scripts/icon-art.ts`     |
 | `npm run package:linux` | AppImage and deb in `dist/`                                          |
 | `npm run smoke:linux`   | checks the packages in `dist/` and launches each once (no install)   |
+| `npm run package:win`   | the Windows installer (NSIS) in `dist/`                              |
+| `npm run package:mac`   | dmg and zip in `dist/` (`-- --arm64` or `-- --x64`)                  |
+| `npm run smoke:package` | checks the Windows or macOS package on its own OS                    |
 | `npm run mcp`           | the MCP server for AI assistants (stdio; see below)                  |
 
 Environment switches:
@@ -43,6 +51,11 @@ Environment switches:
   development builds only.
 - `CS_FFMPEG_DIR=<dir>` uses FFmpeg binaries from another folder; development builds only.
 - `CS_TEST=1` is the end-to-end test mode; development builds only.
+- `CS_NATIVE_DIR=<dir>` loads the native helper from another folder; development builds only.
+- `CS_TEST_MAC_PERMISSIONS=<json>` describes macOS permission states to the permission guidance,
+  for tests on any OS (with `CS_TEST=1`; development builds only).
+- `CS_NATIVE_INPUT_TEST=1` lets the native-helper tests move and click the pointer: only on an X
+  server of their own (Xvfb).
 
 ## Assistants (MCP)
 
@@ -50,8 +63,8 @@ AI assistants such as Claude Code can edit and export projects in the running ap
 language ("cut the first 3 seconds and remove the long pauses, then export 720p").
 
 1. In the app, turn on **Settings → Assistants → Allow assistants to edit and export projects**.
-   This opens a socket at `<userData>/automation/automation.sock` (private to your user; off by
-   default).
+   This opens a socket at `<userData>/automation/automation.sock` (on Windows a named pipe;
+   private to your user; off by default).
 2. Connect the MCP server (`src/mcp/server.ts`, run with `tsx`). In this repository `.mcp.json`
    registers it for Claude Code; elsewhere, use the command under **Settings → Diagnostics →
    Assistants (MCP)**. Set `CS_AUTOMATION_SOCKET` when the app uses another profile

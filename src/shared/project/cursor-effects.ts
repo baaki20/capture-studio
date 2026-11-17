@@ -20,10 +20,9 @@
  * layers and below the timeline objects.
  */
 import { clicksShowingAt, positionAt, type CursorTrack, type Point } from './cursor-track';
-import { refToFileUsExact } from './media-time';
 import type { PxRect } from './objects';
 import type { Scene } from './scene';
-import type { CursorEffects, Media, Project } from './schema';
+import type { CursorEffects, CursorTrackEntry, Project } from './schema';
 
 /** Loaded cursor tracks by cursor media ID. */
 export type CursorTracks = ReadonlyMap<string, CursorTrack>;
@@ -41,13 +40,13 @@ const CURSOR_HEIGHT_AT_1080 = 24;
 const CURSOR_HEIGHT_MIN = 16;
 
 /** The cursor track recorded with `screenMediaId`, if any. */
-export function cursorMediaFor(doc: Project, screenMediaId: string): Media | undefined {
-  return doc.media.find((m) => m.kind === 'cursor' && m.cursor?.screenMediaId === screenMediaId);
+export function cursorMediaFor(doc: Project, screenMediaId: string): CursorTrackEntry | undefined {
+  return doc.cursorTracks.find((t) => t.screenMediaId === screenMediaId);
 }
 
-/** Cursor track media of a project. */
-export function cursorMedia(doc: Project): Media[] {
-  return doc.media.filter((m) => m.kind === 'cursor');
+/** The project's cursor tracks (v3, `project.cursorTracks`). */
+export function cursorMedia(doc: Project): CursorTrackEntry[] {
+  return doc.cursorTracks;
 }
 
 export interface CursorEffectsAvailability {
@@ -73,7 +72,7 @@ export function cursorEffectsAvailability(doc: Project): CursorEffectsAvailabili
           : 'This project has no cursor track (recordings made with cursor tracking have one). Manual zoom still works.';
     return { available: false, drawn: false, reason, drawnReason: reason };
   }
-  const drawn = usable.some((m) => m.cursor?.inVideo === false);
+  const drawn = usable.some((m) => !m.inVideo);
   return {
     available: true,
     drawn,
@@ -90,7 +89,7 @@ export function cursorEffectsAvailability(doc: Project): CursorEffectsAvailabili
  */
 export function effectiveCursorEffects(doc: Project): CursorEffects | null {
   if (doc.timeline.cursorEffects) return doc.timeline.cursorEffects;
-  if (!cursorMedia(doc).some((m) => m.cursor?.inVideo === false)) return null;
+  if (!cursorMedia(doc).some((m) => !m.inVideo)) return null;
   return {
     ...DEFAULT_CURSOR_EFFECTS,
     clickRings: { ...DEFAULT_CURSOR_EFFECTS.clickRings, enabled: false },
@@ -103,7 +102,7 @@ export function cursorEffectsActive(doc: Project): boolean {
   if (!effects || cursorMedia(doc).length === 0) return false;
   if (effects.clickRings.enabled || effects.highlight.enabled) return true;
   // The drawn cursor replaces the system cursor whenever the video lacks it.
-  return cursorMedia(doc).some((m) => m.cursor?.inVideo === false);
+  return cursorMedia(doc).some((m) => !m.inVideo);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -202,10 +201,11 @@ export function sceneCursorPlans(
     const screen = media.get(layer.mediaId);
     const cursorInfo = screen && cursorMediaFor(doc, screen.id);
     const track = cursorInfo && tracks.get(cursorInfo.id);
-    if (!screen?.video || !cursorInfo?.cursor || !track) continue;
-    const fileUs = refToFileUsExact(cursorInfo, layer.refTimeUs);
+    if (!screen?.video || !cursorInfo || !track) continue;
+    // Track times are session time from the recording's start: the timeline's reference time.
+    const fileUs = layer.refTimeUs;
     if (fileUs < 0 || fileUs > cursorInfo.durationUs) continue;
-    const drawn = !cursorInfo.cursor.inVideo;
+    const drawn = !cursorInfo.inVideo;
     const smoothing = drawn ? effects.smoothing : 0;
     const pos = positionAt(track, fileUs, smoothing);
     if (!pos) continue;

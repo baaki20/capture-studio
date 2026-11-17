@@ -256,18 +256,15 @@
               "camera",
               "microphone",
               "system-audio",
-              "imported",
-              "cursor"
+              "imported"
             ]
           },
           "kind": {
             "type": "string",
             "enum": [
               "video",
-              "audio",
-              "cursor"
-            ],
-            "description": "v3: cursor = a cursor track, never a clip"
+              "audio"
+            ]
           },
           "path": {
             "type": "string",
@@ -373,43 +370,6 @@
               "discontinuities"
             ]
           },
-          "cursor": {
-            "description": "v3: kind cursor only",
-            "type": "object",
-            "properties": {
-              "screenMediaId": {
-                "type": "string",
-                "pattern": "^med_[0-9A-Za-z]+$",
-                "description": "The screen video whose pixels the positions are in"
-              },
-              "inVideo": {
-                "type": "boolean",
-                "description": "The screen video shows the system cursor. Then the editor can add rings and a highlight but cannot move, resize or hide the cursor"
-              },
-              "sampleRateHz": {
-                "type": "number",
-                "exclusiveMinimum": 0,
-                "description": "Nominal position rate"
-              },
-              "samples": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              },
-              "clicks": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
-              }
-            },
-            "required": [
-              "screenMediaId",
-              "inVideo",
-              "sampleRateHz",
-              "samples",
-              "clicks"
-            ]
-          },
           "encoder": {
             "type": "object",
             "properties": {
@@ -502,6 +462,75 @@
           "startOffsetUs",
           "syncAdjustUs",
           "clockRatio"
+        ]
+      }
+    },
+    "cursorTracks": {
+      "default": [],
+      "description": "v3: cursor tracks recorded with screen media (never clips)",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^med_[0-9A-Za-z]+$"
+          },
+          "path": {
+            "type": "string",
+            "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*\\\\)(?!(?:.*\\/)?\\.{1,2}(?:\\/|$))(?!.*\\/\\/)(?!.*\\/$)[^\\u0000]+$",
+            "description": "The cursor.jsonl file"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "missing",
+              "recovered",
+              "failed"
+            ]
+          },
+          "durationUs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "Integer microseconds, ≥ 0"
+          },
+          "screenMediaId": {
+            "type": "string",
+            "pattern": "^med_[0-9A-Za-z]+$",
+            "description": "The screen video whose pixels the positions are in"
+          },
+          "inVideo": {
+            "type": "boolean",
+            "description": "The screen video shows the system cursor. Then the editor can add rings and a highlight but cannot move, resize or hide the cursor"
+          },
+          "sampleRateHz": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Nominal position rate"
+          },
+          "samples": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "clicks": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "status",
+          "durationUs",
+          "screenMediaId",
+          "inVideo",
+          "sampleRateHz",
+          "samples",
+          "clicks"
         ]
       }
     },

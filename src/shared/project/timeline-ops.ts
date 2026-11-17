@@ -1438,7 +1438,7 @@ function cursorEffectsDraft(draft: Project, effects: CursorEffects | null): void
     delete draft.timeline.cursorEffects;
     return;
   }
-  if (!draft.media.some((m) => m.kind === 'cursor')) {
+  if (draft.cursorTracks.length === 0) {
     fail('invalid-value', 'this project has no cursor track, so it cannot have cursor effects');
   }
   const { clickRings: rings, highlight } = effects;

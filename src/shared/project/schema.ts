@@ -124,8 +124,16 @@ export const MediaSyncSchema = z.object({
   ),
 });
 
-/** v3: a cursor track recorded with a screen media (`cursor-track.ts`). */
-export const CursorTrackInfoSchema = z.object({
+/**
+ * v3: a cursor track recorded with a screen media (`cursor-track.ts`). Kept in the project's own
+ * `cursorTracks` list, not in `media`: 0.2.0 refuses media of a role or kind it does not know,
+ * but drops unknown top-level keys, so it can still open a 0.3.0 project read-only (R3.24).
+ */
+export const CursorTrackSchema = z.object({
+  id: prefixedId('med'),
+  path: RelativePosixPath.describe('The cursor.jsonl file'),
+  status: z.enum(['ok', 'missing', 'recovered', 'failed']),
+  durationUs: NonNegativeUs,
   screenMediaId: prefixedId('med').describe('The screen video whose pixels the positions are in'),
   inVideo: z
     .boolean()
@@ -140,8 +148,8 @@ export const CursorTrackInfoSchema = z.object({
 
 export const MediaSchema = z.object({
   id: prefixedId('med'),
-  role: z.enum(['screen', 'camera', 'microphone', 'system-audio', 'imported', 'cursor']),
-  kind: z.enum(['video', 'audio', 'cursor']).describe('v3: cursor = a cursor track, never a clip'),
+  role: z.enum(['screen', 'camera', 'microphone', 'system-audio', 'imported']),
+  kind: z.enum(['video', 'audio']),
   path: RelativePosixPath,
   status: z.enum(['ok', 'missing', 'recovered', 'failed']),
   durationUs: NonNegativeUs.describe('File-local duration'),
@@ -167,7 +175,6 @@ export const MediaSchema = z.object({
       discontinuities: z.int().nonnegative(),
     })
     .optional(),
-  cursor: CursorTrackInfoSchema.optional().describe('v3: kind cursor only'),
   encoder: z.object({ name: z.string(), hardware: z.boolean() }).optional(),
   sync: MediaSyncSchema.optional(),
   stats: z
@@ -524,6 +531,10 @@ const projectShape = {
   createdBy: z.object({ app: z.literal('capture-studio'), version: z.string() }),
   recording: RecordingInfoSchema.nullable().describe('null for projects not created by recording'),
   media: z.array(MediaSchema),
+  cursorTracks: z
+    .array(CursorTrackSchema)
+    .default([])
+    .describe('v3: cursor tracks recorded with screen media (never clips)'),
   components: z.array(ComponentSchema),
   timeline: TimelineSchema,
   exportPrefs: ExportPrefsSchema.optional(),
@@ -570,6 +581,6 @@ export type ObjectTrack = z.infer<typeof ObjectTrackSchema>;
 export type CameraKeyframe = z.infer<typeof CameraKeyframeSchema>;
 export type Beautify = z.infer<typeof BeautifySchema>;
 export type Marker = z.infer<typeof MarkerSchema>;
-export type CursorTrackInfo = z.infer<typeof CursorTrackInfoSchema>;
+export type CursorTrackEntry = z.infer<typeof CursorTrackSchema>;
 export type CursorEffects = z.infer<typeof CursorEffectsSchema>;
 export type Project = z.infer<typeof ProjectStructureSchema>;

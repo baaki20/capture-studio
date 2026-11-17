@@ -45,6 +45,13 @@ export function windowsBuild(osRelease: string): number | null {
   return Number.isInteger(build) && build > 0 ? build : null;
 }
 
+/**
+ * Said of what is built for Windows but not yet checked on a real Windows machine (Phase 3 was
+ * built on Linux; `docs/platform-test-backlog.md`). Such capabilities are `degraded`, not
+ * `available`, until the per-OS checklist passes.
+ */
+const UNVERIFIED = 'Not yet checked on a real Windows machine.';
+
 export function detectWindowsCapabilities(input: WindowsDetectInput): CapabilityMap {
   const build = windowsBuild(input.osRelease);
   const hidesFromCapture = build !== null && build >= WINDOWS_EXCLUDE_FROM_CAPTURE_BUILD;
@@ -55,14 +62,14 @@ export function detectWindowsCapabilities(input: WindowsDetectInput): Capability
       'not-needed',
       'Windows asks no permission to capture.',
     ),
-    'capture.screen.allMonitors': available(
+    'capture.screen.allMonitors': degraded(
       'full-desktop-source',
-      'With several monitors, the source picker offers "All screens": every monitor in one picture.',
+      `With several monitors, the source picker offers "All screens". ${UNVERIFIED}`,
     ),
     'capture.window.enumerate': available('desktopCapturer'),
-    'capture.region.onScreenOverlay': available(
+    'capture.region.onScreenOverlay': degraded(
       'overlay-window',
-      'The region is drawn over the live desktop.',
+      `The region is drawn over the live desktop. ${UNVERIFIED}`,
     ),
     'capture.cursor.hide': unavailable(
       'Hiding the cursor is not verified on Windows yet.',
@@ -70,9 +77,9 @@ export function detectWindowsCapabilities(input: WindowsDetectInput): Capability
     ),
     'capture.cursor.track': cursorTrackCapability(input.nativeHelper ?? null, 'win32'),
     'capture.screenshot.silent': available('desktopCapturer'),
-    'audio.system': available(
+    'audio.system': degraded(
       'desktop-loopback',
-      'Recorded with the screen capture (Windows loopback); audio-only recordings go without it.',
+      `Recorded with the screen capture (Windows loopback); audio-only recordings go without it. ${UNVERIFIED}`,
     ),
     'audio.mic': available('getUserMedia', 'Devices are listed in the setup panel.'),
     'video.camera': available('getUserMedia', 'Devices are listed in the setup panel.'),
@@ -83,7 +90,10 @@ export function detectWindowsCapabilities(input: WindowsDetectInput): Capability
     'ui.alwaysOnTop': available('setAlwaysOnTop'),
     'ui.windowPositioning': available('setBounds'),
     'ui.excludeFromCapture': hidesFromCapture
-      ? available('setContentProtection')
+      ? degraded(
+          'minimize-controls',
+          'Windows 10 2004 and later can hide windows from captures, but this is not yet checked on a real machine; the controls minimize when recording starts.',
+        )
       : degraded(
           'minimize-controls',
           'This Windows version shows protected windows as a black box in captures; the controls minimize when recording starts.',

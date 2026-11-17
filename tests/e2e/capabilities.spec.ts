@@ -114,13 +114,16 @@ const CHECKS: Partial<Record<CapabilityKey, Check>> = {
     expect(onTop).toBe(true);
   },
   'ui.excludeFromCapture': async (app) => {
-    const ok = await app.evaluate(({ BrowserWindow }) => {
+    // The OS takes the flag; whether a capture then leaves the window out is a manual check
+    // (spike S9/S10, the per-OS checklists).
+    const protectedWindow = await app.evaluate(({ BrowserWindow }) => {
       const win = new BrowserWindow({ show: false });
       win.setContentProtection(true);
+      const result = win.isContentProtected();
       win.destroy();
-      return true;
+      return result;
     });
-    expect(ok).toBe(true);
+    expect(protectedWindow).toBe(true);
   },
   'clipboard.writeImageUnfocused': async (app) => {
     // Electron 45's clipboard: async, ClipboardItem-based (W3C style).

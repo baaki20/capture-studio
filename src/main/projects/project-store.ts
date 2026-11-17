@@ -133,6 +133,7 @@ export class ProjectStore {
     }
     const mediaUrls: Record<string, string> = {};
     for (const media of loaded.doc.media) mediaUrls[media.id] = mediaUrl(id, media.path);
+    for (const track of loaded.doc.cursorTracks) mediaUrls[track.id] = mediaUrl(id, track.path);
     return {
       doc: loaded.doc,
       revision: this.revision(id),

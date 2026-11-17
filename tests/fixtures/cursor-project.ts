@@ -8,7 +8,7 @@ import {
   type CursorEvent,
   type CursorTrack,
 } from '../../src/shared/project/cursor-track';
-import type { Media, Project } from '../../src/shared/project/schema';
+import type { CursorTrackEntry, Project } from '../../src/shared/project/schema';
 import { exampleProject } from './example-project';
 
 export const CURSOR_MEDIA_ID = 'med_k';
@@ -32,24 +32,17 @@ export function cursorTrack(events: CursorEvent[] = CURSOR_EVENTS): CursorTrack 
   return cursorTrackFromEvents(CURSOR_HEADER, events);
 }
 
-export function cursorMediaItem(inVideo: boolean): Media {
+export function cursorMediaItem(inVideo: boolean): CursorTrackEntry {
   return {
     id: CURSOR_MEDIA_ID,
-    role: 'cursor',
-    kind: 'cursor',
     path: 'media/cursor.jsonl',
     status: 'ok',
     durationUs: 738_500_000,
-    startOffsetUs: 0,
-    syncAdjustUs: 0,
-    clockRatio: 1,
-    cursor: {
-      screenMediaId: 'med_s',
-      inVideo,
-      sampleRateHz: 120,
-      samples: CURSOR_EVENTS.length,
-      clicks: 3,
-    },
+    screenMediaId: 'med_s',
+    inVideo,
+    sampleRateHz: 120,
+    samples: CURSOR_EVENTS.length,
+    clicks: 3,
   };
 }
 
@@ -66,6 +59,6 @@ export function cursorProject(options: { inVideo?: boolean } = {}): Project {
     ...doc.recording,
     platform: { ...doc.recording.platform, session: 'x11' },
   };
-  doc.media.push(cursorMediaItem(options.inVideo ?? false));
+  doc.cursorTracks.push(cursorMediaItem(options.inVideo ?? false));
   return doc;
 }

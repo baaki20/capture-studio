@@ -109,3 +109,15 @@ X11 (`tests/e2e/window-recording.spec.ts`).
 - [ ] macOS: dmg install on both architectures, Gatekeeper with an unsigned build, `.cstudio`
       document package and `.cstudiopack` open from Finder.
 - [ ] Signed builds, notarization and macOS auto-update (need the D3 certificates).
+
+## Known gaps to build later (any platform)
+
+Found by the Phase 3 verification (`verification-p3.md`); listed in the 0.3.0 release notes.
+
+- [ ] Recovery after a crash re-adds the cursor track (today it keeps video and audio only).
+- [ ] The live highlighter and the on-screen region picker with "All screens" (monitors of
+      different scales).
+- [ ] Recording without the system cursor in the picture (`capture.cursor.hide`), which the
+      editor's smoothing, size and hide need.
+- [ ] Detect a missing compositing window manager on X11 and fall back to the frozen-frame
+      picker.

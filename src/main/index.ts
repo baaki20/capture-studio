@@ -496,22 +496,22 @@ async function start(): Promise<void> {
   engineHost = new EngineHost({ router, renderer, logger: log });
   const engine = engineHost;
   const capabilityAvailable = (
-    key:
-      | 'ui.excludeFromCapture'
-      | 'audio.system'
-      | 'capture.region.onScreenOverlay'
-      | 'capture.screen.allMonitors',
+    key: 'audio.system' | 'capture.region.onScreenOverlay' | 'capture.screen.allMonitors',
   ): boolean =>
     ['available', 'degraded'].includes(
       capabilities.current()?.capabilities[key].state ?? 'unavailable',
     );
+  // Content protection only counts when fully available: `degraded` (macOS 15+, Windows before
+  // 2004) means the windows would still show in the capture, so the controls minimize instead.
+  const hidesFromCapture = (): boolean =>
+    capabilities.current()?.capabilities['ui.excludeFromCapture'].state === 'available';
   // On-screen overlays (P3 step 6): the region picker over the live desktop, the recording frame
   // and the live highlighter cover the recorded monitor; none without a display to cover.
   const overlays = new RecordingOverlays({
     router,
     renderer,
     logger: log,
-    excludeFromCapture: () => capabilityAvailable('ui.excludeFromCapture'),
+    excludeFromCapture: () => hidesFromCapture(),
     cursorPoint: () => screen.getCursorScreenPoint(),
   });
   overlaysHost = overlays;
@@ -552,11 +552,8 @@ async function start(): Promise<void> {
     renderer,
     logger: log,
     minimizeOnStart: () =>
-      shouldMinimizeOnStart(
-        settings.get().recorder.minimizeControlsOnStart,
-        capabilityAvailable('ui.excludeFromCapture'),
-      ),
-    excludeFromCapture: () => capabilityAvailable('ui.excludeFromCapture'),
+      shouldMinimizeOnStart(settings.get().recorder.minimizeControlsOnStart, hidesFromCapture()),
+    excludeFromCapture: () => hidesFromCapture(),
   });
   controlsHost = controls;
 
@@ -908,11 +905,10 @@ async function start(): Promise<void> {
     openFrameRenderer: ({ doc, spec }) => {
       const mediaUrls: Record<string, string> = {};
       for (const media of doc.media) {
-        // Cursor tracks too: the render window draws their effects (v3).
-        if (media.kind === 'video' || media.kind === 'cursor') {
-          mediaUrls[media.id] = mediaUrl(doc.id, media.path);
-        }
+        if (media.kind === 'video') mediaUrls[media.id] = mediaUrl(doc.id, media.path);
       }
+      // Cursor tracks too: the render window draws their effects (v3).
+      for (const track of doc.cursorTracks) mediaUrls[track.id] = mediaUrl(doc.id, track.path);
       return openFrameRenderer(renderer, { doc, mediaUrls, spec }, log);
     },
     checkMedia: (root, doc) => markMediaPresence(root, doc),
