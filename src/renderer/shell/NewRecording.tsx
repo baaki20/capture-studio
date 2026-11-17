@@ -7,6 +7,7 @@ import type { Settings } from '../../shared/settings/schema';
 import { Meter } from '../common/Meter';
 import { formatFps } from '../common/recorder-format';
 import styles from './NewRecording.module.css';
+import { Permissions, usePermissions } from './Permissions';
 import { useCameraPreview, useDevices, useMicMeter } from './previews';
 
 type RecState = EventPayload<'rec.state'>['state'];
@@ -82,6 +83,7 @@ export function NewRecording({ recState }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [notices, setNotices] = useState<string[]>([]);
   const devices = useDevices();
+  const [permissions, setPermissions] = usePermissions();
   const video = useRef<HTMLVideoElement>(null);
 
   const resting = RESTING.includes(recState);
@@ -181,6 +183,9 @@ export function NewRecording({ recState }: Props) {
   };
 
   const disabled = !resting || starting;
+  // macOS without Screen Recording (P3 step 3): only audio-only recordings can start.
+  const blocked =
+    config.captureMode !== 'audio-only' ? (permissions?.recordingBlocked ?? null) : null;
   const name = makeFileName(settings.namePattern, {
     now: new Date(),
     increment: settings.nameIncrement,
@@ -195,7 +200,8 @@ export function NewRecording({ recState }: Props) {
           type="button"
           className={styles.record}
           data-testid="record-button"
-          disabled={disabled}
+          disabled={disabled || blocked !== null}
+          title={blocked ?? undefined}
           onClick={() => void record()}
         >
           {starting ? 'Starting…' : 'Record'}
@@ -212,6 +218,7 @@ export function NewRecording({ recState }: Props) {
           {error}
         </p>
       ) : null}
+      <Permissions report={permissions} onReport={setPermissions} />
       {notices.length > 0 ? (
         <ul className={styles.notices} data-testid="setup-notices">
           {notices.map((text, i) => (

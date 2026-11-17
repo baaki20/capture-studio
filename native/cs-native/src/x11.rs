@@ -31,6 +31,11 @@ pub fn coordinate_space() -> &'static str {
     "physical"
 }
 
+/// No input permission to ask for here (macOS only).
+pub fn input_access(_prompt: bool) -> Option<bool> {
+    None
+}
+
 fn connect() -> Result<(RustConnection, Window), String> {
     let (conn, screen) =
         RustConnection::connect(None).map_err(|e| format!("cannot open the X display: {e}"))?;

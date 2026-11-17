@@ -402,6 +402,31 @@ export const UpdateStateSchema = z.discriminatedUnion('kind', [
 ]);
 export type UpdateStatePayload = z.infer<typeof UpdateStateSchema>;
 
+/** macOS privacy permissions the app uses (P3 step 3, `main/permissions/`). */
+export const PERMISSION_KINDS = ['screen', 'camera', 'microphone', 'inputMonitoring'] as const;
+export const PermissionKindSchema = z.enum(PERMISSION_KINDS);
+export type PermissionKind = z.infer<typeof PermissionKindSchema>;
+
+export const PermissionsReportSchema = z.object({
+  /** Only macOS asks; elsewhere `items` is empty and nothing is blocked. */
+  applies: z.boolean(),
+  items: z.array(
+    z.object({
+      kind: PermissionKindSchema,
+      status: z.enum(['granted', 'not-determined', 'denied', 'restricted', 'unknown']),
+      /** What the app uses it for, in one sentence. */
+      purpose: z.string(),
+      /** Recording cannot start without it (Screen Recording). */
+      required: z.boolean(),
+      /** macOS can show its own prompt for it now (otherwise only System Settings helps). */
+      canRequest: z.boolean(),
+    }),
+  ),
+  /** Why recording the screen cannot start, or null. */
+  recordingBlocked: z.string().nullable(),
+});
+export type PermissionsReport = z.infer<typeof PermissionsReportSchema>;
+
 // ---------------------------------------------------------------------------------------------
 // Invoke channels
 
@@ -544,6 +569,20 @@ export const INVOKE_CHANNELS = {
   'updates.check': invoke(NoPayload, UpdateStateSchema, SHELL),
   /** Restarts into a downloaded update. */
   'updates.install': invoke(NoPayload, z.object({ started: z.boolean() }), SHELL),
+  /** macOS permissions (P3 step 3), read again on every call. */
+  'perms.get': invoke(NoPayload, PermissionsReportSchema, SHELL),
+  /** Shows macOS's own prompt where there is one (camera, microphone, Input Monitoring). */
+  'perms.request': invoke(
+    z.strictObject({ kind: PermissionKindSchema }),
+    PermissionsReportSchema,
+    SHELL,
+  ),
+  /** Opens this permission's pane in System Settings. */
+  'perms.openSettings': invoke(
+    z.strictObject({ kind: PermissionKindSchema }),
+    z.object({ opened: z.boolean() }),
+    SHELL,
+  ),
   /** "Choose the screen again" (P3 step 8): the next recording asks the portal. */
   'diag.forgetScreen': invoke(NoPayload, z.object({ forgotten: z.boolean() }), SHELL),
 } as const;
@@ -603,6 +642,8 @@ export const EVENT_CHANNELS = {
   'media.cachesReady': { payload: z.object({ projectId: Id }), windows: ['shell', 'editor'] },
   'caps.changed': { payload: CapabilityReportSchema, windows: UI },
   'updates.changed': { payload: UpdateStateSchema, windows: ['shell'] },
+  /** A macOS permission changed (re-read when the app gets focus, P3 step 3). */
+  'perms.changed': { payload: PermissionsReportSchema, windows: ['shell'] },
   /** An assistant edit, undo, snapshot or frame capture for this editor (`editor-automation.ts`). */
   'automation.request': { payload: EditorAutomationRequestSchema, windows: ['editor'] },
 } as const satisfies Record<string, { payload: z.ZodType; windows: readonly WindowKind[] }>;

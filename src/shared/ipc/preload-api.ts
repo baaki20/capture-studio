@@ -21,6 +21,7 @@ import type {
   EventPayload,
   InvokeRequest,
   InvokeResponse,
+  PermissionKind,
 } from './contract';
 
 export type Unsubscribe = () => void;
@@ -111,6 +112,12 @@ export interface ShellPreloadApi extends PreloadBase {
     copyReport(): Promise<InvokeResponse<'diag.copyReport'>>;
     /** "Choose the screen again": the next recording asks the portal (P3 step 8). */
     forgetScreen(): Promise<InvokeResponse<'diag.forgetScreen'>>;
+  };
+  readonly perms: {
+    get(): Promise<InvokeResponse<'perms.get'>>;
+    request(kind: PermissionKind): Promise<InvokeResponse<'perms.request'>>;
+    openSettings(kind: PermissionKind): Promise<InvokeResponse<'perms.openSettings'>>;
+    onChanged(listener: Listener<EventPayload<'perms.changed'>>): Unsubscribe;
   };
   readonly updates: {
     status(): Promise<InvokeResponse<'updates.status'>>;

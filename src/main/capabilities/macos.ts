@@ -38,6 +38,11 @@ export interface MacPermissions {
   microphone: MacAccessStatus;
   /** `systemPreferences.isTrustedAccessibilityClient(false)`. */
   accessibility: boolean;
+  /**
+   * Input Monitoring, which the helper's listen-only click tap needs (P3 step 3): from the
+   * helper (`inputAccess`); `unknown` without it.
+   */
+  inputMonitoring?: MacAccessStatus;
 }
 
 export interface MacDetectInput {
@@ -136,7 +141,9 @@ export function detectMacCapabilities(input: MacDetectInput): CapabilityMap {
     'capture.cursor.track': cursorTrackCapability(
       input.nativeHelper ?? null,
       'macos',
-      p && !p.accessibility ? 'Clicks need Accessibility permission (System Settings).' : null,
+      p?.inputMonitoring && p.inputMonitoring !== 'granted'
+        ? 'Clicks need the Input Monitoring permission (System Settings → Privacy & Security).'
+        : null,
     ),
     'capture.screenshot.silent': screen,
     'audio.system': macSystemAudio(major, screen),

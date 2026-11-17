@@ -35,7 +35,6 @@ import { CapabilityService, defaultExec } from './capabilities/detect';
 import { systemAudioWithScreen } from './capabilities/common';
 import { estimateSinkOutputLatencyUs } from './system-audio/linux-latency';
 import { inferOzonePlatform } from './capabilities/linux';
-import { readMacPermissions } from './capabilities/mac-permissions';
 import { parseCliArgs } from './cli';
 import {
   FreeSpaceOverride,
@@ -54,6 +53,7 @@ import { registerCoreHandlers } from './ipc/core-handlers';
 import { ScreenSourceMemory, selectWithMemory } from './screen-memory';
 import { DocumentOpener, documentArgs } from './open-documents';
 import { registerUpdates } from './updates/register';
+import { createPermissions, parseFakeMacPermissions } from './permissions/register';
 import type { UpdateService } from './updates/update-service';
 import { loadNativeHelper } from './native/cs-native';
 import { createCursorTrackStarter } from './recording/cursor-track-start';
@@ -344,6 +344,24 @@ async function start(): Promise<void> {
     }),
   );
 
+  // macOS privacy permissions (P3 step 3); read again whenever a window gets focus.
+  let capabilitiesRef: CapabilityService | null = null;
+  const permissions = createPermissions({
+    platform: process.platform,
+    fake: parseFakeMacPermissions(launch.fakeMacPermissions),
+    systemPreferences,
+    helper: native.helper,
+    openExternal: (url) => shell.openExternal(url),
+    onChange: (next) => {
+      if (process.platform === 'darwin') void capabilitiesRef?.setMacPermissions(next);
+    },
+    logger: log,
+    router,
+  });
+  app.on('browser-window-focus', () => {
+    permissions.recheck();
+  });
+
   const capabilities = new CapabilityService(
     {
       platform: process.platform,
@@ -356,7 +374,7 @@ async function start(): Promise<void> {
             )
           : null,
       osRelease: os.release(),
-      macPermissions: process.platform === 'darwin' ? readMacPermissions(systemPreferences) : null,
+      macPermissions: process.platform === 'darwin' ? permissions.permissions : null,
       nativeHelper: native.helper
         ? { backend: native.helper.backend(), reason: null }
         : { backend: null, reason: native.reason },
@@ -365,6 +383,7 @@ async function start(): Promise<void> {
     },
     log,
   );
+  capabilitiesRef = capabilities;
   capabilities.onChange((report) => router.broadcast('caps.changed', report));
 
   mediaUtility = startMediaUtility(ffmpeg, log);
@@ -581,6 +600,7 @@ async function start(): Promise<void> {
     pickRegion: (source) => picker.pick(source),
     systemAudioAvailable: () => capabilityAvailable('audio.system'),
     systemAudioWithScreen: systemAudioWithScreen(process.platform),
+    recordingBlocked: () => permissions.recordingBlocked(),
     systemAudioOutputLatencyUs: () => estimateSinkOutputLatencyUs(defaultExec),
     platform,
     appVersion: app.getVersion(),

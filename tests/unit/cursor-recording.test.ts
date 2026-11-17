@@ -205,6 +205,7 @@ describe('cursor sources', () => {
       listWindows: () => [],
       foregroundWindow: () => null,
       injectPointer: () => undefined,
+      inputAccess: () => null,
     };
     const source = nativeCursorSource(helper, 120);
     const got: RawCursorSample[] = [];
@@ -239,6 +240,7 @@ describe('cursor track start', () => {
         listWindows: () => [],
         foregroundWindow: () => null,
         injectPointer: () => undefined,
+        inputAccess: () => null,
       },
       available: () => true,
       displays: () => [display],

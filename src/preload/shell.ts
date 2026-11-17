@@ -60,6 +60,12 @@ const api: ShellPreloadApi = {
     copyReport: () => invoke('diag.copyReport'),
     forgetScreen: () => invoke('diag.forgetScreen'),
   },
+  perms: {
+    get: () => invoke('perms.get'),
+    request: (kind) => invoke('perms.request', { kind }),
+    openSettings: (kind) => invoke('perms.openSettings', { kind }),
+    onChanged: (listener) => subscribe('perms.changed', listener),
+  },
   updates: {
     status: () => invoke('updates.status'),
     check: () => invoke('updates.check'),

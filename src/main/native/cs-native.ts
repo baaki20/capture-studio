@@ -37,6 +37,8 @@ export interface NativeHelper {
   listWindows(): NativeWindow[];
   foregroundWindow(): NativeWindow | null;
   injectPointer(action: 'move' | 'press' | 'release', x: number, y: number, button?: number): void;
+  /** macOS Input Monitoring (P3 step 3); with `prompt`, asks for it. Null elsewhere. */
+  inputAccess(prompt?: boolean): boolean | null;
 }
 
 export interface NativeHelperOptions {

@@ -41,10 +41,26 @@ analysis.
 - [ ] **Cursor hiding** (`capture.cursor.hide`): stays unavailable until S9/S10 show it works.
 - [ ] The **live harness** ported to Windows and macOS scenario sets (sync check W1 first).
 
+## Step 3: macOS permissions
+
+Tested here with a described Mac (`CS_TEST_MAC_PERMISSIONS`, `tests/e2e/permissions.spec.ts`).
+On a real Mac:
+
+- [ ] First launch on macOS 13, 14 and 15: Screen Recording not asked yet → the first recording
+      shows macOS's prompt; after allowing it (and the restart macOS asks for) recording works.
+- [ ] Screen Recording off: the card says so, Record is disabled (audio only still works), "Open
+      System Settings" opens Privacy & Security → Screen Recording; turning it on and coming
+      back updates the card without restarting.
+- [ ] Camera and microphone "Allow…" show macOS's prompt; a refusal leaves only System Settings.
+- [ ] Input Monitoring "Allow…" shows macOS's prompt (helper `CGRequestListenEventAccess`); after
+      a restart the cursor track has clicks.
+- [ ] After an update of an unsigned build macOS forgets the permissions (D3): the card guides
+      through granting them again.
+
 ## Step 4: native helper
 
 - [ ] Windows: cursor positions and clicks in `cursor.jsonl` line up with the video (S11).
-- [ ] macOS: same, with and without Accessibility permission (clicks need it).
+- [ ] macOS: same, with and without Input Monitoring (clicks need it; step 3 corrected this from Accessibility).
 
 ## Step 9: packages and updates
 

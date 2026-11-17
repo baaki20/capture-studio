@@ -1,8 +1,8 @@
 //! macOS backend: the pointer from `CGEventCreate` + `CGEventGetLocation` each period (global
 //! display coordinates in points, as Electron's DIPs); presses and releases from a listen-only
 //! `CGEventTap` on the cursor thread's run loop, which the loop runs for one period at a time.
-//! Creating the tap needs the Accessibility (or Input Monitoring) permission; without it the
-//! loop still records positions and reports no clicks. Windows come from
+//! A listen-only tap needs the Input Monitoring permission (`input_access`); without it the loop
+//! still records positions and reports no clicks. Windows come from
 //! `CGWindowListCopyWindowInfo` (on-screen, layer 0, front to back); their titles need the Screen
 //! Recording permission.
 
@@ -60,6 +60,8 @@ extern "C" {
     fn CGEventCreate(source: *const c_void) -> CGEventRef;
     fn CGEventGetLocation(event: CGEventRef) -> CGPoint;
     fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> CFArrayRef;
+    fn CGPreflightListenEventAccess() -> bool;
+    fn CGRequestListenEventAccess() -> bool;
     fn CGRectMakeWithDictionaryRepresentation(dict: CFDictionaryRef, rect: *mut CGRect) -> bool;
 }
 
@@ -102,6 +104,18 @@ pub fn backend() -> &'static str {
 
 pub fn coordinate_space() -> &'static str {
     "dip"
+}
+
+/// Input Monitoring (macOS 10.15+), which listen-only taps need. With `prompt`, macOS asks the
+/// user the first time and lists the app in System Settings; the answer applies after a restart.
+pub fn input_access(prompt: bool) -> Option<bool> {
+    Some(unsafe {
+        if prompt {
+            CGRequestListenEventAccess()
+        } else {
+            CGPreflightListenEventAccess()
+        }
+    })
 }
 
 extern "C" fn on_tap(_proxy: *mut c_void, kind: u32, event: CGEventRef, _info: *mut c_void) -> CGEventRef {

@@ -28,6 +28,7 @@ describe('readLaunchEnv (S-1)', () => {
       harnessSocket: null,
       // The XWayland escape hatch is for users, so it stays.
       forceX11: true,
+      fakeMacPermissions: null,
     });
   });
 
@@ -39,12 +40,22 @@ describe('readLaunchEnv (S-1)', () => {
       metricsIntervalMs: 500,
       harnessSocket: '/tmp/harness.sock',
       forceX11: true,
+      fakeMacPermissions: null,
     });
     expect(readLaunchEnv({}, false, SOCKET)).toMatchObject({
       rendererUrl: null,
       testMode: false,
       forceX11: false,
     });
+  });
+
+  it('takes a described Mac only in test mode of an unpackaged build (P3 step 3)', () => {
+    const mac = { CS_TEST_MAC_PERMISSIONS: '{"screen":"denied"}' };
+    expect(readLaunchEnv({ ...DEV_ENV, ...mac }, false, SOCKET).fakeMacPermissions).toBe(
+      '{"screen":"denied"}',
+    );
+    expect(readLaunchEnv(mac, false, SOCKET).fakeMacPermissions).toBeNull();
+    expect(readLaunchEnv({ ...DEV_ENV, ...mac }, true, SOCKET).fakeMacPermissions).toBeNull();
   });
 
   it('accepts only a loopback http(s) dev server', () => {

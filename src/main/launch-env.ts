@@ -17,6 +17,7 @@ export const DEV_ONLY_ENV = [
   'CS_USER_DATA_DIR',
   'CS_METRICS_INTERVAL_MS',
   'CS_FFMPEG_DIR',
+  'CS_TEST_MAC_PERMISSIONS',
 ] as const;
 
 export interface LaunchEnv {
@@ -32,6 +33,8 @@ export interface LaunchEnv {
   harnessSocket: string | null;
   /** Run on XWayland instead of native Wayland. */
   forceX11: boolean;
+  /** Test mode only: macOS permission states to pretend (`CS_TEST_MAC_PERMISSIONS`, P3 step 3). */
+  fakeMacPermissions: string | null;
 }
 
 /** Only a loopback http(s) dev server is accepted, even in development. */
@@ -65,6 +68,7 @@ export function readLaunchEnv(
       metricsIntervalMs: null,
       harnessSocket: null,
       forceX11,
+      fakeMacPermissions: null,
     };
   }
   const interval = Number(env.CS_METRICS_INTERVAL_MS);
@@ -75,6 +79,7 @@ export function readLaunchEnv(
     metricsIntervalMs: Number.isFinite(interval) && interval > 0 ? interval : null,
     harnessSocket: nonEmpty(env[harnessSocketEnv]),
     forceX11,
+    fakeMacPermissions: env.CS_TEST === '1' ? nonEmpty(env.CS_TEST_MAC_PERMISSIONS) : null,
   };
 }
 

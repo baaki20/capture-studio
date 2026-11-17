@@ -13,6 +13,11 @@ pub fn coordinate_space() -> &'static str {
     "physical"
 }
 
+/// No input permission to ask for here (macOS only).
+pub fn input_access(_prompt: bool) -> Option<bool> {
+    None
+}
+
 pub fn run_cursor(
     _stop: &AtomicBool,
     _period: Duration,

@@ -273,6 +273,11 @@ export interface SessionManagerDeps {
    * by the engine) instead of `pw-record` in the utility (Linux). It then needs a screen.
    */
   systemAudioWithScreen?: boolean;
+  /**
+   * P3 step 3: why recording the screen cannot start (macOS Screen Recording denied), or null.
+   * Audio-only recordings are not affected.
+   */
+  recordingBlocked?: () => string | null;
   /** Output latency of the default sink in µs (system audio is shifted by it). */
   systemAudioOutputLatencyUs?: () => Promise<number>;
   platform: () => RecordingInfo['platform'];
@@ -531,6 +536,11 @@ export class SessionManager {
       const text = 'Audio only needs a microphone or system audio.';
       await this.failAndSettle(text);
       return { status: 'failed', message: text };
+    }
+    const blocked = audioOnly ? null : (this.deps.recordingBlocked?.() ?? null);
+    if (blocked) {
+      await this.failAndSettle(blocked);
+      return { status: 'failed', message: blocked };
     }
     try {
       engine = await this.deps.engine();

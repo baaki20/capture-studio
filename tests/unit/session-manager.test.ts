@@ -368,6 +368,7 @@ function harness(
     systemAudio?: boolean;
     /** P3 step 2: Windows/macOS, system audio comes with the screen capture. */
     systemAudioWithScreen?: boolean;
+    recordingBlocked?: SessionManagerDeps['recordingBlocked'];
     countdownTickMs?: number;
     pickRegion?: SessionManagerDeps['pickRegion'];
     selectScreen?: SessionManagerDeps['selectScreen'];
@@ -443,6 +444,7 @@ function harness(
     ...(options.startCursorTrack ? { startCursorTrack: options.startCursorTrack } : {}),
     systemAudioAvailable: () => options.systemAudio ?? true,
     ...(options.systemAudioWithScreen ? { systemAudioWithScreen: true } : {}),
+    ...(options.recordingBlocked ? { recordingBlocked: options.recordingBlocked } : {}),
     systemAudioOutputLatencyUs: () => Promise.resolve(42_000),
     platform: () => ({
       os: 'linux',
@@ -1406,5 +1408,38 @@ describe('system audio with the screen capture (P3 step 2, Windows and macOS)', 
     await h.manager.configure({ ...CONFIG, captureMode: 'audio-only', micId: null });
     const result = await h.manager.record();
     expect(result.status).toBe('failed');
+  });
+});
+
+describe('macOS Screen Recording permission (P3 step 3)', () => {
+  it('refuses to record the screen while it is off, with the reason, and asks nothing', async () => {
+    let asked = 0;
+    const h = harness({
+      recordingBlocked: () => 'Screen Recording is off for Capture Studio.',
+      selectScreen: () => {
+        asked += 1;
+        return Promise.resolve(null);
+      },
+    });
+    await h.manager.configure(CONFIG);
+    const result = await h.manager.record();
+    expect(result).toEqual({
+      status: 'failed',
+      message: 'Screen Recording is off for Capture Studio.',
+    });
+    expect(asked).toBe(0);
+    expect(h.engine.count('engine.acquire')).toBe(0);
+  });
+
+  it('still records audio only', async () => {
+    const h = harness({ recordingBlocked: () => 'Screen Recording is off for Capture Studio.' });
+    h.engine.respond['engine.acquire'] = () => ({
+      status: 'ready',
+      screen: null,
+      camera: null,
+      mic: { label: 'Built-in Mic', sampleRate: 48_000, channels: 1 },
+    });
+    await startRecording(h, { ...CONFIG, captureMode: 'audio-only' });
+    await h.manager.abort();
   });
 });

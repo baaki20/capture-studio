@@ -101,3 +101,25 @@
   padding-left: var(--space-3);
   color: #f08c00;
 }
+
+.permissionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.permissionList li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.permissionActions {
+  display: flex;
+  gap: var(--space-1);
+}

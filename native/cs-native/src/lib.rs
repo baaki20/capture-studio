@@ -128,6 +128,13 @@ pub fn coordinate_space() -> String {
     platform::coordinate_space().to_string()
 }
 
+/// macOS: whether Input Monitoring is granted (clicks need it); with `prompt`, asks for it.
+/// Null where there is no such permission.
+#[napi]
+pub fn input_access(prompt: Option<bool>) -> Option<bool> {
+    platform::input_access(prompt.unwrap_or(false))
+}
+
 /// The helper's clock, the one cursor samples are stamped with.
 #[napi]
 pub fn monotonic_us() -> f64 {

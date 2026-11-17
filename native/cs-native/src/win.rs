@@ -36,6 +36,11 @@ pub fn coordinate_space() -> &'static str {
     "physical"
 }
 
+/// No input permission to ask for here (macOS only).
+pub fn input_access(_prompt: bool) -> Option<bool> {
+    None
+}
+
 unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
         let info = &*(lparam.0 as *const MSLLHOOKSTRUCT);
