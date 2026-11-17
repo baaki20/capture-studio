@@ -134,6 +134,9 @@ jobs:
       # specs run on Windows (macOS runners cannot grant Screen Recording; see tests/e2e/platform.ts).
       - name: E2E tests
         run: npm run test:e2e
+        env:
+          # The Intel macOS runner has no GPU, so no WebGL2 (tests/e2e/platform.ts).
+          CS_E2E_NO_WEBGL: ${{ matrix.runner == 'macos-15-intel' && '1' || '' }}
 
       - name: Upload E2E results
         if: failure()

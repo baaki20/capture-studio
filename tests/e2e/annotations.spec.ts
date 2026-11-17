@@ -18,7 +18,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import type { Picture } from '../sync/image';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG_DIR, FIXTURES } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath, recordConsole, SOFTWARE_GL_ARGS } from './platform';
+import { HAS_WEBGL, controlSocketPath, recordConsole, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -60,7 +60,7 @@ function whiteIn(p: Picture, r: { x: number; y: number; width: number; height: n
   return n;
 }
 
-test.skip(!HAS_DISPLAY, 'needs a display');
+test.skip(!HAS_WEBGL, 'needs a display with WebGL2');
 
 test('add, retype, drag, pixelate, delete and undo annotations (R2.5–R2.8)', async () => {
   test.setTimeout(180_000);

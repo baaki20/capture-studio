@@ -122,5 +122,5 @@ Found by the Phase 3 verification (`verification-p3.md`); listed in the 0.3.0 re
 - [ ] Detect a missing compositing window manager on X11 and fall back to the frozen-frame
       picker.
 - [ ] Software WebGL fallback in the app itself on machines without a usable GPU (macOS VMs show
-      "WebGL2 is not available" and the editor preview cannot draw; the tests pass
-      `--use-angle=swiftshader` there).
+      "WebGL2 is not available" and the editor preview cannot draw; ANGLE's SwiftShader broke
+      the Apple-silicon runner, so the Intel runner skips the WebGL specs, `CS_E2E_NO_WEBGL`).

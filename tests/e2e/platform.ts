@@ -57,14 +57,15 @@ export function recordConsole(app: ElectronApplication): { attach: () => Promise
   };
 }
 
+/** Software WebGL for runners without a GPU (Xvfb); macOS uses its own GPU path. */
+export const SOFTWARE_GL_ARGS: readonly string[] = ['--enable-unsafe-swiftshader'];
+
 /**
- * Software WebGL for runners without a GPU (Xvfb, the macOS VMs). On macOS Chromium's ANGLE
- * uses Metal unless told to use SwiftShader; without it WebGL2 is missing there.
+ * The editor preview and frame-render export need WebGL2. GitHub's Intel macOS runner has no
+ * GPU and Chromium gives no WebGL2 there (ANGLE's SwiftShader made the Apple-silicon runner fail
+ * too), so CI sets `CS_E2E_NO_WEBGL=1` on it; those specs run on the Apple-silicon runner.
  */
-export const SOFTWARE_GL_ARGS: readonly string[] = [
-  '--enable-unsafe-swiftshader',
-  ...(process.platform === 'darwin' ? ['--use-angle=swiftshader'] : []),
-];
+export const HAS_WEBGL = HAS_DISPLAY && process.env.CS_E2E_NO_WEBGL !== '1';
 
 /**
  * Extra pixels a parity region may be off where the GPU path differs from Linux's SwiftShader

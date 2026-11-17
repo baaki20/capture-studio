@@ -452,6 +452,27 @@ describe('system-audio ingest (synthetic PCM instead of pw-record)', () => {
 });
 
 describe('MediaService (dispatcher)', () => {
+  it('runs a job sent while init is still checking FFmpeg (a project opened at once)', async () => {
+    const events: MediaUtilityEvent[] = [];
+    const service = new MediaService({
+      emit: (e) => events.push(MediaUtilityEventSchema.parse(e)),
+    });
+    try {
+      // Not awaited: main sends both at once; the job must wait for init, not fail.
+      const init = service.handle({
+        type: 'init',
+        ffmpegPath: ffmpeg.ffmpeg,
+        ffprobePath: ffmpeg.ffprobe,
+      });
+      const job = service.handle({ type: 'job', jobId: 'soon', job: { kind: 'encoders.probe' } });
+      await Promise.all([init, job]);
+      expect(events.some((e) => e.type === 'job.error' && e.jobId === 'soon')).toBe(false);
+      expect(events.find((e) => e.type === 'job.done' && e.jobId === 'soon')).toBeDefined();
+    } finally {
+      await service.shutdown();
+    }
+  }, 120_000);
+
   it('initializes, runs jobs, and rejects malformed requests', async () => {
     const events: MediaUtilityEvent[] = [];
     const service = new MediaService({

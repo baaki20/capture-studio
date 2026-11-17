@@ -23,7 +23,7 @@ import { createDefaultSettings } from '../../src/shared/settings/schema';
 import { buildRecordedProject } from '../fixtures/recorded-media';
 import { ChannelClient } from '../wayland/lib/channel-client';
 import { FFMPEG, FFMPEG_DIR, FPS } from './parity/fixtures';
-import { HAS_DISPLAY, controlSocketPath, SOFTWARE_GL_ARGS } from './platform';
+import { HAS_DISPLAY, HAS_WEBGL, controlSocketPath, SOFTWARE_GL_ARGS } from './platform';
 
 const ROOT = path.join(import.meta.dirname, '../..');
 const MAIN = path.join(ROOT, 'out/main/index.js');
@@ -106,6 +106,7 @@ const docOf = async (page: Page) => (await page.evaluate(() => window.csEditorDe
 test.skip(!HAS_DISPLAY, 'needs a display');
 
 test('import a picture and add a take (R2.21, R2.22)', async () => {
+  test.skip(!HAS_WEBGL, 'needs WebGL2 (the preview draws the frame)');
   test.setTimeout(180_000);
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-media-'));
   const projects = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-media-projects-'));
@@ -227,6 +228,7 @@ test('a 4K recording gets a 720p proxy that the preview plays (acceptance g)', a
 });
 
 test('export dialog: Small GIF preset and Save frame as PNG (R2.24–R2.26)', async () => {
+  test.skip(!HAS_WEBGL, 'needs WebGL2 (the preview draws the frame)');
   test.setTimeout(180_000);
   const userData = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-formats-'));
   const projects = mkdtempSync(path.join(os.tmpdir(), 'cs-e2e-formats-projects-'));

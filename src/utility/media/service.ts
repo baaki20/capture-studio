@@ -54,6 +54,11 @@ export class MediaService {
   private readonly systems = new Map<string, PcmIngest>();
   private monitor: SystemAudioMonitor | null = null;
   private readonly jobs = new Map<string, AbortController>();
+  /**
+   * The `init` in progress. Requests are handled concurrently, so a job sent right after `init`
+   * (a project opened at once on a slow start) waits for it instead of failing.
+   */
+  private initializing: Promise<void> | null = null;
   private readonly statsTimer: ReturnType<typeof setInterval>;
   private readonly logger: Logger;
   private readonly nowUs: () => number;
@@ -76,21 +81,29 @@ export class MediaService {
     const request = parsed.data;
     switch (request.type) {
       case 'init': {
-        const version = await probeFfmpegVersion(request.ffmpegPath);
-        this.ffmpeg = {
-          ffmpegPath: request.ffmpegPath,
-          ffprobePath: request.ffprobePath,
-          version: version.ok ? version.value : null,
-        };
-        this.emit(
-          version.ok
-            ? {
-                type: 'ready',
-                ffmpegVersion: version.value.version,
-                error: ffmpegTooOldError(version.value),
-              }
-            : { type: 'ready', ffmpegVersion: null, error: version.error.message },
-        );
+        const init = (async () => {
+          const version = await probeFfmpegVersion(request.ffmpegPath);
+          this.ffmpeg = {
+            ffmpegPath: request.ffmpegPath,
+            ffprobePath: request.ffprobePath,
+            version: version.ok ? version.value : null,
+          };
+          this.emit(
+            version.ok
+              ? {
+                  type: 'ready',
+                  ffmpegVersion: version.value.version,
+                  error: ffmpegTooOldError(version.value),
+                }
+              : { type: 'ready', ffmpegVersion: null, error: version.error.message },
+          );
+        })();
+        this.initializing = init;
+        try {
+          await init;
+        } finally {
+          if (this.initializing === init) this.initializing = null;
+        }
         break;
       }
       case 'ping':
@@ -224,6 +237,7 @@ export class MediaService {
     dir: string,
     command: { file: string; args: string[] } | undefined,
   ): Promise<void> {
+    await this.initializing;
     if (!this.ffmpeg) {
       this.emit({ type: 'system.error', captureId, message: 'FFmpeg is not available' });
       return;
@@ -255,6 +269,7 @@ export class MediaService {
       this.emit({ type: 'job.error', jobId, message: 'job id already running', cancelled: false });
       return;
     }
+    await this.initializing;
     const ffmpeg = this.ffmpeg;
     if (!ffmpeg) {
       port?.close();

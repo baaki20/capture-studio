@@ -43,7 +43,7 @@ import {
   type ParityFixture,
 } from './parity/fixtures';
 import {
-  HAS_DISPLAY,
+  HAS_WEBGL,
   controlSocketPath,
   recordConsole,
   PARITY_REGION_SLACK_PX,
@@ -245,7 +245,7 @@ const SELECTED = ONLY.length
   ? FIXTURES.filter((f) => ONLY.some((o) => f.name.includes(o)))
   : FIXTURES;
 
-test.skip(!HAS_DISPLAY, 'needs a display');
+test.skip(!HAS_WEBGL, 'needs a display with WebGL2');
 
 test('preview and frame-render export agree for every parity fixture (R1.48, P2 a)', async () => {
   test.setTimeout(120_000 * SELECTED.length);
