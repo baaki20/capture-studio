@@ -7,7 +7,7 @@
  * analyzes the recorded projects and prints PASS/FAIL with numbers. Reports go to
  * `docs/verification/wayland-<date>-<time>.{json,md}`.
  *
- * Scenarios: R1.20 (no human), W1–W7, W9–W14 by default; W8 (30 min), G (4K preview, ~10 min)
+ * Scenarios: R1.20 (no human), W1–W7, W9–W15 by default; W8 (30 min), G (4K preview, ~10 min)
  * and soak (60 min) only when named (`npm run test:soak` runs the soak). Options:
  *   --dry-run            X11 test mode, fake camera/mic, no portal, no human (proves the harness)
  *   --yes                answer every prompt automatically (implied by --dry-run)
@@ -46,6 +46,7 @@ import { soak, w8 } from './scenarios/w8-soak';
 import { w9, w10 } from './scenarios/w9-w10';
 import { w11, w12, w13, w14 } from './scenarios/w11-w14';
 import { g } from './scenarios/g-proxy';
+import { w15 } from './scenarios/w15-screen-reuse';
 
 const SCENARIOS: Scenario[] = [
   finalize,
@@ -63,6 +64,7 @@ const SCENARIOS: Scenario[] = [
   w12,
   w13,
   w14,
+  w15,
   g,
   soak,
 ];

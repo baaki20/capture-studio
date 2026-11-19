@@ -1,0 +1,154 @@
+{
+  "kind": "capture-studio-wayland-verification",
+  "version": 1,
+  "mode": "real",
+  "startedAt": "2026-11-19T13:15:11.858Z",
+  "finishedAt": "2026-11-19T13:17:05.574Z",
+  "machine": {
+    "session": "wayland",
+    "desktop": "ubuntu:GNOME",
+    "electron": "45.0.0",
+    "node": "v22.23.2",
+    "git": "204943e (phase3, uncommitted changes)"
+  },
+  "scenarios": [
+    {
+      "id": "W15",
+      "title": "The shared screen is reused within an app run",
+      "requirements": ["R3.19"],
+      "humanActions": [
+        "3 portal clicks",
+        "1 click on the top-bar sharing indicator → Stop sharing",
+        "3 yes/no questions"
+      ],
+      "status": "pass",
+      "checks": [
+        {
+          "requirement": "R3.19",
+          "name": "first recording: the portal is asked",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "sharing indicator between recordings (human)",
+          "status": "info",
+          "value": "shown"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "second recording starts",
+          "status": "pass",
+          "value": "recording"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "second recording: the remembered screen is reused, the portal not asked",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "second recording: the reused screen was not stale",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "no sharing dialog for the second recording (human)",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "\"Choose the screen again\" forgets it",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "after \"Choose the screen again\": the portal is asked",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "stopping the share in GNOME forgets the screen",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "after GNOME stopped the share: the portal is asked",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "project.json validates against schema v1",
+          "status": "pass"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "recording.state is \"complete\"",
+          "status": "pass",
+          "value": "complete"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "every media file exists and probes",
+          "status": "pass",
+          "value": "1/1"
+        },
+        {
+          "requirement": "R3.19",
+          "name": "sharing indicator after the last recording (human)",
+          "status": "info",
+          "value": "not shown"
+        }
+      ],
+      "notes": [],
+      "projects": [
+        "~/.cache/capture-studio-harness/runs/20261119-131511/projects/Lesson 2026-11-19 13-15.cstudio",
+        "~/.cache/capture-studio-harness/runs/20261119-131511/projects/Lesson 2026-11-19 13-16.cstudio",
+        "~/.cache/capture-studio-harness/runs/20261119-131511/projects/Lesson 2026-11-19 13-16 (2).cstudio",
+        "~/.cache/capture-studio-harness/runs/20261119-131511/projects/Lesson 2026-11-19 13-16 (3).cstudio"
+      ],
+      "startedAt": "2026-11-19T13:15:32.980Z",
+      "durationS": 92.594
+    }
+  ],
+  "totals": {
+    "pass": 1,
+    "fail": 0,
+    "error": 0,
+    "not-testable": 0,
+    "info": 0
+  }
+}

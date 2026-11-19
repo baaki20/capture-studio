@@ -20,7 +20,7 @@ export class ScreenSourceMemory {
   private kept: { kind: ScreenKind; source: ScreenSource } | null = null;
   private readonly listeners = new Set<() => void>();
 
-  constructor(private readonly logger: Logger) {}
+  constructor(readonly logger: Logger) {}
 
   /** The remembered source for `kind`, marked as reused; null when there is none. */
   get(kind: ScreenKind): ScreenSource | null {
@@ -66,7 +66,11 @@ export async function selectWithMemory(
   select: (kind: ScreenKind) => Promise<ScreenSource | null>,
 ): Promise<ScreenSource | null> {
   const kept = memory.get(kind);
-  if (kept) return kept;
+  if (kept) {
+    memory.logger.info(`recording: reusing the shared ${kind}`);
+    return kept;
+  }
+  memory.logger.info(`recording: asking the portal for a ${kind}`);
   const source = await select(kind);
   if (source) memory.remember(kind, source);
   return source;
