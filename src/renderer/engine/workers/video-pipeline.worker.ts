@@ -12,9 +12,9 @@
  * A still screen sends no frames on Wayland, and a fragment is only written when the next frame
  * arrives, so a crash during a still stretch would lose it. When nothing has arrived for
  * `REPEAT_AFTER_US`, the last frame is encoded again to keep fragments closing (R1.21). The
- * Uneven sources also make fragments run long: when a keyframe falls due before the next check,
- * the next frame is made one, and if none has come for `KEY_REPEAT_AFTER_US` the last frame is
- * repeated as that keyframe, so fragments stay within the 1 s interval (R1.13). The
+ * Uneven sources also make fragments run long, so screen keyframes fall due early and
+ * the last frame is repeated as soon as a repeat would reach that time: fragments stay within the
+ * 1 s interval (R1.13, `stillRepeatAt`). The
  * screen pipeline draws each frame into its own canvas for that: holding the captured frame
  * itself would keep a capture buffer from the source's small pool and starve it (seen on the
  * camera: 28 → 12 fps). The camera never goes still, so it keeps nothing.
@@ -24,7 +24,12 @@ import { clampCrop, letterboxRect } from '../../../shared/recording/region';
 import { FrameRateMeter } from '../encoder-select';
 import { PauseSchedule } from '../pipeline/pause-gate';
 import { sessionNowUs } from '../pipeline/clock';
-import { KeyframeCadence, shouldDropForBackpressure } from '../pipeline/video-policy';
+import {
+  KEYFRAME_INTERVAL_US,
+  KeyframeCadence,
+  shouldDropForBackpressure,
+  stillRepeatAt,
+} from '../pipeline/video-policy';
 import type { VideoInit, WorkerResult } from '../protocol';
 import { StreamMuxer } from './muxer';
 import { describe, PipelineBase, servePipeline } from './pipeline-base';
@@ -34,10 +39,10 @@ const REPEAT_AFTER_US = 600_000;
 /** Repeats stay this far behind the clock, so the next real frame still sorts after them. */
 const REPEAT_LAG_US = 100_000;
 const REPEAT_CHECK_MS = 100;
-/** A keyframe falls due before the next check: within this much file time. */
-const KEY_LOOKAHEAD_US = REPEAT_CHECK_MS * 1000;
-/** With a keyframe due, repeat the last frame once nothing has arrived for this long. */
-const KEY_REPEAT_AFTER_US = REPEAT_LAG_US + 50_000;
+/** A repeat made as a due keyframe stays only this far behind (R1.13). */
+const KEY_REPEAT_LAG_US = 30_000;
+/** Screen keyframes fall due this much early: the check period, the key lag and timer lateness. */
+const SCREEN_KEY_EARLY_US = 200_000;
 
 class VideoPipeline extends PipelineBase<VideoFrame> {
   protected readonly muxer: StreamMuxer;
@@ -58,7 +63,12 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   constructor(private readonly video: VideoInit) {
     super(video, video.fps);
     this.frameDurationUs = Math.round(1_000_000 / video.fps);
-    this.cadence = new KeyframeCadence(this.frameDurationUs);
+    // Screen keyframes fall due early for the repeat timer (the camera never goes still).
+    this.cadence = new KeyframeCadence(
+      this.frameDurationUs,
+      KEYFRAME_INTERVAL_US,
+      video.kind === 'screen' ? SCREEN_KEY_EARLY_US : 0,
+    );
     this.muxer = new StreamMuxer(this.forwarder, { media: 'video', family: video.family });
     this.encoder = new VideoEncoder({
       output: (chunk, meta) => {
@@ -177,8 +187,8 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
   }
 
   /**
-   * Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`, or for
-   * `KEY_REPEAT_AFTER_US` with a keyframe due; with a keyframe due soon, the next frame is one.
+   * Encodes the last frame again when the source has been still for `REPEAT_AFTER_US`, or as
+   * soon as the repeat reaches the keyframe due time (`stillRepeatAt`).
    */
   private repeatLast(): void {
     const last = this.last;
@@ -188,19 +198,23 @@ class VideoPipeline extends PipelineBase<VideoFrame> {
     // The repeat lands `REPEAT_LAG_US` back, which must not fall inside a pause either.
     const pausedAt = (us: number) => this.pauses.isPaused(us);
     if (pausedAt(nowUs) || pausedAt(nowUs - REPEAT_LAG_US)) return;
-    const stillForUs = nowUs - last.arrivalUs;
-    const dueAt = this.cadence.dueAtUs();
-    const keyDue = dueAt !== null && last.fileUs + stillForUs + KEY_LOOKAHEAD_US >= dueAt;
-    if (keyDue) this.cadence.forceNext();
-    if (stillForUs < (keyDue ? KEY_REPEAT_AFTER_US : REPEAT_AFTER_US)) return;
+    const fileUs = stillRepeatAt({
+      lastFileUs: last.fileUs,
+      stillForUs: nowUs - last.arrivalUs,
+      dueAtUs: this.cadence.dueAtUs(),
+      lastEncodedUs: this.lastFileUs,
+      lagUs: REPEAT_LAG_US,
+      keyLagUs: KEY_REPEAT_LAG_US,
+      repeatAfterUs: REPEAT_AFTER_US,
+    });
+    if (fileUs === null) return;
     if (shouldDropForBackpressure(this.encoder.encodeQueueSize, this.video.fps)) return;
-    const fileUs = last.fileUs + (nowUs - last.arrivalUs) - REPEAT_LAG_US;
-    if (fileUs <= this.lastFileUs) return;
     let repeat: VideoFrame | null = null;
     try {
       repeat = new VideoFrame(still.canvas, { timestamp: fileUs, duration: this.frameDurationUs });
       this.encode(repeat, fileUs);
-      last.fileUs = fileUs + REPEAT_LAG_US;
+      // As if a frame had arrived now at the clock's file time.
+      last.fileUs = last.fileUs + (nowUs - last.arrivalUs);
       last.arrivalUs = nowUs;
     } catch (error) {
       this.fail(`repeat failed: ${describe(error)}`);

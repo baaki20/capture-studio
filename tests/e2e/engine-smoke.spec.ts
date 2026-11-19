@@ -297,7 +297,7 @@ test('the engine records screen, camera and mic into fragmented MP4 files', asyn
             sync?: { mode: string };
             checkpoints: unknown[];
           }[];
-          pauses: unknown[];
+          pauses: { startUs: number; endUs: number }[];
         };
       };
       stats: number;
@@ -329,16 +329,26 @@ test('the engine records screen, camera and mic into fragmented MP4 files', asyn
       const probe = ffprobe(path.join(dir, `${kind}.rec.mp4`));
       expect(probe.streams.map((s) => s.codec_type)).toEqual(['video']);
       expect(probe.streams[0]?.codec_name).toMatch(/h264|vp9|av1|vp8/);
-      // Keyframes at most 1 s apart (fragments start on keyframes, R1.13).
+      // Keyframes at most 1 s of recording apart (fragments start on keyframes, R1.13). File time
+      // runs on through a pause, which has no frames, so the paused part of a gap does not count.
       const keys = probe.packets
         .filter((p) => p.flags.startsWith('K'))
         .map((p) => Number(p.pts_time))
         .sort((a, b) => a - b);
       expect(keys.length).toBeGreaterThan(1);
+      const fileZeroUs = ok.start.value.t0Us + (byKind.get(kind)?.startOffsetUs ?? 0);
+      const pausedS = (from: number, to: number) =>
+        ok.stop.value.pauses.reduce((sum, p) => {
+          const start = (p.startUs - fileZeroUs) / 1e6;
+          const end = (p.endUs - fileZeroUs) / 1e6;
+          return sum + Math.max(0, Math.min(to, end) - Math.max(from, start));
+        }, 0);
       for (let i = 1; i < keys.length; i += 1) {
+        const from = keys[i - 1] ?? 0;
+        const to = keys[i] ?? 0;
         expect(
-          (keys[i] ?? 0) - (keys[i - 1] ?? 0),
-          `${kind} keyframes at ${keys.map((k) => k.toFixed(3)).join(', ')} s`,
+          to - from - pausedS(from, to),
+          `${kind} keyframes at ${keys.map((k) => k.toFixed(3)).join(', ')} s, paused ${pausedS(from, to).toFixed(3)} s between`,
         ).toBeLessThanOrEqual(1.05);
       }
     }

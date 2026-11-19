@@ -19,6 +19,7 @@ import {
   KEYFRAME_INTERVAL_US,
   KeyframeCadence,
   shouldDropForBackpressure,
+  stillRepeatAt,
 } from '../../src/renderer/engine/pipeline/video-policy';
 import {
   buildVideoConfig,
@@ -140,18 +141,86 @@ describe('video policies', () => {
     expect(cadence.next(1_600_000)).toBe(true);
   });
 
+  /**
+   * The screen worker over a source that sends frames only on change: real frames at
+   * `frameTimes` (file time = arrival), a repeat check every 100 ms (+ `jitterUs` late), as the
+   * worker sets it up. Returns the gaps between keyframes.
+   */
+  function unevenKeyGaps(frameTimes: number[], endUs: number, jitterUs: (i: number) => number) {
+    const lagUs = 100_000;
+    const cadence = new KeyframeCadence(33_333, KEYFRAME_INTERVAL_US, 200_000);
+    const keys: number[] = [];
+    let last: { fileUs: number; arrivalUs: number } | null = null;
+    let lastEncodedUs = -1;
+    const encode = (fileUs: number) => {
+      if (cadence.next(fileUs)) keys.push(fileUs);
+      lastEncodedUs = fileUs;
+    };
+    const events = [
+      ...frameTimes.map((t) => ({ t, frame: true })),
+      ...Array.from({ length: Math.floor(endUs / 100_000) }, (_, i) => ({
+        t: (i + 1) * 100_000 + jitterUs(i),
+        frame: false,
+      })),
+    ].sort((a, b) => a.t - b.t);
+    for (const { t, frame } of events) {
+      if (frame) {
+        const fileUs = Math.max(t, lastEncodedUs + 1);
+        encode(fileUs);
+        last = { fileUs, arrivalUs: t };
+        continue;
+      }
+      if (!last) continue;
+      const fileUs = stillRepeatAt({
+        lastFileUs: last.fileUs,
+        stillForUs: t - last.arrivalUs,
+        dueAtUs: cadence.dueAtUs(),
+        lastEncodedUs,
+        lagUs,
+        keyLagUs: 30_000,
+        repeatAfterUs: 600_000,
+      });
+      if (fileUs === null) continue;
+      encode(fileUs);
+      last = { fileUs: last.fileUs + (t - last.arrivalUs), arrivalUs: t };
+    }
+    return keys.slice(1).map((k, i) => k - (keys[i] ?? 0));
+  }
+
   it('keeps fragments within 1 s when frames come unevenly (R1.13, Windows and Wayland)', () => {
-    const cadence = new KeyframeCadence(33_333);
-    expect(cadence.dueAtUs()).toBeNull();
-    cadence.next(0);
-    expect(cadence.dueAtUs()).toBe(966_667);
-    // Frames 150 ms apart: without help the first frame past the due time is at 1.05 s.
-    expect(cadence.next(900_000)).toBe(false);
-    // The worker sees the key falls due before its next check and forces the next frame.
-    cadence.forceNext();
-    expect(cadence.next(950_000)).toBe(true);
-    expect(cadence.next(1_000_000)).toBe(false);
-    expect(cadence.dueAtUs()).toBe(950_000 + 966_667);
+    // The CI case: the last frame before a still stretch comes just before the key is due.
+    expect(
+      Math.max(...unevenKeyGaps([0, 827_000, 1_800_000, 2_000_000], 3_000_000, () => 0)),
+    ).toBeLessThanOrEqual(KEYFRAME_INTERVAL_US);
+    // Gaps of 20–700 ms in a fixed pseudo-random pattern, checks up to 60 ms late.
+    const frames: number[] = [];
+    let seed = 7;
+    for (let t = 0; t < 30_000_000;) {
+      frames.push(t);
+      seed = (seed * 48_271) % 2_147_483_647;
+      t += 20_000 + (seed % 680_000);
+    }
+    const gaps = unevenKeyGaps(frames, 30_000_000, (i) => (i * 7_919) % 60_000);
+    expect(gaps.length).toBeGreaterThan(25);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(KEYFRAME_INTERVAL_US);
+  });
+
+  it('repeats a still frame after 600 ms, or as soon as it reaches the keyframe due time', () => {
+    const base = {
+      lastFileUs: 0,
+      dueAtUs: 900_000,
+      lastEncodedUs: 0,
+      lagUs: 100_000,
+      keyLagUs: 30_000,
+      repeatAfterUs: 600_000,
+    };
+    expect(stillRepeatAt({ ...base, stillForUs: 500_000 })).toBeNull();
+    expect(stillRepeatAt({ ...base, stillForUs: 650_000 })).toBe(550_000);
+    const late = { ...base, lastFileUs: 850_000, lastEncodedUs: 850_000 };
+    expect(stillRepeatAt({ ...late, stillForUs: 40_000 })).toBeNull();
+    expect(stillRepeatAt({ ...late, stillForUs: 90_000 })).toBe(910_000);
+    // Never at or before the last encoded frame.
+    expect(stillRepeatAt({ ...late, lastEncodedUs: 990_000, stillForUs: 160_000 })).toBeNull();
   });
 });
 
