@@ -25,8 +25,15 @@ for the exact build we ship is available as follows.
        https://github.com/BtbN/FFmpeg-Builds/tree/<release tag>
 
    Its automatic release tags are removed after a while, so the Capture Studio project keeps
-   a copy of the build archive and of those build scripts in its own releases (for the Linux
-   build of Capture Studio 0.2.0: BtbN/FFmpeg-Builds commit
+   a copy of the build archives and of those build scripts in its own releases.
+
+   Capture Studio 0.3.0 and later (Linux and Windows builds, BtbN/FFmpeg-Builds commit
+   5031c6f1082414e53688d39e521849905071070d):
+
+       https://github.com/baaki20/capture-studio/releases/tag/ffmpeg-n9.0.2-39-g7adfbe40dc
+       https://github.com/BtbN/FFmpeg-Builds/tree/5031c6f1082414e53688d39e521849905071070d
+
+   Capture Studio 0.2.0 (Linux build, BtbN/FFmpeg-Builds commit
    937868360a21d711ec94a33f5591d345ad9b7754):
 
        https://github.com/baaki20/capture-studio/releases/tag/ffmpeg-n9.0.2-35-g9a9b70bb8c
